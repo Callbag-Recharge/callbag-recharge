@@ -29,11 +29,13 @@ export interface StoreOptions {
  * Stream producer function.
  * @param emit  — push a value downstream
  * @param request — register a pull handler (makes the stream pullable)
+ * @param complete — signal that the producer will emit no more values
  * @returns optional cleanup function
  */
 export type StreamProducer<T> = (
 	emit: (value: T) => void,
 	request: (handler: () => void) => void,
-) => (() => void) | undefined;
+	complete: () => void,
+) => (() => void) | void;
 
 export type StoreOperator<A, B> = (input: Store<A>) => Store<B>;

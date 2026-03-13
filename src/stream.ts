@@ -6,7 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
-import { DATA, END, pushDirty, START } from "./protocol";
+import { DATA, END, deferStart, pushDirty, START } from "./protocol";
 import { registerRead } from "./tracking";
 import type { StoreOptions, StreamProducer, StreamStore } from "./types";
 
@@ -16,11 +16,13 @@ export function stream<T>(
 ): StreamStore<T> {
 	let currentValue: T | undefined = opts?.initial;
 	let started = false;
-	let cleanup: (() => void) | undefined;
+	let completed = false;
+	let cleanup: (() => void) | void;
 	let pullHandler: (() => void) | null = null;
 	const sinks = new Set<any>();
 
 	function emit(value: T): void {
+		if (completed) return;
 		if (Object.is(currentValue, value)) return;
 		currentValue = value;
 		pushDirty(sinks);
@@ -30,10 +32,19 @@ export function stream<T>(
 		pullHandler = handler;
 	}
 
+	function complete(): void {
+		if (completed) return;
+		completed = true;
+		// Notify all sinks that this source is done
+		for (const sink of sinks) sink(END);
+		sinks.clear();
+		stopProducer();
+	}
+
 	function startProducer(): void {
 		if (started) return;
 		started = true;
-		cleanup = producer(emit, request);
+		cleanup = producer(emit, request, complete);
 	}
 
 	function stopProducer(): void {
@@ -61,6 +72,14 @@ export function stream<T>(
 		source(type: number, payload?: any) {
 			if (type === START) {
 				const sink = payload;
+
+				// If already completed, handshake then immediately end
+				if (completed) {
+					sink(START, (_t: number) => {});
+					sink(END);
+					return;
+				}
+
 				sinks.add(sink);
 				sink(START, (t: number) => {
 					if (t === DATA) sink(DATA, currentValue);
@@ -69,7 +88,7 @@ export function stream<T>(
 						if (sinks.size === 0) stopProducer();
 					}
 				});
-				startProducer();
+				deferStart(startProducer);
 			}
 		},
 	};

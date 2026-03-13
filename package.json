@@ -16,6 +16,26 @@
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
+		},
+		"./extra": {
+			"import": {
+				"types": "./dist/extra/index.d.ts",
+				"default": "./dist/extra/index.js"
+			},
+			"require": {
+				"types": "./dist/extra/index.d.cts",
+				"default": "./dist/extra/index.cjs"
+			}
+		},
+		"./extra/*": {
+			"import": {
+				"types": "./dist/extra/*.d.ts",
+				"default": "./dist/extra/*.js"
+			},
+			"require": {
+				"types": "./dist/extra/*.d.cts",
+				"default": "./dist/extra/*.cjs"
+			}
 		}
 	},
 	"files": [

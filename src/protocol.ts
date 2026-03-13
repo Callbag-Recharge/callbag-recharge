@@ -14,7 +14,10 @@ export const START = 0;
 export const DATA = 1;
 export const END = 2;
 
-// Propagation batching
+// ---------------------------------------------------------------------------
+// Propagation batching (DIRTY)
+// ---------------------------------------------------------------------------
+
 let depth = 0;
 const pending: Array<() => void> = [];
 let flushing = false;
@@ -52,4 +55,44 @@ function flush(): void {
 		effect();
 	}
 	flushing = false;
+}
+
+// ---------------------------------------------------------------------------
+// Connection batching (producer start deferral)
+// ---------------------------------------------------------------------------
+// During subscribe/effect setup, producer starts are queued so that the
+// entire sink chain is wired before any data flows. This prevents
+// synchronous producers (e.g. fromIter) from emitting into an incomplete
+// pipeline.
+// ---------------------------------------------------------------------------
+
+let connectDepth = 0;
+const pendingStarts: Array<() => void> = [];
+
+/** Enter a connection phase — producer starts will be queued. */
+export function beginDeferredStart(): void {
+	connectDepth++;
+}
+
+/** Exit a connection phase — if outermost, start all queued producers. */
+export function endDeferredStart(): void {
+	connectDepth--;
+	if (connectDepth === 0) {
+		while (pendingStarts.length > 0) {
+			const start = pendingStarts.shift()!;
+			start();
+		}
+	}
+}
+
+/**
+ * Start a producer, or queue it if inside a connection phase.
+ * Called by stream.source() instead of starting the producer directly.
+ */
+export function deferStart(start: () => void): void {
+	if (connectDepth > 0) {
+		pendingStarts.push(start);
+	} else {
+		start();
+	}
 }

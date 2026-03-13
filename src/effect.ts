@@ -3,9 +3,19 @@
 // ---------------------------------------------------------------------------
 // Connects as a callbag sink to each dependency.
 // When DIRTY arrives, schedules re-run after propagation completes.
+// Uses beginDeferredStart/endDeferredStart so that stream producers only
+// start after all deps are connected.
 // ---------------------------------------------------------------------------
 
-import { DATA, DIRTY, END, enqueueEffect, START } from "./protocol";
+import {
+	DATA,
+	DIRTY,
+	END,
+	START,
+	beginDeferredStart,
+	endDeferredStart,
+	enqueueEffect,
+} from "./protocol";
 import { tracked } from "./tracking";
 
 export function effect(fn: () => undefined | (() => void)): () => void {
@@ -25,6 +35,8 @@ export function effect(fn: () => undefined | (() => void)): () => void {
 		for (const tb of talkbacks) tb(END);
 		talkbacks = [];
 
+		beginDeferredStart();
+
 		// Run fn in tracking context — discovers deps via .get() calls
 		const [result, deps] = tracked(fn);
 		cleanupEffect = result;
@@ -41,6 +53,8 @@ export function effect(fn: () => undefined | (() => void)): () => void {
 				}
 			});
 		}
+
+		endDeferredStart();
 	}
 
 	// Initial run

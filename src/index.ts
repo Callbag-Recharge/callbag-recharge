@@ -9,7 +9,12 @@ export { Inspector } from "./inspector";
 // Operators & piping
 export { filter, map, pipe, scan } from "./pipe";
 // Protocol (for advanced use / interop)
-export { DIRTY } from "./protocol";
+export {
+	DIRTY,
+	beginDeferredStart,
+	deferStart,
+	endDeferredStart,
+} from "./protocol";
 // Core primitives
 export { state } from "./state";
 export { stream } from "./stream";
