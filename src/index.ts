@@ -7,22 +7,23 @@ export { state } from './state';
 export { derived } from './derived';
 export { stream } from './stream';
 export { effect } from './effect';
+export { subscribe } from './subscribe';
 
 // Operators & piping
 export { pipe, map, filter, scan } from './pipe';
-export type { StoreOperator } from './pipe';
 
 // Observability
-export { inspect, graph, observe, trace } from './registry';
+export { Inspector } from './inspector';
+
+// Protocol (for advanced use / interop)
+export { DIRTY } from './protocol';
 
 // Types
 export type {
   Store,
   WritableStore,
-  StoreInfo,
   StoreOptions,
+  StreamStore,
   StreamProducer,
-  Source,
-  Sink,
-  Operator,
+  StoreOperator,
 } from './types';

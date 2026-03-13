@@ -1,51 +1,55 @@
 // ---------------------------------------------------------------------------
 // effect(fn) — run side effects when tracked stores change
 // ---------------------------------------------------------------------------
+// Connects as a callbag sink to each dependency.
+// When DIRTY arrives, schedules re-run after propagation completes.
+// ---------------------------------------------------------------------------
 
+import { START, DATA, END, DIRTY, enqueueEffect } from './protocol';
 import { tracked } from './tracking';
 
-/**
- * Runs `fn` immediately and re-runs it whenever any store read
- * inside `fn` changes. Returns a dispose function.
- */
 export function effect(fn: () => void | (() => void)): () => void {
   let cleanupEffect: void | (() => void);
-  let cleanupSubs: Array<() => void> = [];
+  let talkbacks: Array<(type: number) => void> = [];
   let disposed = false;
-  let running = false;
+  let pending = false;
 
   function run(): void {
-    if (disposed || running) return;
-    running = true;
+    if (disposed) return;
+    pending = false;
 
-    // Cleanup previous effect return value
+    // Cleanup previous effect
     if (cleanupEffect) cleanupEffect();
 
-    // Cleanup previous subscriptions
-    for (const unsub of cleanupSubs) unsub();
-    cleanupSubs = [];
+    // Disconnect from previous deps
+    for (const tb of talkbacks) tb(END);
+    talkbacks = [];
 
-    // Run in tracking context
+    // Run fn in tracking context — discovers deps via .get() calls
     const [result, deps] = tracked(fn);
     cleanupEffect = result;
 
-    // Subscribe to all deps so we re-run when they change
+    // Connect to each dep's callbag source
     for (const dep of deps) {
-      const unsub = dep.subscribe(() => {
-        run();
+      dep.source(START, (type: number, data: any) => {
+        if (type === START) talkbacks.push(data);
+        if (type === DATA && data === DIRTY) {
+          if (!pending && !disposed) {
+            pending = true;
+            enqueueEffect(run);
+          }
+        }
       });
-      cleanupSubs.push(unsub);
     }
-
-    running = false;
   }
 
+  // Initial run
   run();
 
   return () => {
     disposed = true;
     if (cleanupEffect) cleanupEffect();
-    for (const unsub of cleanupSubs) unsub();
-    cleanupSubs = [];
+    for (const tb of talkbacks) tb(END);
+    talkbacks = [];
   };
 }

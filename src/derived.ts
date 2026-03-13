@@ -1,121 +1,69 @@
 // ---------------------------------------------------------------------------
-// derived(fn) — a computed store that auto-tracks dependencies
+// derived(fn) — a computed store, no cache, always pulls fresh
+// ---------------------------------------------------------------------------
+// - .get() always runs fn() — no cached value, always fresh
+// - Connects to upstream lazily (on first .get())
+// - Propagates DIRTY downstream so effects/subscribers know to re-run
 // ---------------------------------------------------------------------------
 
-import { START, DATA, END } from './types';
-import type { Store, StoreOptions, Source, Sink } from './types';
+import type { Store, StoreOptions } from './types';
+import { START, DATA, END, DIRTY, pushDirty } from './protocol';
 import { tracked, registerRead } from './tracking';
-import { register, notifyUpdate } from './registry';
-import { defineStore } from './store-utils';
+import { Inspector } from './inspector';
+
+function sameSet(a: Set<unknown>, b: Set<unknown>): boolean {
+  if (a.size !== b.size) return false;
+  for (const item of a) {
+    if (!b.has(item)) return false;
+  }
+  return true;
+}
 
 export function derived<T>(fn: () => T, opts?: StoreOptions): Store<T> {
-  let currentValue: T;
-  let trackedDeps = new Set<Store<unknown>>();
-  let depUnsubs: Array<() => void> = [];
-  const sinks = new Set<Sink<T>>();
-  const subscribers = new Set<(value: T, prev: T | undefined) => void>();
-  let storeRef: Store<T> | null = null;
-  let notifying = false;
+  const sinks = new Set<any>();
+  let upstreamTalkbacks: Array<(type: number) => void> = [];
+  let currentDeps = new Set<Store<unknown>>();
 
-  function compute(): T {
-    const [result, newDeps] = tracked(fn);
-    trackedDeps = newDeps;
-    return result;
-  }
+  function connectUpstream(deps: Set<Store<unknown>>): void {
+    if (sameSet(currentDeps, deps)) return;
 
-  function teardownSubs(): void {
-    for (const unsub of depUnsubs) unsub();
-    depUnsubs = [];
-  }
+    // Disconnect old
+    for (const tb of upstreamTalkbacks) tb(END);
+    upstreamTalkbacks = [];
+    currentDeps = deps;
 
-  function setupSubscriptions(): void {
-    teardownSubs();
-
-    for (const dep of trackedDeps) {
-      if (storeRef && '_addDependent' in dep) {
-        (dep as any)._addDependent(storeRef);
-      }
-      const unsub = dep.subscribe(() => {
-        // Guard against re-entrant notifications
-        if (notifying) return;
-
-        const prev = currentValue;
-        currentValue = compute();
-
-        if (!Object.is(currentValue, prev)) {
-          notifying = true;
-          if (storeRef) notifyUpdate(storeRef, currentValue, prev);
-          for (const sink of sinks) {
-            sink(DATA, currentValue);
-          }
-          for (const cb of subscribers) {
-            cb(currentValue, prev);
-          }
-          notifying = false;
-        }
-      });
-      depUnsubs.push(() => {
-        unsub();
-        if (storeRef && '_removeDependent' in dep) {
-          (dep as any)._removeDependent(storeRef);
+    // Connect new
+    for (const dep of deps) {
+      dep.source(START, (type: number, data: any) => {
+        if (type === START) upstreamTalkbacks.push(data);
+        if (type === DATA && data === DIRTY) {
+          pushDirty(sinks);
         }
       });
     }
   }
 
-  // Initial computation
-  currentValue = compute();
-
-  const source: Source<T> = ((type: number, payload?: unknown) => {
-    if (type === START) {
-      const sink = payload as Sink<T>;
-      sinks.add(sink);
-
-      const talkback = ((t: number) => {
-        if (t === DATA) {
-          sink(DATA, currentValue);
-        }
-        if (t === END) {
-          sinks.delete(sink);
-        }
-      }) as Source<T>;
-
-      sink(START, talkback);
-      sink(DATA, currentValue);
-    }
-  }) as Source<T>;
-
-  const store: Store<T> = defineStore(
-    function (this: unknown) {
+  const store: Store<T> = {
+    get() {
       registerRead(store);
-      return currentValue;
-    } as unknown as Store<T>,
-    {
-      name: opts?.name,
-      kind: 'derived',
-      source,
-
-      get value() {
-        return currentValue;
-      },
-
-      get deps() {
-        return Array.from(trackedDeps);
-      },
-
-      get subs() {
-        return [] as ReadonlyArray<Store<unknown>>;
-      },
-
-      subscribe(cb: (value: T, prev: T | undefined) => void) {
-        subscribers.add(cb);
-        return () => subscribers.delete(cb);
-      },
+      // Always run fn — no cache. fn() calls deps' .get() which are passive reads.
+      const [result, newDeps] = tracked(fn);
+      connectUpstream(newDeps);
+      return result;
     },
-  );
 
-  storeRef = store;
-  setupSubscriptions();
-  register(store);
+    source(type: number, payload?: any) {
+      if (type === START) {
+        const sink = payload;
+        sinks.add(sink);
+        sink(START, (t: number) => {
+          if (t === DATA) sink(DATA, store.get());
+          if (t === END) sinks.delete(sink);
+        });
+      }
+    },
+  };
+
+  Inspector.register(store, { kind: 'derived', ...opts });
   return store;
 }

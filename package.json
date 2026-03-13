@@ -16,9 +16,22 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
-  "keywords": ["callbag", "reactive", "signals", "store", "observable", "state-management"],
+  "keywords": [
+    "callbag",
+    "reactive",
+    "signals",
+    "store",
+    "observable",
+    "state-management"
+  ],
   "license": "MIT",
   "devDependencies": {
+    "@preact/signals-core": "^1.14.0",
+    "callbag-basics": "^4.0.0",
+    "callbag-filter": "^1.1.0",
+    "callbag-map": "^1.1.0",
+    "callbag-pipe": "^1.2.0",
+    "callbag-subscribe": "^1.5.1",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
   }

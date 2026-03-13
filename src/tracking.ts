@@ -1,9 +1,8 @@
 // ---------------------------------------------------------------------------
 // Dependency tracking context
 // ---------------------------------------------------------------------------
-// When a derived store's computation runs, we set a global context so that
-// any store read via `store()` during that computation is automatically
-// registered as a dependency. This is the same trick Signals/MobX/Solid use.
+// When a derived store's computation runs, any store.get() call
+// registers that store as a dependency. Same mechanism as Signals/MobX.
 // ---------------------------------------------------------------------------
 
 import type { Store } from './types';
@@ -11,7 +10,7 @@ import type { Store } from './types';
 let currentTracker: Set<Store<unknown>> | null = null;
 
 /**
- * Run `fn` while tracking which stores are read.
+ * Run `fn` while tracking which stores are read via .get().
  * Returns [result, Set of stores that were read].
  */
 export function tracked<T>(fn: () => T): [T, Set<Store<unknown>>] {

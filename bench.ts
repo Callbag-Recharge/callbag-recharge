@@ -1,9 +1,7 @@
-import { state, derived, pipe, map, filter, effect } from './src/index';
+import { state, derived, stream, pipe, map, filter, effect, subscribe } from './src/index';
 
 function bench(name: string, fn: () => void, iterations = 100_000) {
-  // Warmup
-  for (let i = 0; i < 1000; i++) fn();
-
+  for (let i = 0; i < 1000; i++) fn(); // warmup
   const start = performance.now();
   for (let i = 0; i < iterations; i++) fn();
   const elapsed = performance.now() - start;
@@ -15,26 +13,19 @@ function bench(name: string, fn: () => void, iterations = 100_000) {
 
 // 1. State read/write
 const count = state(0);
-bench('state read', () => {
-  count();
-});
+bench('state.get()', () => { count.get(); });
+bench('state.set()', () => { count.set(Math.random()); });
 
-bench('state write', () => {
-  count.set(Math.random());
-});
-
-// 2. Derived (auto-tracking) — read after dep change
+// 2. Derived (no cache — always recomputes)
 const a = state(0);
 const b = state(0);
-const sum = derived(() => a() + b());
-bench('derived read (cached)', () => {
-  sum();
-});
+const sum = derived(() => a.get() + b.get());
+bench('derived.get() (always recomputes)', () => { sum.get(); });
 
 let di = 0;
-bench('derived recompute', () => {
+bench('derived.get() after dep change', () => {
   a.set(di++);
-  sum();
+  sum.get();
 });
 
 // 3. Pipe operators
@@ -45,61 +36,54 @@ const piped = pipe(
   filter((n) => n > 0),
   map((n) => n + 1),
 );
-
 let pi = 0;
-bench('pipe (3 operators) propagate', () => {
+bench('pipe (3 ops) set + get', () => {
   src.set(pi++);
+  piped.get();
 });
 
-bench('pipe (3 operators) read', () => {
-  piped();
-});
+bench('pipe (3 ops) get only', () => { piped.get(); });
 
 // 4. Effect re-run
 const trigger = state(0);
 let effectRuns = 0;
-effect(() => {
-  trigger();
-  effectRuns++;
-});
-
+effect(() => { trigger.get(); effectRuns++; });
 let ei = 0;
-bench('effect re-run', () => {
-  trigger.set(ei++);
-});
+bench('effect re-run', () => { trigger.set(ei++); });
 
-// 5. Subscriber fan-out (1 state, 10 subscribers)
+// 5. Fan-out (1 state, 10 subscribers)
 const fanSrc = state(0);
-for (let i = 0; i < 10; i++) {
-  fanSrc.subscribe(() => {});
-}
-
+for (let i = 0; i < 10; i++) subscribe(fanSrc, () => {});
 let fi = 0;
-bench('fan-out (10 subscribers)', () => {
-  fanSrc.set(fi++);
+bench('fan-out (10 subscribers)', () => { fanSrc.set(fi++); });
+
+// 6. Diamond: A -> B, A -> C, B+C -> D
+const dA = state(0);
+const dB = derived(() => dA.get() + 1);
+const dC = derived(() => dA.get() * 2);
+const dD = derived(() => dB.get() + dC.get());
+let ddi = 0;
+bench('diamond (A->B,C->D) set + get', () => {
+  dA.set(ddi++);
+  dD.get();
 });
 
-// 6. Diamond pattern: A -> B, A -> C, B+C -> D
-const dA = state(0);
-const dB = derived(() => dA() + 1);
-const dC = derived(() => dA() * 2);
-const dD = derived(() => dB() + dC());
-
-let ddi = 0;
-bench('diamond (A->B,C->D) propagate+read', () => {
-  dA.set(ddi++);
-  dD();
+// 7. Pull-based stream
+let pullCount = 0;
+const pullable = stream<number>((emit, request) => {
+  request(() => emit(++pullCount));
+});
+pullable.source(0, () => {});
+bench('stream.pull() + get()', () => {
+  pullable.pull();
+  pullable.get();
 });
 
 console.log('\n--- Memory ---');
 const before = process.memoryUsage();
 const stores: any[] = [];
-for (let i = 0; i < 10_000; i++) {
-  stores.push(state(i));
-}
+for (let i = 0; i < 10_000; i++) stores.push(state(i));
 const after = process.memoryUsage();
 const perStore = (after.heapUsed - before.heapUsed) / 10_000;
 console.log(`10,000 state stores: ~${perStore.toFixed(0)} bytes/store`);
-console.log(
-  `Heap delta: ${((after.heapUsed - before.heapUsed) / 1024).toFixed(0)} KB`,
-);
+console.log(`Heap delta: ${((after.heapUsed - before.heapUsed) / 1024).toFixed(0)} KB`);
