@@ -5,51 +5,51 @@
 // When DIRTY arrives, schedules re-run after propagation completes.
 // ---------------------------------------------------------------------------
 
-import { START, DATA, END, DIRTY, enqueueEffect } from './protocol';
-import { tracked } from './tracking';
+import { DATA, DIRTY, END, enqueueEffect, START } from "./protocol";
+import { tracked } from "./tracking";
 
-export function effect(fn: () => void | (() => void)): () => void {
-  let cleanupEffect: void | (() => void);
-  let talkbacks: Array<(type: number) => void> = [];
-  let disposed = false;
-  let pending = false;
+export function effect(fn: () => undefined | (() => void)): () => void {
+	let cleanupEffect: undefined | (() => void);
+	let talkbacks: Array<(type: number) => void> = [];
+	let disposed = false;
+	let pending = false;
 
-  function run(): void {
-    if (disposed) return;
-    pending = false;
+	function run(): void {
+		if (disposed) return;
+		pending = false;
 
-    // Cleanup previous effect
-    if (cleanupEffect) cleanupEffect();
+		// Cleanup previous effect
+		if (cleanupEffect) cleanupEffect();
 
-    // Disconnect from previous deps
-    for (const tb of talkbacks) tb(END);
-    talkbacks = [];
+		// Disconnect from previous deps
+		for (const tb of talkbacks) tb(END);
+		talkbacks = [];
 
-    // Run fn in tracking context — discovers deps via .get() calls
-    const [result, deps] = tracked(fn);
-    cleanupEffect = result;
+		// Run fn in tracking context — discovers deps via .get() calls
+		const [result, deps] = tracked(fn);
+		cleanupEffect = result;
 
-    // Connect to each dep's callbag source
-    for (const dep of deps) {
-      dep.source(START, (type: number, data: any) => {
-        if (type === START) talkbacks.push(data);
-        if (type === DATA && data === DIRTY) {
-          if (!pending && !disposed) {
-            pending = true;
-            enqueueEffect(run);
-          }
-        }
-      });
-    }
-  }
+		// Connect to each dep's callbag source
+		for (const dep of deps) {
+			dep.source(START, (type: number, data: any) => {
+				if (type === START) talkbacks.push(data);
+				if (type === DATA && data === DIRTY) {
+					if (!pending && !disposed) {
+						pending = true;
+						enqueueEffect(run);
+					}
+				}
+			});
+		}
+	}
 
-  // Initial run
-  run();
+	// Initial run
+	run();
 
-  return () => {
-    disposed = true;
-    if (cleanupEffect) cleanupEffect();
-    for (const tb of talkbacks) tb(END);
-    talkbacks = [];
-  };
+	return () => {
+		disposed = true;
+		if (cleanupEffect) cleanupEffect();
+		for (const tb of talkbacks) tb(END);
+		talkbacks = [];
+	};
 }

@@ -1,38 +1,53 @@
 {
-  "name": "callbag-recharge",
-  "version": "0.1.0",
-  "description": "Reactive stores connected by callbag protocol — every step is inspectable",
-  "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
-  "exports": {
-    ".": {
-      "import": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    }
-  },
-  "scripts": {
-    "build": "tsc",
-    "test": "vitest run",
-    "test:watch": "vitest"
-  },
-  "keywords": [
-    "callbag",
-    "reactive",
-    "signals",
-    "store",
-    "observable",
-    "state-management"
-  ],
-  "license": "MIT",
-  "devDependencies": {
-    "@preact/signals-core": "^1.14.0",
-    "callbag-basics": "^4.0.0",
-    "callbag-filter": "^1.1.0",
-    "callbag-map": "^1.1.0",
-    "callbag-pipe": "^1.2.0",
-    "callbag-subscribe": "^1.5.1",
-    "typescript": "^5.7.0",
-    "vitest": "^3.0.0"
-  }
+	"name": "callbag-recharge",
+	"version": "0.1.0",
+	"description": "Reactive stores connected by callbag protocol — every step is inspectable",
+	"type": "module",
+	"main": "dist/index.cjs",
+	"module": "dist/index.js",
+	"types": "dist/index.d.ts",
+	"exports": {
+		".": {
+			"import": {
+				"types": "./dist/index.d.ts",
+				"default": "./dist/index.js"
+			},
+			"require": {
+				"types": "./dist/index.d.cts",
+				"default": "./dist/index.cjs"
+			}
+		}
+	},
+	"files": [
+		"dist"
+	],
+	"scripts": {
+		"build": "tsup",
+		"test": "vitest run",
+		"test:watch": "vitest",
+		"lint": "biome check .",
+		"lint:fix": "biome check --write .",
+		"format": "biome format --write ."
+	},
+	"keywords": [
+		"callbag",
+		"reactive",
+		"signals",
+		"store",
+		"observable",
+		"state-management"
+	],
+	"license": "MIT",
+	"devDependencies": {
+		"@biomejs/biome": "^2.4.6",
+		"@preact/signals-core": "^1.14.0",
+		"callbag-basics": "^4.0.0",
+		"callbag-filter": "^1.1.0",
+		"callbag-map": "^1.1.0",
+		"callbag-pipe": "^1.2.0",
+		"callbag-subscribe": "^1.5.1",
+		"tsup": "^8.5.1",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
 }

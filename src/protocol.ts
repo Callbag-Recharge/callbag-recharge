@@ -7,7 +7,7 @@
 // ---------------------------------------------------------------------------
 
 /** Sentinel value pushed via type 1 to indicate invalidation, not data */
-export const DIRTY = Symbol('DIRTY');
+export const DIRTY = Symbol("DIRTY");
 
 /** Callbag signal types */
 export const START = 0;
@@ -24,10 +24,10 @@ let flushing = false;
  * Effects are deferred until the outermost propagation completes.
  */
 export function pushDirty(sinks: Set<any>): void {
-  depth++;
-  for (const sink of sinks) sink(DATA, DIRTY);
-  depth--;
-  if (depth === 0) flush();
+	depth++;
+	for (const sink of sinks) sink(DATA, DIRTY);
+	depth--;
+	if (depth === 0) flush();
 }
 
 /**
@@ -35,21 +35,21 @@ export function pushDirty(sinks: Set<any>): void {
  * If not inside a propagation, runs immediately.
  */
 export function enqueueEffect(run: () => void): void {
-  if (depth === 0 && !flushing) {
-    run();
-  } else {
-    pending.push(run);
-  }
+	if (depth === 0 && !flushing) {
+		run();
+	} else {
+		pending.push(run);
+	}
 }
 
 function flush(): void {
-  if (flushing) return;
-  flushing = true;
-  // Process queue — effects may trigger new state changes
-  // which enqueue more effects, so loop until empty
-  while (pending.length > 0) {
-    const effect = pending.shift()!;
-    effect();
-  }
-  flushing = false;
+	if (flushing) return;
+	flushing = true;
+	// Process queue — effects may trigger new state changes
+	// which enqueue more effects, so loop until empty
+	while (pending.length > 0) {
+		const effect = pending.shift()!;
+		effect();
+	}
+	flushing = false;
 }
