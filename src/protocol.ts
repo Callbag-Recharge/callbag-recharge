@@ -57,6 +57,19 @@ function flush(): void {
 	flushing = false;
 }
 
+/**
+ * Batch multiple state changes — effects run only when the outermost batch ends.
+ */
+export function batch<T>(fn: () => T): T {
+	depth++;
+	try {
+		return fn();
+	} finally {
+		depth--;
+		if (depth === 0) flush();
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Connection batching (producer start deferral)
 // ---------------------------------------------------------------------------

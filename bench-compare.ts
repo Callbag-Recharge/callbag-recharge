@@ -9,11 +9,14 @@ import cbMap from "callbag-map";
 import cbPipe from "callbag-pipe";
 import cbSubscribe from "callbag-subscribe";
 import {
+	batch,
 	derived,
 	effect as rechargeEffect,
 	filter as rFilter,
+	Inspector,
 	map as rMap,
 	pipe as rPipe,
+	pipeRaw,
 	subscribe as rSubscribe,
 	state,
 } from "./src/index";
@@ -255,7 +258,144 @@ function printGroup(
 }
 
 // ============================================================
-// 9. Memory per store
+// 9. Inspector disabled vs enabled (10K store creation)
+// ============================================================
+{
+	Inspector.enabled = true;
+	const enabledResult = bench(
+		"Recharge state (Inspector ON)",
+		() => {
+			state(0);
+		},
+		10_000,
+	);
+
+	Inspector.enabled = false;
+	const disabledResult = bench(
+		"Recharge state (Inspector OFF)",
+		() => {
+			state(0);
+		},
+		10_000,
+	);
+	Inspector.enabled = true;
+
+	printGroup("Inspector disabled vs enabled (store creation)", [
+		enabledResult,
+		disabledResult,
+	]);
+}
+
+// ============================================================
+// 10. batch() — N set() calls with effects
+// ============================================================
+{
+	const items = Array.from({ length: 10 }, (_, i) => state(i));
+	let _runs = 0;
+	rechargeEffect(() => {
+		for (const s of items) s.get();
+		_runs++;
+	});
+
+	let k = 0;
+	const unbatched = bench(
+		"Recharge unbatched (10 sets)",
+		() => {
+			for (const s of items) s.set(k++);
+		},
+		10_000,
+	);
+
+	let k2 = 0;
+	const batched = bench(
+		"Recharge batched (10 sets)",
+		() => {
+			batch(() => {
+				for (const s of items) s.set(k2++);
+			});
+		},
+		10_000,
+	);
+
+	printGroup("batch() — 10 set() calls with effect", [unbatched, batched]);
+}
+
+// ============================================================
+// 11. pipeRaw vs pipe — 3-operator chain
+// ============================================================
+{
+	const rSrc1 = state(0);
+	const rPiped1 = rPipe(
+		rSrc1,
+		rMap((n) => n * 2),
+		rFilter((n) => n > 0),
+		rMap((n) => (n ?? 0) + 1),
+	);
+	let ri1 = 1;
+
+	const rSrc2 = state(0);
+	const rPiped2 = pipeRaw(
+		rSrc2,
+		(n: number) => n * 2,
+		(n: number) => (n > 0 ? n : undefined),
+		(n: number | undefined) => (n ?? 0) + 1,
+	);
+	let ri2 = 1;
+
+	printGroup("pipeRaw vs pipe (3 operators)", [
+		bench("Recharge pipe", () => {
+			rSrc1.set(ri1++);
+			rPiped1.get();
+		}),
+		bench("Recharge pipeRaw", () => {
+			rSrc2.set(ri2++);
+			rPiped2.get();
+		}),
+	]);
+}
+
+// ============================================================
+// 12. equals — diamond with/without equals on intermediates
+// ============================================================
+{
+	// Without equals
+	const a1 = state(0);
+	const b1 = derived(() => (a1.get() >= 5 ? 1 : 0));
+	const c1 = derived(() => a1.get() * 2);
+	let runs1 = 0;
+	rechargeEffect(() => {
+		b1.get();
+		c1.get();
+		runs1++;
+	});
+	let k1 = 0;
+
+	// With equals
+	const a2 = state(0);
+	const b2 = derived(() => (a2.get() >= 5 ? 1 : 0), {
+		equals: (x, y) => x === y,
+	});
+	const c2 = derived(() => a2.get() * 2);
+	let runs2 = 0;
+	rechargeEffect(() => {
+		b2.get();
+		c2.get();
+		runs2++;
+	});
+	let k2 = 0;
+
+	printGroup("equals on diamond intermediates", [
+		bench("Without equals", () => {
+			a1.set(k1++);
+		}),
+		bench("With equals", () => {
+			a2.set(k2++);
+		}),
+	]);
+}
+
+// ============================================================
+// 13. Memory per store
 // ============================================================
 console.log("\n## Memory per store (10,000 stores)");
 console.log("| Library | bytes/store | heap delta |");

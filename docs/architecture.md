@@ -8,6 +8,7 @@ callbag-recharge is built on four layers. Each layer has a single responsibility
 ┌──────────────────────────────────────────────┐
 │  User API                                    │
 │  state · derived · stream · effect · pipe    │
+│  batch · pipeRaw · SKIP                      │
 ├──────────────────────────────────────────────┤
 │  Store layer — plain objects { get, set? }   │
 │  No wrapper classes, no defineProperties     │
@@ -16,9 +17,9 @@ callbag-recharge is built on four layers. Each layer has a single responsibility
 │  DIRTY symbol via type 1 push                │
 │  Value pull via .get() chain                 │
 ├──────────────────────────────────────────────┤
-│  Inspector (global singleton)                │
+│  Inspector (global singleton, disableable)    │
 │  WeakMaps for metadata — zero per-store cost │
-│  inspect · trace · graph                     │
+│  enabled · inspect · trace · graph           │
 └──────────────────────────────────────────────┘
 ```
 
@@ -28,7 +29,7 @@ callbag-recharge is built on four layers. Each layer has a single responsibility
 
 ### 1. Stores are plain objects
 
-A store is `{ get, set?, source }` — nothing more. No classes, no `Object.defineProperties`, no function-as-object tricks. This keeps memory low (~376 bytes per state store) and avoids fighting JavaScript's runtime (e.g., `Function.name` being read-only).
+A store is `{ get, set?, source }` — nothing more. No classes, no `Object.defineProperties`, no function-as-object tricks. This keeps memory low (~737 bytes per state store with Inspector enabled, less with it disabled) and avoids fighting JavaScript's runtime (e.g., `Function.name` being read-only).
 
 Debug metadata (name, kind) lives in the global `Inspector` singleton backed by WeakMaps, not on the store itself. Stores that aren't named don't pay for naming.
 
@@ -52,13 +53,15 @@ D.get()
         D = 16 (computed once, consistent state)
 ```
 
-### 3. No cache in derived stores
+### 3. No cache in derived stores (by default)
 
-Derived stores always run their computation function on `.get()`. There is no cached value, no dirty flag, no staleness tracking.
+Derived stores always run their computation function on `.get()`. There is no cached value, no dirty flag, no staleness tracking by default.
 
 **Why:** Caching requires dirty flags, version counters, and careful invalidation logic — all sources of bugs. Without caching, the model is simpler: state and stream stores hold values because they are **sources of truth**; derived stores are pure functions that pull from their dependencies.
 
-**Tradeoff:** Repeated reads of the same derived store re-run the computation. For the vast majority of use cases, the computation is a simple expression (e.g., `a.get() + b.get()`) that takes nanoseconds. For expensive computations, opt-in memoization can be added (see [optimizations](./optimizations.md)).
+**Tradeoff:** Repeated reads of the same derived store re-run the computation. For the vast majority of use cases, the computation is a simple expression (e.g., `a.get() + b.get()`) that takes nanoseconds.
+
+**Opt-in caching via `equals`:** Providing an `equals` option enables pull-phase caching — the derived store remembers its last output and returns the cached value if `equals(cached, recomputed)` returns true. This is useful for derived stores whose output stabilizes (e.g., clamping, rounding, enum mapping). See [optimizations](./optimizations.md).
 
 ### 4. `undefined` means empty
 
@@ -69,7 +72,7 @@ Type implications:
 - `stream<T>(producer)` → `.get()` returns `T | undefined` (might not have emitted)
 - `derived<T>(fn)` → `.get()` returns whatever `fn` returns (TypeScript infers it)
 
-### 5. Observability is external
+### 5. Observability is external and disableable
 
 The `Inspector` singleton stores names and kinds in WeakMaps, and tracks all living stores via `WeakRef`. This means:
 
@@ -77,6 +80,8 @@ The `Inspector` singleton stores names and kinds in WeakMaps, and tracks all liv
 - Garbage-collected stores are automatically cleaned up
 - Unnamed stores don't pay for naming
 - The entire reactive graph is queryable at any time via `Inspector.graph()`
+
+Setting `Inspector.enabled = false` makes `register()` and `getName()` no-ops, eliminating all WeakRef/WeakMap overhead in production. The flag defaults to enabled when `NODE_ENV !== 'production'`.
 
 ---
 
@@ -87,11 +92,12 @@ The `Inspector` singleton stores names and kinds in WeakMaps, and tracks all liv
 The simplest store. Holds a value, exposes a callbag source.
 
 ```
-state(0)
+state(0, { equals? })
   ├── currentValue: 0
   ├── sinks: Set<callbag sink>
+  ├── eq: opts.equals ?? Object.is
   ├── get() → registerRead + return currentValue
-  ├── set(v) → if changed, update currentValue, pushDirty(sinks)
+  ├── set(v) → if eq(current, v), skip; else update + pushDirty(sinks)
   └── source(type, payload) → callbag handshake, stores sink, sends talkback
 ```
 
@@ -104,11 +110,13 @@ The callbag talkback supports:
 A computed store with auto-tracking and lazy evaluation.
 
 ```
-derived(() => a.get() + b.get())
+derived(() => a.get() + b.get(), { equals? })
   ├── sinks: Set<callbag sink>
   ├── upstreamTalkbacks: talkback functions for disconnecting
   ├── currentDeps: Set<Store> (for change detection)
-  ├── get() → run fn() in tracking context, reconnect if deps changed, return result
+  ├── cachedValue / hasCached (only active when equals provided)
+  ├── get() → run fn() in tracking context, reconnect if deps changed,
+  │           if equals && cached matches → return cached, else return result
   └── source(type, payload) → callbag handshake, propagates DIRTY
 ```
 
@@ -184,6 +192,16 @@ function pushDirty(sinks) {
 
 `depth` tracks re-entrant DIRTY propagation. Effects are only flushed when the outermost `pushDirty` completes. This prevents effects from running mid-propagation, which would cause diamond glitches.
 
+The `batch()` function leverages this same mechanism — it increments `depth` before running the callback and decrements after, so effects flush only when the outermost batch completes:
+
+```ts
+function batch<T>(fn: () => T): T {
+  depth++;
+  try { return fn(); }
+  finally { depth--; if (depth === 0) flush(); }
+}
+```
+
 ### Auto-tracking
 
 A module-level `currentTracker` variable (a `Set<Store>` or `null`) is set during `tracked(fn)`. Any `store.get()` call checks this variable and adds itself if tracking is active. After `fn()` returns, the set contains all stores that were read.
@@ -234,16 +252,16 @@ Talkback supports:
 ```
 src/
   types.ts       — Store, WritableStore, StreamStore interfaces
-  protocol.ts    — DIRTY symbol, pushDirty(), enqueueEffect(), batching
+  protocol.ts    — DIRTY symbol, pushDirty(), enqueueEffect(), batch(), batching
   tracking.ts    — Auto-dependency tracking context
-  inspector.ts   — Global singleton with WeakMaps for metadata
-  state.ts       — state() factory
-  derived.ts     — derived() factory (no cache, lazy, auto-tracked)
-  stream.ts      — stream() factory (push + pull)
+  inspector.ts   — Global singleton with WeakMaps, enabled flag
+  state.ts       — state() factory (custom equals support)
+  derived.ts     — derived() factory (conditional caching via equals, lazy, auto-tracked)
+  stream.ts      — stream() factory (push + pull, custom equals)
   effect.ts      — effect() factory (batched re-runs)
   subscribe.ts   — subscribe() function
-  pipe.ts        — pipe() + map, filter, scan operators
+  pipe.ts        — pipe() + map, filter, scan operators + pipeRaw(), SKIP
   index.ts       — Public exports
 ```
 
-Total: ~617 lines of TypeScript. Minified bundle: ~4 KB.
+Minified ESM bundle: ~1.6 KB (core entry point). CJS: ~4.6 KB.

@@ -7,9 +7,10 @@ import { DATA, END, pushDirty, START } from "./protocol";
 import { registerRead } from "./tracking";
 import type { StoreOptions, WritableStore } from "./types";
 
-export function state<T>(initial: T, opts?: StoreOptions): WritableStore<T> {
+export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
 	let currentValue = initial;
 	const sinks = new Set<any>();
+	const eq = opts?.equals ?? Object.is;
 
 	const store: WritableStore<T> = {
 		get() {
@@ -18,7 +19,7 @@ export function state<T>(initial: T, opts?: StoreOptions): WritableStore<T> {
 		},
 
 		set(value: T) {
-			if (Object.is(currentValue, value)) return;
+			if (eq(currentValue, value)) return;
 			currentValue = value;
 			pushDirty(sinks);
 		},

@@ -12,7 +12,7 @@ import type { StoreOptions, StreamProducer, StreamStore } from "./types";
 
 export function stream<T>(
 	producer: StreamProducer<T>,
-	opts?: StoreOptions & { initial?: T },
+	opts?: StoreOptions<T> & { initial?: T },
 ): StreamStore<T> {
 	let currentValue: T | undefined = opts?.initial;
 	let started = false;
@@ -20,10 +20,11 @@ export function stream<T>(
 	let cleanup: (() => void) | void;
 	let pullHandler: (() => void) | null = null;
 	const sinks = new Set<any>();
+	const eq = opts?.equals ?? Object.is;
 
 	function emit(value: T): void {
 		if (completed) return;
-		if (Object.is(currentValue, value)) return;
+		if (currentValue !== undefined && eq(currentValue as T, value)) return;
 		currentValue = value;
 		pushDirty(sinks);
 	}

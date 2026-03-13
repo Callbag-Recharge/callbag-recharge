@@ -21,8 +21,9 @@ export interface StreamStore<T> extends Store<T | undefined> {
 	pull(): void;
 }
 
-export interface StoreOptions {
+export interface StoreOptions<T = unknown> {
 	name?: string;
+	equals?: (a: T, b: T) => boolean;
 }
 
 /**

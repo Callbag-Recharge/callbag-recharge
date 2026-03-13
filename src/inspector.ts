@@ -22,8 +22,25 @@ export const Inspector = {
 	// WeakRef set for graph() — allows GC of unused stores
 	_stores: new Set<WeakRef<Store<unknown>>>(),
 
+	// Enabled flag — when false, register/getName are no-ops
+	_explicitEnabled: null as boolean | null,
+
+	get enabled(): boolean {
+		if (this._explicitEnabled !== null) return this._explicitEnabled;
+		try {
+			return (globalThis as any).process?.env?.NODE_ENV !== "production";
+		} catch {
+			return true;
+		}
+	},
+
+	set enabled(value: boolean) {
+		this._explicitEnabled = value;
+	},
+
 	/** Register a store with the inspector */
 	register(store: Store<unknown>, opts?: { name?: string; kind?: string }): void {
+		if (!this.enabled) return;
 		if (opts?.name) this._names.set(store, opts.name);
 		if (opts?.kind) this._kinds.set(store, opts.kind);
 		this._stores.add(new WeakRef(store));
@@ -31,6 +48,7 @@ export const Inspector = {
 
 	/** Get the name of a store */
 	getName(store: Store<unknown>): string | undefined {
+		if (!this.enabled) return undefined;
 		return this._names.get(store);
 	},
 
@@ -74,5 +92,6 @@ export const Inspector = {
 		this._names = new WeakMap();
 		this._kinds = new WeakMap();
 		this._stores = new Set();
+		this._explicitEnabled = null;
 	},
 };

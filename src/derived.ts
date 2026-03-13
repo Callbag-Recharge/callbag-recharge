@@ -19,10 +19,13 @@ function sameSet(a: Set<unknown>, b: Set<unknown>): boolean {
 	return true;
 }
 
-export function derived<T>(fn: () => T, opts?: StoreOptions): Store<T> {
+export function derived<T>(fn: () => T, opts?: StoreOptions<T>): Store<T> {
 	const sinks = new Set<any>();
 	let upstreamTalkbacks: Array<(type: number) => void> = [];
 	let currentDeps = new Set<Store<unknown>>();
+	let cachedValue: T | undefined;
+	let hasCached = false;
+	const eqFn = opts?.equals;
 
 	function connectUpstream(deps: Set<Store<unknown>>): void {
 		if (sameSet(currentDeps, deps)) return;
@@ -46,9 +49,15 @@ export function derived<T>(fn: () => T, opts?: StoreOptions): Store<T> {
 	const store: Store<T> = {
 		get() {
 			registerRead(store);
-			// Always run fn — no cache. fn() calls deps' .get() which are passive reads.
 			const [result, newDeps] = tracked(fn);
 			connectUpstream(newDeps);
+			if (eqFn && hasCached && eqFn(cachedValue as T, result)) {
+				return cachedValue as T;
+			}
+			if (eqFn) {
+				cachedValue = result;
+				hasCached = true;
+			}
 			return result;
 		},
 

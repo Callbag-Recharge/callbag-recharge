@@ -7,11 +7,12 @@ export { effect } from "./effect";
 // Observability
 export { Inspector } from "./inspector";
 // Operators & piping
-export { filter, map, pipe, scan } from "./pipe";
+export { filter, map, pipe, pipeRaw, SKIP, scan } from "./pipe";
 // Protocol (for advanced use / interop)
 export {
-	DIRTY,
+	batch,
 	beginDeferredStart,
+	DIRTY,
 	deferStart,
 	endDeferredStart,
 } from "./protocol";
