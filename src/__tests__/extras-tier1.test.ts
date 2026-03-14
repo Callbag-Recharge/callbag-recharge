@@ -40,7 +40,10 @@ describe("distinctUntilChanged", () => {
 
 	it("accepts a custom equality function", () => {
 		const s = state({ x: 1 });
-		const d = pipe(s, distinctUntilChanged((a, b) => a.x === b.x));
+		const d = pipe(
+			s,
+			distinctUntilChanged((a, b) => a.x === b.x),
+		);
 		const values: { x: number }[] = [];
 		subscribe(d, (v) => values.push(v));
 

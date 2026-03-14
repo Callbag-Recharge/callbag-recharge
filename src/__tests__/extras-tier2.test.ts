@@ -525,7 +525,7 @@ describe("take", () => {
 		const t = pipe(s, take(2));
 
 		// Track whether upstream DIRTY still reaches take's subscriber
-		let dirtyAfterN = false;
+		const dirtyAfterN = false;
 		subscribe(t, () => {});
 
 		s.set(1); // taken (1st)

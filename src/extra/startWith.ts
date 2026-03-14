@@ -1,5 +1,5 @@
-import { Inspector } from "../inspector";
 import { derived } from "../derived";
+import { Inspector } from "../inspector";
 import type { Store, StoreOperator } from "../types";
 
 /**

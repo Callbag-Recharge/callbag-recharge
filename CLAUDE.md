@@ -19,7 +19,7 @@ callbag-recharge is a reactive state management library where **every store is a
 ### Core primitives (src/)
 
 - **`state(initial)`** — writable store. `set()` pushes `DIRTY` sentinel through callbag sinks (not the value itself). Actual values are pulled lazily via `get()`. Supports custom `equals` option to replace `Object.is`.
-- **`derived(deps, fn)`** — computed store with explicit deps array. Always re-runs `fn()` on `get()` (no cache by default). Connects to upstream callbag sources lazily in `source()` (on first sink), disconnects when last sink leaves. `get()` is pure pull with no side effects. When `equals` option is provided, caches last output and returns cached value if equal.
+- **`derived(deps, fn)`** — computed store with explicit deps array. Always re-runs `fn()` on `get()` (no cache by default). Connects to upstream callbag sources lazily in `source()` (on first sink), disconnects when last sink leaves. `get()` is pure pull with no side effects. When `equals` option is provided, caches last output and returns cached reference if equal — but this is pull-phase only; DIRTY still propagates unconditionally to downstream sinks.
 - **`stream(producer)`** — store backed by an async event source. Producer receives `(emit, request, complete)`. Supports pull-based streams via `request()` handler. Uses deferred start (`protocol.ts`) so producers don't emit before sinks are wired.
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Re-runs `fn()` when any dep's DIRTY propagates. Returns a dispose function.
 - **`subscribe(store, cb)`** — listen to value changes with previous-value tracking.
