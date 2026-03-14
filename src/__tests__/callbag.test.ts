@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { filter } from "../extra/filter";
 import { map } from "../extra/map";
 import { scan } from "../extra/scan";
-import { DIRTY, derived, Inspector, pipe, state, stream, subscribe } from "../index";
+import { DIRTY, derived, Inspector, pipe, STATE, state, stream, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -34,7 +34,7 @@ describe("Callbag protocol", () => {
 
 		count.source(0, (type: number, data: any) => {
 			if (type === 0) talkback = data;
-			if (type === 1 && data !== DIRTY) pulledValue = data;
+			if (type === 1) pulledValue = data;
 		});
 
 		talkback(1); // pull
@@ -48,7 +48,8 @@ describe("Callbag protocol", () => {
 
 		count.source(0, (type: number, data: any) => {
 			if (type === 0) talkback = data;
-			if (type === 1 && data === DIRTY) dirtyCount++;
+			// v3: DIRTY arrives on type 3 (STATE), not type 1
+			if (type === STATE && data === DIRTY) dirtyCount++;
 		});
 
 		count.set(1);
@@ -59,17 +60,61 @@ describe("Callbag protocol", () => {
 		expect(dirtyCount).toBe(1);
 	});
 
-	it("pushes DIRTY then value on state change (two-phase)", () => {
+	it("sends DIRTY on type 3 and value on type 1 per state change", () => {
 		const count = state(0);
-		const received: any[] = [];
+		const signals: Array<{ type: number; data: any }> = [];
 
 		count.source(0, (type: number, data: any) => {
-			if (type === 1) received.push(data);
+			if (type === STATE) signals.push({ type: STATE, data });
+			if (type === 1) signals.push({ type: 1, data });
 		});
 
 		count.set(1);
 		count.set(2);
-		expect(received).toEqual([DIRTY, 1, DIRTY, 2]);
+
+		// v3: DIRTY on type 3, values on type 1
+		expect(signals).toEqual([
+			{ type: STATE, data: DIRTY },
+			{ type: 1, data: 1 },
+			{ type: STATE, data: DIRTY },
+			{ type: 1, data: 2 },
+		]);
+	});
+
+	it("type 1 DATA carries only real values, never sentinels", () => {
+		const count = state(0);
+		const dataValues: any[] = [];
+
+		count.source(0, (type: number, data: any) => {
+			if (type === 1) dataValues.push(data);
+		});
+
+		count.set(1);
+		count.set(2);
+
+		// type 1 should only have real values — no DIRTY sentinel
+		expect(dataValues).toEqual([1, 2]);
+		expect(dataValues.every((v) => v !== DIRTY)).toBe(true);
+	});
+
+	it("type 3 transparent forwarding convention", () => {
+		// A node that doesn't understand type 3 should forward it
+		const s = state(0);
+		const signals: Array<{ type: number; data: any }> = [];
+
+		// derived forwards type 3 signals
+		const d = derived([s], () => s.get() * 2);
+		d.source(0, (type: number, data: any) => {
+			if (type === STATE) signals.push({ type: STATE, data });
+			if (type === 1) signals.push({ type: 1, data });
+		});
+
+		s.set(5);
+
+		expect(signals).toEqual([
+			{ type: STATE, data: DIRTY },
+			{ type: 1, data: 10 },
+		]);
 	});
 });
 

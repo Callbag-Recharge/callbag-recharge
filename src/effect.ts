@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // effect(deps, fn) — run side effects when deps change
 // ---------------------------------------------------------------------------
-// v2: Two-phase push with dirty dep tracking
-// - Phase 1 (DIRTY): track dirty deps
-// - Phase 2 (value): when all dirty deps resolve, enqueue effect run
+// Type 3 dirty tracking across deps. Runs fn() inline when all dirty deps
+// resolve. No enqueueEffect — effects run as part of the callbag signal flow.
+// Skips execution when all deps sent RESOLVED (no value changed).
 // ---------------------------------------------------------------------------
 
 import {
@@ -12,8 +12,9 @@ import {
 	DIRTY,
 	END,
 	endDeferredStart,
-	enqueueEffect,
+	RESOLVED,
 	START,
+	STATE,
 } from "./protocol";
 import type { Store } from "./types";
 
@@ -22,14 +23,11 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
 	const dirtyDeps = new Set<number>();
+	let anyDataReceived = false;
 
 	function run(): void {
 		if (disposed) return;
-		dirtyDeps.clear();
-
-		// Cleanup previous effect
 		if (cleanupEffect) cleanupEffect();
-
 		cleanupEffect = fn();
 	}
 
@@ -42,19 +40,28 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 		const depIndex = i;
 		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) talkbacks.push(data);
-			if (type === DATA) {
+			if (type === STATE) {
 				if (data === DIRTY) {
-					// Phase 1: track dirty dep
 					if (!disposed) {
+						if (dirtyDeps.size === 0) anyDataReceived = false;
 						dirtyDeps.add(depIndex);
 					}
-				} else {
-					// Phase 2: value arrived from dep
+				} else if (data === RESOLVED) {
 					if (dirtyDeps.has(depIndex)) {
 						dirtyDeps.delete(depIndex);
 						if (dirtyDeps.size === 0 && !disposed) {
-							enqueueEffect(run);
+							if (anyDataReceived) run();
+							// else: all deps RESOLVED, skip
 						}
+					}
+				}
+			}
+			if (type === DATA) {
+				if (dirtyDeps.has(depIndex)) {
+					dirtyDeps.delete(depIndex);
+					anyDataReceived = true;
+					if (dirtyDeps.size === 0 && !disposed) {
+						run();
 					}
 				}
 			}

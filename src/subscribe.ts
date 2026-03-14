@@ -1,20 +1,11 @@
 // ---------------------------------------------------------------------------
 // subscribe(store, cb) — listen to value changes
 // ---------------------------------------------------------------------------
-// v2: Receives values through callbag sinks (two-phase push)
-// - Phase 1 (DIRTY): mark pending
-// - Phase 2 (value): capture value, enqueue callback
+// Pure callbag sink. Receives type 1 DATA only — no DIRTY awareness.
+// Type 3 signals are ignored (subscribe doesn't participate in state mgmt).
 // ---------------------------------------------------------------------------
 
-import {
-	beginDeferredStart,
-	DATA,
-	DIRTY,
-	END,
-	endDeferredStart,
-	enqueueEffect,
-	START,
-} from "./protocol";
+import { beginDeferredStart, END, endDeferredStart, START } from "./protocol";
 import type { Store } from "./types";
 
 export function subscribe<T>(
@@ -22,39 +13,31 @@ export function subscribe<T>(
 	cb: (value: T, prev: T | undefined) => void,
 ): () => void {
 	let talkback: ((type: number) => void) | null = null;
-	let pending = false;
 
 	beginDeferredStart();
 
-	// Connect sink — receives DIRTY (phase 1) and values (phase 2)
 	store.source(START, (type: number, data: any) => {
 		if (type === START) talkback = data;
 		if (type === END) {
 			talkback = null;
 			return;
 		}
-		if (type === DATA) {
-			if (data === DIRTY) {
-				pending = true;
-			} else if (pending) {
-				// Phase 2: value arrived
-				pending = false;
-				const next = data as T;
-				enqueueEffect(() => {
-					if (!Object.is(next, prev)) {
-						const p = prev;
-						prev = next;
-						cb(next, p);
-					}
-				});
+		// Equality check is intentional: suppresses duplicate emissions (e.g. a
+		// state store that set() was called on with an equal value, or a batch that
+		// coalesced multiple sets back to the original value).
+		if (type === 1 /* DATA */) {
+			const next = data as T;
+			if (!Object.is(next, prev)) {
+				const p = prev;
+				prev = next;
+				cb(next, p);
 			}
 		}
 	});
 
-	// Read initial value
-	let prev: T = store.get();
+	// Read initial value — sets prev baseline
+	let prev: T | undefined = store.get();
 
-	// Start queued producers now that the chain is fully wired
 	endDeferredStart();
 
 	return () => talkback?.(END);

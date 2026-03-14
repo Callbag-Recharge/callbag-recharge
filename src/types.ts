@@ -2,6 +2,8 @@
 // Minimal store types — stores are plain objects
 // ---------------------------------------------------------------------------
 
+import type { Signal } from "./protocol";
+
 /** Read-only store */
 export interface Store<T> {
 	get(): T;
@@ -14,10 +16,15 @@ export interface WritableStore<T> extends Store<T> {
 	update(fn: (current: T) => T): void;
 }
 
-/** Stream store — may support .pull() */
+/** Producer store — general-purpose source with emit/signal/complete */
+export interface ProducerStore<T> extends Store<T | undefined> {
+	emit(value: T): void;
+	signal(s: Signal): void;
+	complete(): void;
+}
+
+/** Stream store — may support .pull() (backward compat) */
 export interface StreamStore<T> extends Store<T | undefined> {
-	/** Request the producer to emit the next value.
-	 *  Throws if the producer is not pullable. */
 	pull(): void;
 }
 
@@ -26,8 +33,16 @@ export interface StoreOptions<T = unknown> {
 	equals?: (a: T, b: T) => boolean;
 }
 
+/** Actions API for producer and operator init functions */
+export type Actions<T> = {
+	emit: (value: T) => void;
+	signal: (s: Signal) => void;
+	complete: () => void;
+	disconnect: (dep?: number) => void;
+};
+
 /**
- * Stream producer function.
+ * Stream producer function (backward compat).
  * @param emit  — push a value downstream
  * @param request — register a pull handler (makes the stream pullable)
  * @param complete — signal that the producer will emit no more values

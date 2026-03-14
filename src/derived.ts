@@ -1,14 +1,20 @@
 // ---------------------------------------------------------------------------
-// derived(deps, fn) — a computed store with explicit dependencies
+// derived(deps, fn) — computed store with dirty tracking and caching
 // ---------------------------------------------------------------------------
-// v2: Two-phase push with caching and dirty dep tracking
-// - Phase 1 (DIRTY): track which deps are dirty, forward DIRTY on first
-// - Phase 2 (value): wait for all dirty deps, recompute, cache, emit
-// - get(): returns cache if settled, recomputes if not connected
+// Type 3 DIRTY/RESOLVED for diamond resolution.
+// Type 1 DATA carries only real values.
+// get(): returns cache when settled, recomputes when pending or unconnected.
+// equals: push-phase memoization via RESOLVED (skip entire subtree).
+//
+// Note: derived is implemented as a standalone primitive rather than on top of
+// operator() because it needs a custom get() (pull-fallback recompute when
+// unconnected) that operator does not support. Sharing the operator abstraction
+// would require either a getOverride hook in operator or double Inspector
+// registration, both of which add more complexity than they remove.
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
-import { DATA, DIRTY, END, START } from "./protocol";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
 export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
@@ -19,13 +25,13 @@ export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOpti
 	let connected = false;
 	const dirtyDeps = new Set<number>();
 	const eqFn = opts?.equals;
+	let anyDataReceived = false;
 
 	function recompute(): void {
 		const result = fn();
 		if (eqFn && hasCached && eqFn(cachedValue as T, result)) {
-			// Value unchanged — keep cached reference
-			// Still emit so downstream can resolve their dirty dep counts
-			for (const sink of sinks) sink(DATA, cachedValue);
+			// Value unchanged — send RESOLVED (subtree skipping)
+			for (const sink of sinks) sink(STATE, RESOLVED);
 			return;
 		}
 		cachedValue = result;
@@ -42,22 +48,46 @@ export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOpti
 					upstreamTalkbacks.push(data);
 					return;
 				}
-				if (type === DATA) {
+				if (type === STATE) {
 					if (data === DIRTY) {
-						// Phase 1: track dirty dep, forward DIRTY inline on first
 						const wasEmpty = dirtyDeps.size === 0;
 						dirtyDeps.add(depIndex);
 						if (wasEmpty) {
-							for (const sink of sinks) sink(DATA, DIRTY);
+							anyDataReceived = false;
+							for (const sink of sinks) sink(STATE, DIRTY);
 						}
-					} else {
-						// Phase 2: value arrived from dep
+					} else if (data === RESOLVED) {
 						if (dirtyDeps.has(depIndex)) {
 							dirtyDeps.delete(depIndex);
 							if (dirtyDeps.size === 0) {
-								// All dirty deps resolved — recompute and emit
-								recompute();
+								if (anyDataReceived) {
+									recompute();
+								} else {
+									// All deps resolved without value change — skip fn()
+									for (const sink of sinks) sink(STATE, RESOLVED);
+								}
 							}
+						}
+					}
+				}
+				if (type === DATA) {
+					if (dirtyDeps.has(depIndex)) {
+						dirtyDeps.delete(depIndex);
+						anyDataReceived = true;
+						if (dirtyDeps.size === 0) {
+							recompute();
+						}
+					} else {
+						// DATA without prior DIRTY: dep bypasses the control channel
+						// (e.g. a raw callbag source). Treat as immediate trigger.
+						if (dirtyDeps.size === 0) {
+							// No other dirty deps — signal and recompute immediately.
+							for (const sink of sinks) sink(STATE, DIRTY);
+							recompute();
+						} else {
+							// Other deps already dirty — mark that real data arrived
+							// so we don't skip recompute when they resolve.
+							anyDataReceived = true;
 						}
 					}
 				}
@@ -75,13 +105,10 @@ export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOpti
 	const store: Store<T> = {
 		get() {
 			if (connected && dirtyDeps.size === 0) {
-				// Connected + settled → return cache
+				// Connected + settled — return cache
 				return cachedValue as T;
 			}
-			// Not connected, or connected but pending — recompute on demand.
-			// Pending case: deps' get() recursively resolves (states are always
-			// settled, pending deriveds recompute here too). The result is NOT
-			// cached — phase 2 will handle proper cache update and sink emission.
+			// Not connected or pending — recompute on demand
 			const result = fn();
 			if (eqFn && hasCached && eqFn(cachedValue as T, result)) {
 				return cachedValue as T;
