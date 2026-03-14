@@ -3,18 +3,10 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-	DIRTY,
-	derived,
-	filter,
-	Inspector,
-	map,
-	pipe,
-	scan,
-	state,
-	stream,
-	subscribe,
-} from "../index";
+import { filter } from "../extra/filter";
+import { map } from "../extra/map";
+import { scan } from "../extra/scan";
+import { DIRTY, derived, Inspector, pipe, state, stream, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();

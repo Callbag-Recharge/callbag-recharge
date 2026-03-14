@@ -138,9 +138,9 @@ The `equals` option on derived stores adds a comparison check on pull. For this 
 
 | Entry | ESM | CJS |
 |---|---|---|
-| `callbag-recharge` (core) | 1.52 KB | 4.41 KB |
+| `callbag-recharge` (core) | 1.12 KB | 4.02 KB |
 
-The explicit deps refactor reduced the ESM bundle by ~40 bytes (removed `tracking.ts` module). All optimization APIs are tree-shakeable — unused imports are eliminated by bundlers.
+The `map`, `filter`, and `scan` operators moved to `callbag-recharge/extra`, reducing the core entry point. All operators and extras are tree-shakeable — unused imports are eliminated by bundlers.
 
 ---
 

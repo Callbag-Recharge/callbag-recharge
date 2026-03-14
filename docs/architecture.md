@@ -255,8 +255,8 @@ src/
   stream.ts      — stream() factory (push + pull, custom equals)
   effect.ts      — effect(deps, fn) factory (static deps, batched re-runs)
   subscribe.ts   — subscribe() function
-  pipe.ts        — pipe() + map, filter, scan operators + pipeRaw(), SKIP
+  pipe.ts        — pipe() + pipeRaw(), SKIP
   index.ts       — Public exports
 ```
 
-Minified ESM bundle: ~1.5 KB (core entry point). CJS: ~4.4 KB.
+Minified ESM bundle: ~1.1 KB (core entry point). CJS: ~4.0 KB.

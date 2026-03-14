@@ -2,13 +2,14 @@
 
 Reactive stores connected by the [callbag protocol](https://github.com/callbag/callbag). Every node is a store you can see into.
 
-- **~4 KB** minified, zero dependencies
+- **~1.1 KB** core ESM, zero dependencies
 - **Glitch-free** diamond updates via push-pull architecture
 - **~376 bytes per store** — plain objects, no wrapper overhead
 - **Full TypeScript** from the ground up
 
 ```ts
-import { state, derived, effect, pipe, map, filter } from 'callbag-recharge'
+import { state, derived, effect, pipe } from 'callbag-recharge'
+import { map, filter, scan } from 'callbag-recharge/extra'
 
 const count = state(0)
 const doubled = derived([count], () => count.get() * 2)
@@ -31,7 +32,7 @@ Signals gave us ergonomic reactive state. Callbag gave us zero-overhead push/pul
 | Inspect intermediate values | No | Derivations only | No | **Every step** |
 | Push + pull unified | No | Pull only | Yes (opaque) | **Yes (inspectable)** |
 | Glitch-free diamonds | N/A | Yes | No | **Yes** |
-| Bundle size | ~30 KB | ~3-5 KB | ~1-2 KB | **~4 KB** |
+| Bundle size | ~30 KB | ~3-5 KB | ~1-2 KB | **~1.1 KB** (core) |
 | Memory per node | Heavy | Medium | Minimal | **~376 bytes** |
 
 ---

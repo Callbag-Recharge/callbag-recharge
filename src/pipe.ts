@@ -3,8 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "./derived";
-import { Inspector } from "./inspector";
-import type { Store, StoreOperator, StoreOptions } from "./types";
+import type { Store, StoreOperator } from "./types";
 
 // ---------------------------------------------------------------------------
 // pipe overloads
@@ -47,38 +46,6 @@ export function pipe(
 }
 
 // ---------------------------------------------------------------------------
-// Operators
-// ---------------------------------------------------------------------------
-
-export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperator<A, B> {
-	return (input) => {
-		const name = opts?.name ?? `map(${Inspector.getName(input) ?? "?"})`;
-		return derived([input], () => fn(input.get()), { name });
-	};
-}
-
-export function filter<A>(
-	predicate: (value: A) => boolean,
-	opts?: StoreOptions,
-): StoreOperator<A, A | undefined> {
-	return (input) => {
-		const name = opts?.name ?? `filter(${Inspector.getName(input) ?? "?"})`;
-		// Filter holds the last value that passed the predicate.
-		// Starts as undefined — nothing has passed yet.
-		let lastPassing: A | undefined;
-		return derived(
-			[input],
-			() => {
-				const v = input.get();
-				if (predicate(v)) lastPassing = v;
-				return lastPassing;
-			},
-			{ name },
-		);
-	};
-}
-
-// ---------------------------------------------------------------------------
 // SKIP sentinel + pipeRaw — fused pipe with a single derived store
 // ---------------------------------------------------------------------------
 
@@ -118,27 +85,4 @@ export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>):
 		hasCached = true;
 		return v;
 	});
-}
-
-// ---------------------------------------------------------------------------
-// Operators
-// ---------------------------------------------------------------------------
-
-export function scan<A, B>(
-	reducer: (acc: B, value: A) => B,
-	seed: B,
-	opts?: StoreOptions,
-): StoreOperator<A, B> {
-	return (input) => {
-		const name = opts?.name ?? `scan(${Inspector.getName(input) ?? "?"})`;
-		let acc = seed;
-		return derived(
-			[input],
-			() => {
-				acc = reducer(acc, input.get());
-				return acc;
-			},
-			{ name },
-		);
-	};
 }

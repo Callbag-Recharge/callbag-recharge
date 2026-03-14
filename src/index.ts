@@ -7,7 +7,7 @@ export { effect } from "./effect";
 // Observability
 export { Inspector } from "./inspector";
 // Operators & piping
-export { filter, map, pipe, pipeRaw, SKIP, scan } from "./pipe";
+export { pipe, pipeRaw, SKIP } from "./pipe";
 // Protocol (for advanced use / interop)
 export {
 	batch,

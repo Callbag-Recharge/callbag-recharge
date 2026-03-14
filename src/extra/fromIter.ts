@@ -11,5 +11,6 @@ export function fromIter<T>(iterable: Iterable<T>): StreamStore<T> {
 			emit(value);
 		}
 		complete();
+		return undefined;
 	});
 }
