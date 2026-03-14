@@ -16,7 +16,7 @@ export function scan<A, B>(
 				acc = reducer(acc, input.get());
 				return acc;
 			},
-			{ name },
+			{ name, equals: opts?.equals },
 		);
 	};
 }

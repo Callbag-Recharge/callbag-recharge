@@ -27,7 +27,7 @@ export function filter<A>(
 				if (predicate(v)) lastPassing = v;
 				return lastPassing;
 			},
-			{ name, equals: Object.is },
+			{ name, equals: opts?.equals ?? Object.is },
 		);
 	};
 }
