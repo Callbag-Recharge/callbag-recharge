@@ -7,13 +7,13 @@
 // ---------------------------------------------------------------------------
 
 import {
+	beginDeferredStart,
 	DATA,
 	DIRTY,
 	END,
-	START,
-	beginDeferredStart,
 	endDeferredStart,
 	enqueueEffect,
+	START,
 } from "./protocol";
 import type { Store } from "./types";
 

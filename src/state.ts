@@ -4,7 +4,6 @@
 
 import { Inspector } from "./inspector";
 import { DATA, END, pushDirty, START } from "./protocol";
-import { registerRead } from "./tracking";
 import type { StoreOptions, WritableStore } from "./types";
 
 export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
@@ -14,7 +13,6 @@ export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
 
 	const store: WritableStore<T> = {
 		get() {
-			registerRead(store);
 			return currentValue;
 		},
 

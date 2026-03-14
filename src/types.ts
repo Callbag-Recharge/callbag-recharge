@@ -37,6 +37,6 @@ export type StreamProducer<T> = (
 	emit: (value: T) => void,
 	request: (handler: () => void) => void,
 	complete: () => void,
-) => (() => void) | void;
+) => (() => void) | undefined;
 
 export type StoreOperator<A, B> = (input: Store<A>) => Store<B>;

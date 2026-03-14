@@ -1,7 +1,6 @@
-import { DATA, END, START, pushDirty } from "../protocol";
 import { Inspector } from "../inspector";
+import { DATA, END, pushDirty, START } from "../protocol";
 import { subscribe } from "../subscribe";
-import { registerRead } from "../tracking";
 import type { Store, StoreOperator } from "../types";
 
 /**
@@ -10,7 +9,7 @@ import type { Store, StoreOperator } from "../types";
  */
 export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
-		let currentValue: A | undefined = undefined;
+		let currentValue: A | undefined;
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let count = 0;
 		let started = false;
@@ -30,7 +29,6 @@ export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 
 		const store: Store<A | undefined> = {
 			get() {
-				registerRead(store);
 				return currentValue;
 			},
 			source(type: number, payload?: unknown) {

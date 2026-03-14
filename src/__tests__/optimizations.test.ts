@@ -42,7 +42,7 @@ describe("equals option", () => {
 	test("state with custom equals: skip pushDirty when values are 'equal'", () => {
 		const s = state({ id: 1, label: "a" }, { equals: (a, b) => a.id === b.id });
 		let runs = 0;
-		effect(() => {
+		effect([s], () => {
 			s.get();
 			runs++;
 		});
@@ -60,7 +60,7 @@ describe("equals option", () => {
 	test("derived with equals: returns cached ref when output unchanged", () => {
 		const a = state(1);
 		const b = state(2);
-		const sum = derived(() => a.get() + b.get(), {
+		const sum = derived([a, b], () => a.get() + b.get(), {
 			equals: (x, y) => x === y,
 		});
 
@@ -77,12 +77,12 @@ describe("equals option", () => {
 	test("diamond with equals on intermediates: downstream effect runs fewer times", () => {
 		const a = state(0);
 		// B clamps to 0/1
-		const b = derived(() => (a.get() >= 5 ? 1 : 0), {
+		const b = derived([a], () => (a.get() >= 5 ? 1 : 0), {
 			equals: (x, y) => x === y,
 		});
-		const c = derived(() => a.get() * 2);
+		const c = derived([a], () => a.get() * 2);
 		let dRuns = 0;
-		effect(() => {
+		effect([b, c], () => {
 			b.get();
 			c.get();
 			dRuns++;
@@ -108,7 +108,7 @@ describe("equals option", () => {
 		);
 
 		let runs = 0;
-		effect(() => {
+		effect([s], () => {
 			s.get();
 			runs++;
 		});
@@ -135,7 +135,7 @@ describe("batch()", () => {
 		const a = state(0);
 		const b = state(0);
 		let runs = 0;
-		effect(() => {
+		effect([a, b], () => {
 			a.get();
 			b.get();
 			runs++;
@@ -152,7 +152,7 @@ describe("batch()", () => {
 	test("nested batch → effects run only when outermost ends", () => {
 		const a = state(0);
 		let runs = 0;
-		effect(() => {
+		effect([a], () => {
 			a.get();
 			runs++;
 		});
@@ -180,7 +180,7 @@ describe("batch()", () => {
 	test("error in callback still decrements depth (try/finally)", () => {
 		const a = state(0);
 		let runs = 0;
-		effect(() => {
+		effect([a], () => {
 			a.get();
 			runs++;
 		});

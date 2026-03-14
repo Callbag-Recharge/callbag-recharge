@@ -1,7 +1,4 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { filter, map, pipe } from "../pipe";
-import { state } from "../state";
-import { subscribe } from "../subscribe";
 import { combine } from "../extra/combine";
 import { concat } from "../extra/concat";
 import { flat } from "../extra/flat";
@@ -12,6 +9,9 @@ import { interval } from "../extra/interval";
 import { merge } from "../extra/merge";
 import { skip } from "../extra/skip";
 import { take } from "../extra/take";
+import { filter, map, pipe } from "../pipe";
+import { state } from "../state";
+import { subscribe } from "../subscribe";
 
 // ---------------------------------------------------------------------------
 // Tests adapted from callbag-basics (https://github.com/staltz/callbag-basics)
@@ -352,7 +352,7 @@ describe("concat", () => {
 	});
 
 	test("waits for completion before moving to next source", () => {
-		const s1 = state(0);
+		const _s1 = state(0);
 		const s2 = fromIter([10, 20]);
 		const s = concat(fromIter([1, 2]), s2);
 		const received: number[] = [];

@@ -29,7 +29,7 @@ callbag-recharge is built on four layers. Each layer has a single responsibility
 
 ### 1. Stores are plain objects
 
-A store is `{ get, set?, source }` — nothing more. No classes, no `Object.defineProperties`, no function-as-object tricks. This keeps memory low (~737 bytes per state store with Inspector enabled, less with it disabled) and avoids fighting JavaScript's runtime (e.g., `Function.name` being read-only).
+A store is `{ get, set?, source }` — nothing more. No classes, no `Object.defineProperties`, no function-as-object tricks. This keeps memory low (~723 bytes per state store with Inspector enabled, less with it disabled) and avoids fighting JavaScript's runtime (e.g., `Function.name` being read-only).
 
 Debug metadata (name, kind) lives in the global `Inspector` singleton backed by WeakMaps, not on the store itself. Stores that aren't named don't pay for naming.
 
@@ -53,7 +53,22 @@ D.get()
         D = 16 (computed once, consistent state)
 ```
 
-### 3. No cache in derived stores (by default)
+### 3. Explicit deps, callbag wiring
+
+`derived` and `effect` take an explicit deps array that declares which stores to subscribe to via callbag protocol. The `fn` still calls `.get()` to pull values — deps declare *what to subscribe to*, `.get()` declares *what to read*.
+
+```ts
+const sum = derived([a, b], () => a.get() + b.get())
+```
+
+This is a deliberate departure from the implicit tracking pattern (Signals/MobX) where deps are discovered by intercepting `.get()` calls at runtime. Explicit deps have several advantages:
+
+- **Pure pull:** `.get()` is just a function call with no side effects — no tracking context, no Set allocation, no dependency diffing. This makes reads ~10x faster.
+- **Static deps:** Effect deps are wired once on creation and never reconnect, eliminating per-run overhead.
+- **Predictable:** All deps are visible in the call site. No surprises from conditional reads changing the dependency graph.
+- **Simpler internals:** No global mutable state for tracking, no `registerRead()` in every store's `.get()`.
+
+### 4. No cache in derived stores (by default)
 
 Derived stores always run their computation function on `.get()`. There is no cached value, no dirty flag, no staleness tracking by default.
 
@@ -63,16 +78,16 @@ Derived stores always run their computation function on `.get()`. There is no ca
 
 **Opt-in caching via `equals`:** Providing an `equals` option enables pull-phase caching — the derived store remembers its last output and returns the cached value if `equals(cached, recomputed)` returns true. This is useful for derived stores whose output stabilizes (e.g., clamping, rounding, enum mapping). See [optimizations](./optimizations.md).
 
-### 4. `undefined` means empty
+### 5. `undefined` means empty
 
 No special `EMPTY` symbol, no `.ready` flag. If a stream hasn't emitted or a filter hasn't passed anything, `.get()` returns `undefined`. This is JavaScript's natural "no value" — the library doesn't invent another one.
 
 Type implications:
 - `state<T>(initial)` → `.get()` returns `T` (always has a value)
 - `stream<T>(producer)` → `.get()` returns `T | undefined` (might not have emitted)
-- `derived<T>(fn)` → `.get()` returns whatever `fn` returns (TypeScript infers it)
+- `derived<T>(deps, fn)` → `.get()` returns whatever `fn` returns (TypeScript infers it)
 
-### 5. Observability is external and disableable
+### 6. Observability is external and disableable
 
 The `Inspector` singleton stores names and kinds in WeakMaps, and tracks all living stores via `WeakRef`. This means:
 
@@ -96,7 +111,7 @@ state(0, { equals? })
   ├── currentValue: 0
   ├── sinks: Set<callbag sink>
   ├── eq: opts.equals ?? Object.is
-  ├── get() → registerRead + return currentValue
+  ├── get() → return currentValue
   ├── set(v) → if eq(current, v), skip; else update + pushDirty(sinks)
   └── source(type, payload) → callbag handshake, stores sink, sends talkback
 ```
@@ -107,22 +122,22 @@ The callbag talkback supports:
 
 ### `derived`
 
-A computed store with auto-tracking and lazy evaluation.
+A computed store with explicit deps and lazy upstream connection.
 
 ```
-derived(() => a.get() + b.get(), { equals? })
+derived([a, b], () => a.get() + b.get(), { equals? })
+  ├── deps: Store[] (fixed, declared upfront)
   ├── sinks: Set<callbag sink>
   ├── upstreamTalkbacks: talkback functions for disconnecting
-  ├── currentDeps: Set<Store> (for change detection)
   ├── cachedValue / hasCached (only active when equals provided)
-  ├── get() → run fn() in tracking context, reconnect if deps changed,
-  │           if equals && cached matches → return cached, else return result
-  └── source(type, payload) → callbag handshake, propagates DIRTY
+  ├── get() → run fn(), if equals && cached matches → return cached, else return result
+  └── source(type, payload) → callbag handshake, connects to deps on first sink,
+                               disconnects when last sink leaves, propagates DIRTY
 ```
 
-**Auto-tracking:** `.get()` runs `fn()` inside a tracking context. Any `store.get()` call within `fn()` registers that store as a dependency. If `fn()` conditionally reads different stores, the deps update automatically.
+**Explicit deps:** The deps array declares which stores to subscribe to. The `fn` calls `.get()` on those stores to pull values. All deps are listed upfront — no runtime discovery.
 
-**Lazy connection:** The derived store doesn't connect to upstream until the first `.get()` call. If nobody reads it, it never computes and never receives DIRTY. This is correct because derived stores with no readers have no observable effect.
+**Lazy connection:** The derived store doesn't connect to upstream deps until the first sink subscribes (via `source()`). When the last sink disconnects, it disconnects from all deps. If nobody subscribes, it never receives DIRTY — but `get()` still works as a pure pull.
 
 **DIRTY propagation:** When an upstream dep pushes DIRTY, the derived store propagates DIRTY to its own sinks (for effects/subscribers downstream). It does NOT recompute — that waits for the next `.get()`.
 
@@ -150,15 +165,18 @@ stream((emit, request) => { ... })
 
 ### `effect`
 
-Runs a function and re-runs it when dependencies change.
+Runs a function and re-runs it when dependencies change. Deps are static — wired once on creation.
 
 ```
-effect(() => { count.get(); })
+effect([count, doubled], () => { console.log(count.get(), doubled.get()) })
+  ├── deps: Store[] (fixed, declared upfront)
   ├── talkbacks: Array<talkback> for disconnecting from deps
   ├── pending: boolean (dedup flag)
-  ├── run() → tracked(fn), connect to deps as callbag sinks
+  ├── run() → cleanup previous, call fn(), store new cleanup
   └── dispose() → cleanup + disconnect all
 ```
+
+**Static connection:** Unlike the previous auto-tracking design, effects connect to their deps once on creation and never reconnect. This eliminates per-run tracking context setup and callbag reconnection overhead.
 
 **Batching:** When DIRTY arrives, the effect doesn't re-run immediately. It enqueues itself via `enqueueEffect()`. The protocol layer flushes all pending effects only after DIRTY propagation completes (propagation depth reaches 0). This ensures diamond patterns trigger the effect once, not once per path.
 
@@ -202,28 +220,6 @@ function batch<T>(fn: () => T): T {
 }
 ```
 
-### Auto-tracking
-
-A module-level `currentTracker` variable (a `Set<Store>` or `null`) is set during `tracked(fn)`. Any `store.get()` call checks this variable and adds itself if tracking is active. After `fn()` returns, the set contains all stores that were read.
-
-```ts
-let currentTracker = null;
-
-function tracked(fn) {
-  const prev = currentTracker;
-  const deps = new Set();
-  currentTracker = deps;
-  try { return [fn(), deps]; }
-  finally { currentTracker = prev; }
-}
-
-function registerRead(store) {
-  if (currentTracker) currentTracker.add(store);
-}
-```
-
-Nested tracking (derived reading another derived) works correctly because `tracked()` saves and restores the previous tracker.
-
 ---
 
 ## Callbag interop
@@ -253,15 +249,14 @@ Talkback supports:
 src/
   types.ts       — Store, WritableStore, StreamStore interfaces
   protocol.ts    — DIRTY symbol, pushDirty(), enqueueEffect(), batch(), batching
-  tracking.ts    — Auto-dependency tracking context
   inspector.ts   — Global singleton with WeakMaps, enabled flag
   state.ts       — state() factory (custom equals support)
-  derived.ts     — derived() factory (conditional caching via equals, lazy, auto-tracked)
+  derived.ts     — derived(deps, fn) factory (explicit deps, lazy connection, optional equals caching)
   stream.ts      — stream() factory (push + pull, custom equals)
-  effect.ts      — effect() factory (batched re-runs)
+  effect.ts      — effect(deps, fn) factory (static deps, batched re-runs)
   subscribe.ts   — subscribe() function
   pipe.ts        — pipe() + map, filter, scan operators + pipeRaw(), SKIP
   index.ts       — Public exports
 ```
 
-Minified ESM bundle: ~1.6 KB (core entry point). CJS: ~4.6 KB.
+Minified ESM bundle: ~1.5 KB (core entry point). CJS: ~4.4 KB.

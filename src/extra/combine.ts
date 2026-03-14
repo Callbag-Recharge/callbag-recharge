@@ -11,5 +11,5 @@ export function combine<Sources extends Store<unknown>[]>(
 	type Result = {
 		[K in keyof Sources]: Sources[K] extends Store<infer T> ? T : never;
 	};
-	return derived(() => sources.map((s) => s.get()) as unknown as Result);
+	return derived(sources, () => sources.map((s) => s.get()) as unknown as Result);
 }

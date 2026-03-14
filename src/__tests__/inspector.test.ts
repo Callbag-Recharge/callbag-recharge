@@ -21,7 +21,7 @@ describe("Inspector", () => {
 
 	it("inspect() works on derived stores", () => {
 		const a = state(1, { name: "a" });
-		const sum = derived(() => a.get() + 10, { name: "sum" });
+		const sum = derived([a], () => a.get() + 10, { name: "sum" });
 		const info = Inspector.inspect(sum);
 
 		expect(info.name).toBe("sum");
@@ -58,7 +58,7 @@ describe("Inspector", () => {
 
 	it("getKind() returns the store kind", () => {
 		const s = state(0);
-		const d = derived(() => s.get());
+		const d = derived([s], () => s.get());
 		expect(Inspector.getKind(s)).toBe("state");
 		expect(Inspector.getKind(d)).toBe("derived");
 	});
@@ -66,7 +66,7 @@ describe("Inspector", () => {
 	it("graph() returns all living stores", () => {
 		const a = state(1, { name: "a" });
 		const b = state(2, { name: "b" });
-		const _sum = derived(() => a.get() + b.get(), { name: "sum" });
+		const _sum = derived([a, b], () => a.get() + b.get(), { name: "sum" });
 
 		const g = Inspector.graph();
 		expect(g.size).toBe(3);

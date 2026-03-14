@@ -1,6 +1,6 @@
 # Optimizations
 
-callbag-recharge deliberately trades some performance for simplicity and correctness. This document describes built-in optimization APIs and potential future techniques to close the gaps identified in the [benchmarks](./benchmarks.md).
+callbag-recharge deliberately trades some performance for simplicity and correctness. This document describes built-in optimization APIs and techniques for performance-sensitive paths.
 
 ---
 
@@ -22,7 +22,7 @@ Inspector.enabled = false
 - `register()` becomes a no-op — no WeakRef, no WeakMap writes
 - `getName()` returns `undefined` — pipe operator names are skipped
 - `graph()` returns an empty Map
-- **2.5x faster** store creation (see [benchmarks](./benchmarks.md#inspector-disabled-vs-enabled-store-creation))
+- **6.8x faster** store creation (see [benchmarks](./benchmarks.md#inspector-disabled-vs-enabled-store-creation))
 
 The flag defaults to `true` when `NODE_ENV !== 'production'` and `true` in browsers. Set it explicitly for deterministic behavior.
 
@@ -46,6 +46,7 @@ user.set({ id: 2, name: 'Carol' }) // different id → propagates
 
 ```ts
 const category = derived(
+  [score],
   () => (score.get() >= 90 ? 'A' : score.get() >= 80 ? 'B' : 'C'),
   { equals: (a, b) => a === b }
 )
@@ -81,13 +82,13 @@ batch(() => {
 - Nesting is supported — effects flush only when the outermost batch ends
 - Return values are forwarded: `const result = batch(() => computeAndSet())`
 - Errors in the callback still correctly restore batch depth (try/finally)
-- **8.4x faster** for 10 concurrent set() calls with an active effect
+- **3.3x faster** for 10 concurrent set() calls with an active effect
 
 **When to use:** Any code path that updates multiple state stores and has active effects or subscribers downstream.
 
 ### 4. `pipeRaw()` — fused pipe with a single derived store
 
-`pipe()` creates one `derived` store per operator (each with its own tracking context, Inspector registration, and sinks Set). `pipeRaw()` fuses all transform functions into a single `derived` store.
+`pipe()` creates one `derived` store per operator (each with its own Inspector registration and sinks Set). `pipeRaw()` fuses all transform functions into a single `derived` store.
 
 ```ts
 import { pipeRaw, SKIP } from 'callbag-recharge'
@@ -102,12 +103,11 @@ const result = pipeRaw(
 result.get() // runs all 3 transforms in one derived() call
 ```
 
-- **2x faster** than `pipe()` for 3-operator chains
 - `SKIP` sentinel replaces filter — returns the last non-skipped value (or `undefined` if nothing has passed yet)
 - Type overloads for up to 4 transforms
 - No `scan` support (use regular `pipe()` with the `scan` operator for accumulator state)
 
-**When to use:** Performance-sensitive pipe chains where you don't need per-step inspectability or `scan`.
+**When to use:** Performance-sensitive pipe chains where you don't need per-step inspectability or `scan`, or when you need `SKIP` filter semantics.
 
 ### 5. Raw callbag interop for hot paths
 
@@ -127,7 +127,7 @@ cbPipe(
 )
 ```
 
-Raw callbag operators are nested function calls with zero allocation — **9-18x faster** than recharge pipes. The tradeoff is no `.get()`, no Inspector visibility, and no store interop (pure push, no pull).
+Raw callbag operators are nested function calls with zero allocation — **~2x faster** than recharge pipes. The tradeoff is no `.get()`, no Inspector visibility, and no store interop (pure push, no pull).
 
 ### 6. Memoized derived stores (userland)
 
@@ -135,7 +135,7 @@ For derived stores with expensive computation functions, memoize at the call sit
 
 ```ts
 let lastA: number, lastB: number, lastResult: number
-const memoized = derived(() => {
+const memoized = derived([inputA, inputB], () => {
   const a = inputA.get()
   const b = inputB.get()
   if (a === lastA && b === lastB) return lastResult
@@ -158,7 +158,7 @@ Currently, any change to a state store notifies all downstream derived stores, e
 
 ```ts
 const user = state({ name: 'Alice', age: 30 })
-const name = derived(() => user.get().name) // re-runs on ANY user change
+const name = derived([user], () => user.get().name) // re-runs on ANY user change
 ```
 
 Two approaches:
@@ -168,7 +168,7 @@ Two approaches:
 ```ts
 const name = state('Alice')
 const age = state(30)
-const nameUpper = derived(() => name.get().toUpperCase()) // only re-runs on name change
+const nameUpper = derived([name], () => name.get().toUpperCase()) // only re-runs on name change
 ```
 
 **Approach B — Selector-based derived:**
@@ -180,10 +180,6 @@ const name = select(user, u => u.name) // only propagates DIRTY when .name chang
 
 This would require derived stores to compare their output value with the previous one before propagating DIRTY downstream — a form of memoization at the output rather than the input. The `equals` option on derived already provides the pull-phase half of this; the missing piece is suppressing DIRTY propagation to downstream sinks.
 
-### Lazy upstream connection
-
-Currently, `derived` stores connect to upstream callbag sources on first `.get()` and reconnect if dependencies change. A potential optimization is to defer upstream connection until the first *sink* is added (i.e., when someone subscribes or an effect depends on the derived). This would eliminate callbag wiring overhead for derived stores that are only read imperatively.
-
 ### Compile-time Inspector removal
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
@@ -194,12 +190,11 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 
 | Optimization | Status | Impact | When to use |
 |---|---|---|---|
-| `Inspector.enabled = false` | Built-in | 2.5x faster store creation | Production builds |
+| `Inspector.enabled = false` | Built-in | 6.8x faster store creation | Production builds |
 | `equals` on state/derived/stream | Built-in | Skip unnecessary DIRTY / cache outputs | Object/array state, stabilizing derived |
-| `batch()` | Built-in | 8.4x for multi-set patterns | Concurrent state updates |
-| `pipeRaw()` + `SKIP` | Built-in | 2x faster than `pipe()` | Hot pipe chains |
-| Raw callbag interop | Built-in | 9-18x for pure streaming | Hot paths, no store needed |
+| `batch()` | Built-in | 3.3x for multi-set patterns | Concurrent state updates |
+| `pipeRaw()` + `SKIP` | Built-in | Single derived store for pipe chain | Hot pipe chains, SKIP filter semantics |
+| Raw callbag interop | Built-in | ~2x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
 | Selective subscription | Potential | Fine-grained reactivity | Large object stores |
-| Lazy upstream connection | Potential | Skip wiring for imperative reads | Read-only derived stores |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |

@@ -1,26 +1,25 @@
 // ---------------------------------------------------------------------------
-// effect(fn) — run side effects when tracked stores change
+// effect(deps, fn) — run side effects when deps change
 // ---------------------------------------------------------------------------
-// Connects as a callbag sink to each dependency.
-// When DIRTY arrives, schedules re-run after propagation completes.
-// Uses beginDeferredStart/endDeferredStart so that stream producers only
-// start after all deps are connected.
+// Connects once to all deps on creation. When DIRTY arrives, schedules
+// re-run after propagation completes. Uses beginDeferredStart/endDeferredStart
+// so that stream producers only start after all deps are connected.
 // ---------------------------------------------------------------------------
 
 import {
+	beginDeferredStart,
 	DATA,
 	DIRTY,
 	END,
-	START,
-	beginDeferredStart,
 	endDeferredStart,
 	enqueueEffect,
+	START,
 } from "./protocol";
-import { tracked } from "./tracking";
+import type { Store } from "./types";
 
-export function effect(fn: () => undefined | (() => void)): () => void {
+export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void)): () => void {
 	let cleanupEffect: undefined | (() => void);
-	let talkbacks: Array<(type: number) => void> = [];
+	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
 	let pending = false;
 
@@ -31,39 +30,31 @@ export function effect(fn: () => undefined | (() => void)): () => void {
 		// Cleanup previous effect
 		if (cleanupEffect) cleanupEffect();
 
-		// Disconnect from previous deps
-		for (const tb of talkbacks) tb(END);
-		talkbacks = [];
-
-		beginDeferredStart();
-
-		// Run fn in tracking context — discovers deps via .get() calls
-		const [result, deps] = tracked(fn);
-		cleanupEffect = result;
-
-		// Connect to each dep's callbag source
-		for (const dep of deps) {
-			dep.source(START, (type: number, data: any) => {
-				if (type === START) talkbacks.push(data);
-				if (type === DATA && data === DIRTY) {
-					if (!pending && !disposed) {
-						pending = true;
-						enqueueEffect(run);
-					}
-				}
-			});
-		}
-
-		endDeferredStart();
+		cleanupEffect = fn();
 	}
 
-	// Initial run
+	// Initial setup: run fn, then connect to deps
+	beginDeferredStart();
+
 	run();
+
+	for (const dep of deps) {
+		dep.source(START, (type: number, data: any) => {
+			if (type === START) talkbacks.push(data);
+			if (type === DATA && data === DIRTY) {
+				if (!pending && !disposed) {
+					pending = true;
+					enqueueEffect(run);
+				}
+			}
+		});
+	}
+
+	endDeferredStart();
 
 	return () => {
 		disposed = true;
 		if (cleanupEffect) cleanupEffect();
 		for (const tb of talkbacks) tb(END);
-		talkbacks = [];
 	};
 }

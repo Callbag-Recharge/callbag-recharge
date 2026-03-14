@@ -1,11 +1,4 @@
-import {
-	DATA,
-	DIRTY,
-	END,
-	START,
-	beginDeferredStart,
-	endDeferredStart,
-} from "../protocol";
+import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -18,7 +11,7 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 	return (outer: Store<Store<T> | undefined>) => {
 		// We use the raw callbag protocol for the output store so we can
 		// manage inner subscriptions manually.
-		let currentValue: T | undefined = undefined;
+		let currentValue: T | undefined;
 		let innerTalkback: ((type: number) => void) | null = null;
 		let outerUnsub: (() => void) | null = null;
 		const sinks = new Set<(type: number, data?: unknown) => void>();

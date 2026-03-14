@@ -136,7 +136,7 @@ describe("Stream", () => {
 
 		s.source(0, () => {}); // start producer
 
-		const doubled = derived(() => (s.get() ?? 0) * 2);
+		const doubled = derived([s], () => (s.get() ?? 0) * 2);
 		expect(doubled.get()).toBe(0);
 
 		emitter?.(5);
@@ -195,7 +195,7 @@ describe("Stream", () => {
 
 		s.source(0, () => {});
 
-		const doubled = derived(() => (s.get() ?? 0) * 2);
+		const doubled = derived([s], () => (s.get() ?? 0) * 2);
 
 		expect(doubled.get()).toBe(0); // nothing pulled yet
 
@@ -310,7 +310,7 @@ describe("Backpressure / pull", () => {
 	it("derived does not compute until pulled", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() + 1);
-		const d = derived(computeFn);
+		const d = derived([count], computeFn);
 
 		// Should NOT have computed yet
 		expect(computeFn).toHaveBeenCalledTimes(0);

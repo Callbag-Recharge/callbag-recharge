@@ -55,22 +55,22 @@ describe("State (like Signal.State)", () => {
 describe("Derived (like Signal.Computed)", () => {
 	it("computes from a state store", () => {
 		const count = state(3);
-		const doubled = derived(() => count.get() * 2);
+		const doubled = derived([count], () => count.get() * 2);
 		expect(doubled.get()).toBe(6);
 	});
 
 	it("recomputes when dependency changes", () => {
 		const count = state(1);
-		const doubled = derived(() => count.get() * 2);
+		const doubled = derived([count], () => count.get() * 2);
 		expect(doubled.get()).toBe(2);
 		count.set(5);
 		expect(doubled.get()).toBe(10);
 	});
 
-	it("auto-tracks multiple dependencies", () => {
+	it("tracks multiple dependencies", () => {
 		const a = state(2);
 		const b = state(3);
-		const sum = derived(() => a.get() + b.get());
+		const sum = derived([a, b], () => a.get() + b.get());
 		expect(sum.get()).toBe(5);
 		a.set(10);
 		expect(sum.get()).toBe(13);
@@ -80,8 +80,8 @@ describe("Derived (like Signal.Computed)", () => {
 
 	it("chains derived stores", () => {
 		const count = state(2);
-		const doubled = derived(() => count.get() * 2);
-		const quadrupled = derived(() => doubled.get() * 2);
+		const doubled = derived([count], () => count.get() * 2);
+		const quadrupled = derived([doubled], () => doubled.get() * 2);
 		expect(quadrupled.get()).toBe(8);
 		count.set(3);
 		expect(quadrupled.get()).toBe(12);
@@ -90,7 +90,7 @@ describe("Derived (like Signal.Computed)", () => {
 	it("is lazy — does not compute until .get() is called", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
-		const doubled = derived(computeFn);
+		const doubled = derived([count], computeFn);
 
 		// Should NOT have computed yet — nobody called .get()
 		expect(computeFn).toHaveBeenCalledTimes(0);
@@ -102,7 +102,7 @@ describe("Derived (like Signal.Computed)", () => {
 	it("always recomputes on .get() (no cache)", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
-		const doubled = derived(computeFn);
+		const doubled = derived([count], computeFn);
 
 		doubled.get();
 		doubled.get();
@@ -111,32 +111,34 @@ describe("Derived (like Signal.Computed)", () => {
 		expect(computeFn).toHaveBeenCalledTimes(3);
 	});
 
-	it("handles conditional dependencies", () => {
+	it("handles conditional dependencies (all deps listed upfront)", () => {
 		const toggle = state(true);
 		const a = state(1);
 		const b = state(2);
-		const result = derived(() => (toggle.get() ? a.get() : b.get()));
+		const result = derived([toggle, a, b], () => (toggle.get() ? a.get() : b.get()));
 
 		expect(result.get()).toBe(1);
 
 		b.set(20);
-		expect(result.get()).toBe(1); // b is not a dep right now
+		// b is always subscribed now, but fn returns a.get() when toggle is true
+		expect(result.get()).toBe(1);
 
 		toggle.set(false);
 		expect(result.get()).toBe(20); // now reads b
 
 		a.set(100);
-		expect(result.get()).toBe(20); // a is no longer a dep
+		// a is always subscribed, but fn returns b.get() when toggle is false
+		expect(result.get()).toBe(20);
 	});
 });
 
 describe("Diamond problem (glitch-free)", () => {
 	it("derived D depending on B and C (both from A) computes once per pull", () => {
 		const a = state(1);
-		const b = derived(() => a.get() + 1);
-		const c = derived(() => a.get() * 2);
+		const b = derived([a], () => a.get() + 1);
+		const c = derived([a], () => a.get() * 2);
 		const computeD = vi.fn(() => b.get() + c.get());
-		const d = derived(computeD);
+		const d = derived([b, c], computeD);
 
 		expect(d.get()).toBe(4); // b=2, c=2 → 4
 		computeD.mockClear();
@@ -148,11 +150,11 @@ describe("Diamond problem (glitch-free)", () => {
 
 	it("never sees inconsistent intermediate state", () => {
 		const a = state(1);
-		const b = derived(() => a.get() + 1);
-		const c = derived(() => a.get() * 2);
+		const b = derived([a], () => a.get() + 1);
+		const c = derived([a], () => a.get() * 2);
 		const snapshots: Array<{ b: number; c: number }> = [];
 
-		const d = derived(() => {
+		const d = derived([b, c], () => {
 			const bv = b.get();
 			const cv = c.get();
 			snapshots.push({ b: bv, c: cv });
@@ -170,11 +172,11 @@ describe("Diamond problem (glitch-free)", () => {
 
 	it("deep diamond: A → B → D, A → C → D, D → E", () => {
 		const a = state(1);
-		const b = derived(() => a.get() * 2);
-		const c = derived(() => a.get() * 3);
-		const d = derived(() => b.get() + c.get());
+		const b = derived([a], () => a.get() * 2);
+		const c = derived([a], () => a.get() * 3);
+		const d = derived([b, c], () => b.get() + c.get());
 		const computeE = vi.fn(() => d.get() * 10);
-		const e = derived(computeE);
+		const e = derived([d], computeE);
 
 		expect(e.get()).toBe(50); // (2+3)*10
 		computeE.mockClear();
@@ -186,11 +188,11 @@ describe("Diamond problem (glitch-free)", () => {
 
 	it("effect on diamond runs once per source change", () => {
 		const a = state(1);
-		const b = derived(() => a.get() + 1);
-		const c = derived(() => a.get() * 2);
+		const b = derived([a], () => a.get() + 1);
+		const c = derived([a], () => a.get() * 2);
 		const runs: number[] = [];
 
-		effect(() => {
+		effect([b, c], () => {
 			runs.push(b.get() + c.get());
 		});
 
@@ -205,7 +207,7 @@ describe("Effect (like Signal effect/watcher)", () => {
 	it("runs immediately on creation", () => {
 		const count = state(0);
 		const log: number[] = [];
-		effect(() => {
+		effect([count], () => {
 			log.push(count.get());
 		});
 		expect(log).toEqual([0]);
@@ -214,7 +216,7 @@ describe("Effect (like Signal effect/watcher)", () => {
 	it("re-runs when dependency changes", () => {
 		const count = state(0);
 		const log: number[] = [];
-		effect(() => {
+		effect([count], () => {
 			log.push(count.get());
 		});
 		count.set(1);
@@ -226,7 +228,7 @@ describe("Effect (like Signal effect/watcher)", () => {
 		const count = state(0);
 		const cleanups: number[] = [];
 
-		effect(() => {
+		effect([count], () => {
 			const val = count.get();
 			return () => cleanups.push(val);
 		});
@@ -241,7 +243,7 @@ describe("Effect (like Signal effect/watcher)", () => {
 		const count = state(0);
 		const log: number[] = [];
 
-		const dispose = effect(() => {
+		const dispose = effect([count], () => {
 			log.push(count.get());
 		});
 
@@ -293,7 +295,7 @@ describe("Subscribe", () => {
 
 	it("subscribe to derived store", () => {
 		const count = state(0);
-		const doubled = derived(() => count.get() * 2);
+		const doubled = derived([count], () => count.get() * 2);
 		const values: number[] = [];
 		subscribe(doubled, (v) => values.push(v));
 		count.set(1);

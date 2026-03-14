@@ -53,7 +53,7 @@ export function pipe(
 export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperator<A, B> {
 	return (input) => {
 		const name = opts?.name ?? `map(${Inspector.getName(input) ?? "?"})`;
-		return derived(() => fn(input.get()), { name });
+		return derived([input], () => fn(input.get()), { name });
 	};
 }
 
@@ -67,6 +67,7 @@ export function filter<A>(
 		// Starts as undefined — nothing has passed yet.
 		let lastPassing: A | undefined;
 		return derived(
+			[input],
 			() => {
 				const v = input.get();
 				if (predicate(v)) lastPassing = v;
@@ -107,7 +108,7 @@ export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>):
 export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>): Store<unknown> {
 	let cached: unknown;
 	let hasCached = false;
-	return derived(() => {
+	return derived([source], () => {
 		let v: any = source.get();
 		for (const fn of fns) {
 			v = fn(v);
@@ -132,6 +133,7 @@ export function scan<A, B>(
 		const name = opts?.name ?? `scan(${Inspector.getName(input) ?? "?"})`;
 		let acc = seed;
 		return derived(
+			[input],
 			() => {
 				acc = reducer(acc, input.get());
 				return acc;

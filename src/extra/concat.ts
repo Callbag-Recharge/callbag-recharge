@@ -1,11 +1,4 @@
-import {
-	DATA,
-	DIRTY,
-	END,
-	START,
-	beginDeferredStart,
-	endDeferredStart,
-} from "../protocol";
+import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START } from "../protocol";
 import { stream } from "../stream";
 import type { Store, StreamStore } from "../types";
 

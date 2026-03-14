@@ -2,9 +2,7 @@ import { stream } from "../stream";
 import type { StreamStore } from "../types";
 
 interface Observable<T> {
-	subscribe(observer: {
-		next: (value: T) => void;
-	}): { unsubscribe: () => void };
+	subscribe(observer: { next: (value: T) => void }): { unsubscribe: () => void };
 }
 
 /**

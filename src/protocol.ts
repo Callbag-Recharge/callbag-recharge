@@ -51,8 +51,8 @@ function flush(): void {
 	// Process queue — effects may trigger new state changes
 	// which enqueue more effects, so loop until empty
 	while (pending.length > 0) {
-		const effect = pending.shift()!;
-		effect();
+		const effect = pending.shift();
+		if (effect) effect();
 	}
 	flushing = false;
 }
@@ -92,8 +92,8 @@ export function endDeferredStart(): void {
 	connectDepth--;
 	if (connectDepth === 0) {
 		while (pendingStarts.length > 0) {
-			const start = pendingStarts.shift()!;
-			start();
+			const start = pendingStarts.shift();
+			if (start) start();
 		}
 	}
 }

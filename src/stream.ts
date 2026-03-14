@@ -6,8 +6,7 @@
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
-import { DATA, END, deferStart, pushDirty, START } from "./protocol";
-import { registerRead } from "./tracking";
+import { DATA, deferStart, END, pushDirty, START } from "./protocol";
 import type { StoreOptions, StreamProducer, StreamStore } from "./types";
 
 export function stream<T>(
@@ -17,7 +16,7 @@ export function stream<T>(
 	let currentValue: T | undefined = opts?.initial;
 	let started = false;
 	let completed = false;
-	let cleanup: (() => void) | void;
+	let cleanup: (() => void) | undefined;
 	let pullHandler: (() => void) | null = null;
 	const sinks = new Set<any>();
 	const eq = opts?.equals ?? Object.is;
@@ -56,7 +55,6 @@ export function stream<T>(
 
 	const store: StreamStore<T> = {
 		get() {
-			registerRead(store);
 			return currentValue;
 		},
 

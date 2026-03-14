@@ -11,12 +11,12 @@ import cbSubscribe from "callbag-subscribe";
 import {
 	batch,
 	derived,
+	Inspector,
+	pipeRaw,
 	effect as rechargeEffect,
 	filter as rFilter,
-	Inspector,
 	map as rMap,
 	pipe as rPipe,
-	pipeRaw,
 	subscribe as rSubscribe,
 	state,
 } from "./src/index";
@@ -92,7 +92,7 @@ function printGroup(
 
 	const rA = state(0);
 	const rB = state(0);
-	const rSum = derived(() => rA.get() + rB.get());
+	const rSum = derived([rA, rB], () => rA.get() + rB.get());
 	let ri = 0;
 
 	printGroup("Computed read after dep change", [
@@ -116,7 +116,7 @@ function printGroup(
 	pSum.value; // prime cache
 
 	const rA = state(5);
-	const rSum = derived(() => rA.get() * 2);
+	const rSum = derived([rA], () => rA.get() * 2);
 
 	printGroup("Computed read (unchanged deps)", [
 		bench("Preact computed (cached)", () => {
@@ -139,9 +139,9 @@ function printGroup(
 	let pi = 0;
 
 	const rA = state(0);
-	const rB = derived(() => rA.get() + 1);
-	const rC = derived(() => rA.get() * 2);
-	const rD = derived(() => rB.get() + rC.get());
+	const rB = derived([rA], () => rA.get() + 1);
+	const rC = derived([rA], () => rA.get() * 2);
+	const rD = derived([rB, rC], () => rB.get() + rC.get());
 	let ri = 0;
 
 	printGroup("Diamond (A→B,C→D) write + read", [
@@ -170,7 +170,7 @@ function printGroup(
 
 	const rTrigger = state(0);
 	let _rRuns = 0;
-	rechargeEffect(() => {
+	rechargeEffect([rTrigger], () => {
 		rTrigger.get();
 		_rRuns++;
 	});
@@ -280,10 +280,7 @@ function printGroup(
 	);
 	Inspector.enabled = true;
 
-	printGroup("Inspector disabled vs enabled (store creation)", [
-		enabledResult,
-		disabledResult,
-	]);
+	printGroup("Inspector disabled vs enabled (store creation)", [enabledResult, disabledResult]);
 }
 
 // ============================================================
@@ -292,7 +289,7 @@ function printGroup(
 {
 	const items = Array.from({ length: 10 }, (_, i) => state(i));
 	let _runs = 0;
-	rechargeEffect(() => {
+	rechargeEffect(items, () => {
 		for (const s of items) s.get();
 		_runs++;
 	});
@@ -360,27 +357,27 @@ function printGroup(
 {
 	// Without equals
 	const a1 = state(0);
-	const b1 = derived(() => (a1.get() >= 5 ? 1 : 0));
-	const c1 = derived(() => a1.get() * 2);
-	let runs1 = 0;
-	rechargeEffect(() => {
+	const b1 = derived([a1], () => (a1.get() >= 5 ? 1 : 0));
+	const c1 = derived([a1], () => a1.get() * 2);
+	let _runs1 = 0;
+	rechargeEffect([b1, c1], () => {
 		b1.get();
 		c1.get();
-		runs1++;
+		_runs1++;
 	});
 	let k1 = 0;
 
 	// With equals
 	const a2 = state(0);
-	const b2 = derived(() => (a2.get() >= 5 ? 1 : 0), {
+	const b2 = derived([a2], () => (a2.get() >= 5 ? 1 : 0), {
 		equals: (x, y) => x === y,
 	});
-	const c2 = derived(() => a2.get() * 2);
-	let runs2 = 0;
-	rechargeEffect(() => {
+	const c2 = derived([a2], () => a2.get() * 2);
+	let _runs2 = 0;
+	rechargeEffect([b2, c2], () => {
 		b2.get();
 		c2.get();
-		runs2++;
+		_runs2++;
 	});
 	let k2 = 0;
 

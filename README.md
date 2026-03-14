@@ -11,9 +11,9 @@ Reactive stores connected by the [callbag protocol](https://github.com/callbag/c
 import { state, derived, effect, pipe, map, filter } from 'callbag-recharge'
 
 const count = state(0)
-const doubled = derived(() => count.get() * 2)
+const doubled = derived([count], () => count.get() * 2)
 
-effect(() => {
+effect([doubled], () => {
   console.log(doubled.get()) // 0, then 10
 })
 
@@ -44,8 +44,8 @@ const count = state(0)
 count.set(5)
 count.get() // 5
 
-// Derived — auto-tracks dependencies, no cache, always fresh
-const doubled = derived(() => count.get() * 2)
+// Derived — explicit deps, no cache, always fresh
+const doubled = derived([count], () => count.get() * 2)
 doubled.get() // 10
 
 // Stream — push-based, pull-based, or both
@@ -54,8 +54,8 @@ const ticks = stream<number>(emit => {
   return () => clearInterval(id)
 })
 
-// Effect — batched, re-runs when deps change
-const dispose = effect(() => {
+// Effect — explicit deps, batched, re-runs when deps change
+const dispose = effect([doubled], () => {
   console.log(doubled.get())
   return () => { /* cleanup */ }
 })
@@ -84,9 +84,10 @@ Inspector.graph()
 
 1. **Stores are plain objects** — `{ get, set?, source }`, no classes, no property descriptors
 2. **Push invalidation, pull computation** — DIRTY symbol propagates instantly; values computed lazily on `.get()`
-3. **No cache in derived stores** — always recompute, no dirty flags or version counters
-4. **`undefined` means empty** — no special symbols, no `.ready` flag
-5. **Observability is external** — Inspector singleton with WeakMaps, zero per-store cost
+3. **Explicit deps** — `derived` and `effect` declare dependencies upfront; callbag protocol is the sole connection mechanism
+4. **No cache in derived stores** — always recompute, no dirty flags or version counters
+5. **`undefined` means empty** — no special symbols, no `.ready` flag
+6. **Observability is external** — Inspector singleton with WeakMaps, zero per-store cost
 
 See [docs/architecture.md](./docs/architecture.md) for the full design and implementation details.
 
