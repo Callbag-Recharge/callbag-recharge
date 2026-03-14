@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
-import { DATA, END, pushDirty, START } from "./protocol";
+import { DATA, END, pushChange, START } from "./protocol";
 import type { StoreOptions, WritableStore } from "./types";
 
 export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
@@ -19,7 +19,7 @@ export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
 		set(value: T) {
 			if (eq(currentValue, value)) return;
 			currentValue = value;
-			pushDirty(sinks);
+			pushChange(sinks, () => currentValue);
 		},
 
 		update(fn: (current: T) => T) {

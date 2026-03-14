@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, pushDirty, START } from "../protocol";
+import { DATA, DIRTY, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -28,8 +28,8 @@ export function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 			// Subscribe to notifier — push downstream when notifier fires
 			notifier.source(START, (type: number, data: unknown) => {
 				if (type === START) notifierTalkback = data as (type: number) => void;
-				if (type === DATA && data === DIRTY) {
-					pushDirty(sinks);
+				if (type === DATA && data !== DIRTY) {
+					pushChange(sinks, () => currentValue);
 				}
 				if (type === END) notifierTalkback = null;
 			});

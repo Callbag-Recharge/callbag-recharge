@@ -1,9 +1,14 @@
 // ---------------------------------------------------------------------------
-// Protocol — DIRTY symbol and propagation batching
+// Protocol — DIRTY symbol and two-phase propagation
 // ---------------------------------------------------------------------------
-// Push phase: state.set() pushes DIRTY through callbag sinks
-// Pull phase: .get() lazily recomputes dirty nodes
-// Effects run after all DIRTY has propagated (depth reaches 0)
+// Phase 1: source of change sends DIRTY inline through callbag sinks
+//          (synchronous depth-first — returns when all downstream notified)
+// Phase 2: source triggers value emission (queued emitters drain)
+// Effects run after phase 2 completes (all values settled)
+//
+// No global depth counter — DIRTY propagation is synchronous, so when the
+// inline loop returns to the source, phase 1 is complete. Only `batch()`
+// defers phase 2 via `batchDepth`.
 // ---------------------------------------------------------------------------
 
 /** Sentinel value pushed via type 1 to indicate invalidation, not data */
@@ -15,34 +20,64 @@ export const DATA = 1;
 export const END = 2;
 
 // ---------------------------------------------------------------------------
-// Propagation batching (DIRTY)
+// Two-phase propagation
 // ---------------------------------------------------------------------------
 
-let depth = 0;
+let batchDepth = 0;
 const pending: Array<() => void> = [];
 let flushing = false;
 
+// Phase 2: value emission queue
+const pendingValueEmitters: Array<() => void> = [];
+let emittingValues = false;
+
 /**
- * Push DIRTY to all sinks in a set.
- * Effects are deferred until the outermost propagation completes.
+ * Queue a value emission for phase 2.
  */
-export function pushDirty(sinks: Set<any>): void {
-	depth++;
-	for (const sink of sinks) sink(DATA, DIRTY);
-	depth--;
-	if (depth === 0) flush();
+function queueValueEmission(fn: () => void): void {
+	pendingValueEmitters.push(fn);
 }
 
 /**
- * Schedule a callback (effect/subscriber) to run after DIRTY propagation.
- * If not inside a propagation, runs immediately.
+ * Two-phase change: queue value emission, send DIRTY inline, trigger phase 2.
+ * The single API for any source of change (state, stream, extras).
+ */
+export function pushChange(sinks: Set<any>, getValue: () => any): void {
+	queueValueEmission(() => {
+		const v = getValue();
+		for (const sink of sinks) sink(DATA, v);
+	});
+	// Phase 1: DIRTY propagates synchronously through the graph
+	for (const sink of sinks) sink(DATA, DIRTY);
+	// When control returns here, all downstream nodes have received DIRTY.
+	if (batchDepth === 0 && !emittingValues) runPhase2AndFlush();
+}
+
+/**
+ * Schedule a callback (effect/subscriber) to run after value propagation.
+ * If not inside propagation or value emission, runs immediately.
  */
 export function enqueueEffect(run: () => void): void {
-	if (depth === 0 && !flushing) {
+	if (batchDepth === 0 && !flushing && !emittingValues) {
 		run();
 	} else {
 		pending.push(run);
 	}
+}
+
+/**
+ * Run phase 2 (drain value emitters) then flush effects.
+ */
+function runPhase2AndFlush(): void {
+	if (emittingValues) return;
+	emittingValues = true;
+	// Drain value emission queue — new entries may be appended during processing
+	for (let i = 0; i < pendingValueEmitters.length; i++) {
+		pendingValueEmitters[i]();
+	}
+	pendingValueEmitters.length = 0;
+	emittingValues = false;
+	flush();
 }
 
 function flush(): void {
@@ -50,23 +85,23 @@ function flush(): void {
 	flushing = true;
 	// Process queue — effects may trigger new state changes
 	// which enqueue more effects, so loop until empty
-	while (pending.length > 0) {
-		const effect = pending.shift();
-		if (effect) effect();
+	for (let i = 0; i < pending.length; i++) {
+		pending[i]();
 	}
+	pending.length = 0;
 	flushing = false;
 }
 
 /**
- * Batch multiple state changes — effects run only when the outermost batch ends.
+ * Batch multiple state changes — phase 2 and effects run only when the outermost batch ends.
  */
 export function batch<T>(fn: () => T): T {
-	depth++;
+	batchDepth++;
 	try {
 		return fn();
 	} finally {
-		depth--;
-		if (depth === 0) flush();
+		batchDepth--;
+		if (batchDepth === 0 && !emittingValues) runPhase2AndFlush();
 	}
 }
 

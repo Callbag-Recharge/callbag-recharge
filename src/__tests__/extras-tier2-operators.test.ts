@@ -716,7 +716,7 @@ describe("retry", () => {
 
 	it("re-subscribes on error up to n times", () => {
 		let attempts = 0;
-		let completes: (() => void)[] = [];
+		const completes: (() => void)[] = [];
 		const makeSource = () =>
 			stream<number>((emit, _req, complete) => {
 				attempts++;
@@ -869,9 +869,12 @@ describe("rescue", () => {
 		expect(receivedError).toBe(err);
 		expect(r.get()).toBe(99);
 
+		// Rescue emits fallback initial value when switching
+		expect(values).toEqual([99]);
+
 		// Fallback should be live
 		fallback.set(100);
-		expect(values).toContain(100);
+		expect(values).toEqual([99, 100]);
 	});
 
 	it("forwards normal completion from source", () => {

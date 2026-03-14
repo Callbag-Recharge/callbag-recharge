@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // effect(deps, fn) — run side effects when deps change
 // ---------------------------------------------------------------------------
-// Connects once to all deps on creation. When DIRTY arrives, schedules
-// re-run after propagation completes. Uses beginDeferredStart/endDeferredStart
-// so that stream producers only start after all deps are connected.
+// v2: Two-phase push with dirty dep tracking
+// - Phase 1 (DIRTY): track dirty deps
+// - Phase 2 (value): when all dirty deps resolve, enqueue effect run
 // ---------------------------------------------------------------------------
 
 import {
@@ -21,11 +21,11 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 	let cleanupEffect: undefined | (() => void);
 	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
-	let pending = false;
+	const dirtyDeps = new Set<number>();
 
 	function run(): void {
 		if (disposed) return;
-		pending = false;
+		dirtyDeps.clear();
 
 		// Cleanup previous effect
 		if (cleanupEffect) cleanupEffect();
@@ -38,13 +38,24 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 
 	run();
 
-	for (const dep of deps) {
-		dep.source(START, (type: number, data: any) => {
+	for (let i = 0; i < deps.length; i++) {
+		const depIndex = i;
+		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) talkbacks.push(data);
-			if (type === DATA && data === DIRTY) {
-				if (!pending && !disposed) {
-					pending = true;
-					enqueueEffect(run);
+			if (type === DATA) {
+				if (data === DIRTY) {
+					// Phase 1: track dirty dep
+					if (!disposed) {
+						dirtyDeps.add(depIndex);
+					}
+				} else {
+					// Phase 2: value arrived from dep
+					if (dirtyDeps.has(depIndex)) {
+						dirtyDeps.delete(depIndex);
+						if (dirtyDeps.size === 0 && !disposed) {
+							enqueueEffect(run);
+						}
+					}
 				}
 			}
 		});

@@ -1,9 +1,9 @@
 // ---------------------------------------------------------------------------
 // subscribe(store, cb) — listen to value changes
 // ---------------------------------------------------------------------------
-// Connects as a callbag sink. Deferred like effects to avoid glitches.
-// Uses beginDeferredStart/endDeferredStart so that stream producers only
-// start after the full sink chain is wired (Option A + C).
+// v2: Receives values through callbag sinks (two-phase push)
+// - Phase 1 (DIRTY): mark pending
+// - Phase 2 (value): capture value, enqueue callback
 // ---------------------------------------------------------------------------
 
 import {
@@ -26,19 +26,21 @@ export function subscribe<T>(
 
 	beginDeferredStart();
 
-	// Option A: connect sink FIRST, so it receives DIRTY from producers
+	// Connect sink — receives DIRTY (phase 1) and values (phase 2)
 	store.source(START, (type: number, data: any) => {
 		if (type === START) talkback = data;
 		if (type === END) {
 			talkback = null;
 			return;
 		}
-		if (type === DATA && data === DIRTY) {
-			if (!pending) {
+		if (type === DATA) {
+			if (data === DIRTY) {
 				pending = true;
+			} else if (pending) {
+				// Phase 2: value arrived
+				pending = false;
+				const next = data as T;
 				enqueueEffect(() => {
-					pending = false;
-					const next = store.get();
 					if (!Object.is(next, prev)) {
 						const p = prev;
 						prev = next;
@@ -49,10 +51,10 @@ export function subscribe<T>(
 		}
 	});
 
-	// Then read initial value — may trigger connectUpstream → deferStart
+	// Read initial value
 	let prev: T = store.get();
 
-	// Option C: start queued producers now that the chain is fully wired
+	// Start queued producers now that the chain is fully wired
 	endDeferredStart();
 
 	return () => talkback?.(END);

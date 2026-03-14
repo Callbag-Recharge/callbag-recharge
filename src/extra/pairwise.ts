@@ -1,38 +1,61 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
-import { subscribe } from "../subscribe";
+import { DATA, DIRTY, END, START } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
  * Emits [prev, curr] pairs on each upstream change.
- * get() returns undefined until the second value arrives (i.e. until first upstream change).
+ * get() returns undefined until the first upstream change arrives.
  * The "prev" in the first pair is the value upstream held at subscription time.
+ *
+ * Raw-callbag two-phase node: forwards DIRTY in phase 1, creates pair
+ * and emits in phase 2. Glitch-free in diamond topologies.
  */
 export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 	return (input: Store<A>) => {
 		let currentPair: [A, A] | undefined;
+		let prev: A | undefined;
 		const sinks = new Set<(type: number, data?: unknown) => void>();
-		let started = false;
-		let unsub: (() => void) | null = null;
+		let connected = false;
+		let talkback: ((type: number) => void) | null = null;
+		let dirty = false;
 
-		function start() {
-			if (started) return;
-			started = true;
-			// subscribe tracks prev internally; we use it directly from the callback.
-			unsub = subscribe(input, (v, prev) => {
-				currentPair = [prev as A, v];
-				pushDirty(sinks);
+		function connectUpstream(): void {
+			prev = input.get();
+			input.source(START, (type: number, data: any) => {
+				if (type === START) {
+					talkback = data;
+					return;
+				}
+				if (type === DATA) {
+					if (data === DIRTY) {
+						if (!dirty) {
+							dirty = true;
+							for (const sink of sinks) sink(DATA, DIRTY);
+						}
+					} else if (dirty) {
+						dirty = false;
+						currentPair = [prev as A, data as A];
+						prev = data as A;
+						for (const sink of sinks) sink(DATA, currentPair);
+					}
+				}
+				if (type === END) {
+					talkback = null;
+					connected = false;
+					dirty = false;
+					for (const sink of sinks) sink(END, data);
+				}
 			});
 		}
 
-		function stop() {
-			if (!started) return;
-			started = false;
-			currentPair = undefined;
-			if (unsub) {
-				unsub();
-				unsub = null;
+		function disconnectUpstream(): void {
+			if (talkback) {
+				talkback(END);
+				talkback = null;
 			}
+			connected = false;
+			dirty = false;
+			currentPair = undefined;
 		}
 
 		const store: Store<[A, A] | undefined> = {
@@ -41,14 +64,20 @@ export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 			},
 			source(type: number, payload?: unknown) {
 				if (type === START) {
-					start();
 					const sink = payload as (type: number, data?: unknown) => void;
+					const wasEmpty = sinks.size === 0;
 					sinks.add(sink);
+					if (wasEmpty) {
+						connectUpstream();
+						connected = true;
+					}
 					sink(START, (t: number) => {
 						if (t === DATA) sink(DATA, currentPair);
 						if (t === END) {
 							sinks.delete(sink);
-							if (sinks.size === 0) stop();
+							if (sinks.size === 0 && connected) {
+								disconnectUpstream();
+							}
 						}
 					});
 				}

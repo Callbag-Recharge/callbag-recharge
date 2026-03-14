@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
+import { DATA, END, pushChange, START } from "../protocol";
 import type { Store } from "../types";
 
 /**
@@ -27,7 +27,7 @@ export function subject<T>(): Subject<T> {
 			if (completed) return;
 			if (sinks.size > 0 && Object.is(currentValue, value)) return;
 			currentValue = value;
-			if (sinks.size > 0) pushDirty(sinks);
+			if (sinks.size > 0) pushChange(sinks, () => currentValue);
 		},
 
 		error(err: unknown) {

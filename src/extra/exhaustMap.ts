@@ -1,5 +1,13 @@
 import { Inspector } from "../inspector";
-import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START } from "../protocol";
+import {
+	beginDeferredStart,
+	DATA,
+	DIRTY,
+	END,
+	endDeferredStart,
+	pushChange,
+	START,
+} from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -17,19 +25,26 @@ export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let started = false;
 
-		function emit(value: B | undefined) {
+		function emitChange(value: B | undefined) {
 			if (Object.is(currentValue, value)) return;
 			currentValue = value;
-			for (const sink of sinks) sink(DATA, DIRTY);
+			pushChange(sinks, () => currentValue);
 		}
 
 		function subscribeInner(innerStore: Store<B>) {
 			innerActive = true;
 			beginDeferredStart();
-			emit(innerStore.get());
+			emitChange(innerStore.get());
 			innerStore.source(START, (type: number, data: unknown) => {
 				if (type === START) innerTalkback = data as (type: number) => void;
-				if (type === DATA && data === DIRTY) emit(innerStore.get());
+				if (type === DATA) {
+					if (data === DIRTY) {
+						// Phase 1: inner is dirty
+					} else {
+						// Phase 2: value from inner
+						emitChange(data as B);
+					}
+				}
 				if (type === END) {
 					innerTalkback = null;
 					innerActive = false;

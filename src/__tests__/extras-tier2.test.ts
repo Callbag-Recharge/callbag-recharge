@@ -335,7 +335,7 @@ describe("merge", () => {
 		completeA!(); // a completes
 		b.set(10); // b should still work
 
-		expect(values).toContain(10);
+		expect(values).toEqual([10]);
 	});
 });
 
@@ -364,8 +364,7 @@ describe("concat", () => {
 		emitA!(2);
 		completeA!(); // a completes → subscribes to b
 
-		expect(values).toContain(1);
-		expect(values).toContain(2);
+		expect(values).toEqual([1, 2]);
 	});
 
 	it("tears down current source on unsubscribe", () => {
@@ -614,7 +613,7 @@ describe("switchMap teardown verification", () => {
 		});
 
 		inner1.set(11);
-		expect(values).toContain(11);
+		expect(values).toEqual([11]);
 
 		// Switch to inner2
 		outer.set(2);
@@ -622,11 +621,11 @@ describe("switchMap teardown verification", () => {
 
 		// inner1 changes should NOT propagate
 		inner1.set(99);
-		expect(values).not.toContain(99);
+		expect(values).toEqual([]);
 
 		// inner2 changes should propagate
 		inner2.set(21);
-		expect(values).toContain(21);
+		expect(values).toEqual([21]);
 
 		unsub();
 
@@ -653,7 +652,7 @@ describe("concatMap teardown verification", () => {
 		});
 
 		inner.set(2);
-		expect(values).toContain(2);
+		expect(values).toEqual([2]);
 
 		unsub();
 
@@ -680,7 +679,7 @@ describe("exhaustMap teardown verification", () => {
 		});
 
 		inner.set(2);
-		expect(values).toContain(2);
+		expect(values).toEqual([2]);
 
 		unsub();
 

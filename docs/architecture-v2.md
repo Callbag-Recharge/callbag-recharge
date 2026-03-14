@@ -117,18 +117,17 @@ This replaces the v1 limitation where `equals` on derived was pull-phase only. I
 
 ## `get()` semantics
 
-### Blocking during pending state
+### Resolving during pending state
 
-In v2, `get()` returns the cached value. But during the window between DIRTY arrival and value resolution, the cache is stale. Rather than silently returning stale data:
+In v2, `get()` returns the cached value when the store is settled. During the window between DIRTY arrival and value resolution (pending state), `get()` recomputes on demand by calling `fn()` — which recursively pulls through the dep chain (states are always settled, pending deriveds recompute recursively). This preserves the v1 guarantee that `get()` always returns a consistent value.
 
-- `get()` on a fully resolved store: returns cached value (fast, no computation)
-- `get()` on a pending store: **blocks** — either throws an error or returns a sentinel indicating the value is not yet settled
-
-This is the honest API. If users want reactive behavior, they use effects or subscribers. `get()` is "give me the settled, consistent value."
+- `get()` on a connected, settled store: returns cached value (fast, no computation)
+- `get()` on a connected, pending store: recomputes on demand (recursive pull). The result is NOT cached — phase 2 handles proper cache update and sink emission.
+- `get()` on an unconnected store: always recomputes (v1 lazy semantics, no cache)
 
 ### Rationale
 
-In the v1 pull model, `get()` was always safe because it recomputed on-demand. In v2, values arrive via push, so there's a real gap between invalidation and resolution. Blocking `get()` prevents consumers from seeing inconsistent intermediate states.
+Throwing on pending `get()` was considered but rejected — it forces callers to handle an error for a condition that can be resolved synchronously. Since deps' `get()` recursively resolves (states always have their value set before DIRTY propagates, pending deriveds recompute), the pull always succeeds. The tradeoff: a pending `get()` may recompute a value that phase 2 will recompute again moments later. This is rare in practice — `get()` during propagation only happens from imperative code outside the reactive graph.
 
 ### Future: JSX/template integration
 
@@ -195,6 +194,58 @@ Extra modules that are callbag operators/sources need to participate in the two-
 **Sinks** (`forEach`):
 - Terminal nodes. Receive DIRTY (enqueue), receive value (run callback).
 
+### Glitch behavior in extras (part 2 concern)
+
+The v2 core (state, derived, effect, subscribe) is glitch-free in diamond topologies. Extras, however, fall into three categories with different glitch guarantees:
+
+#### 1. Simple passthrough extras — glitch-free (done)
+
+`take`, `skip`, `tap`, `remember`, `pairwise`, `distinctUntilChanged`
+
+These are structurally equivalent to single-dep derived nodes. They participate in two-phase by using raw callbag to forward DIRTY in phase 1 and emit transformed values in phase 2. They use a `dirty` flag to coalesce batch DIRTYs (same role as derived's `dirtyDeps` Set for a single dep). They forward upstream END to downstream sinks, matching the standard callbag convention.
+
+The pattern (simplified — actual implementations add operator-specific logic):
+```ts
+input.source(START, (type, data) => {
+	if (type === DATA) {
+		if (data === DIRTY) {
+			if (!dirty) {
+				dirty = true;
+				// Phase 1: forward DIRTY to downstream
+				for (const sink of sinks) sink(DATA, DIRTY);
+			}
+		} else if (dirty) {
+			dirty = false;
+			// Phase 2: transform and emit value
+			currentValue = transform(data);
+			for (const sink of sinks) sink(DATA, currentValue);
+		}
+	}
+	if (type === END) {
+		// Forward upstream completion to downstream sinks
+		for (const sink of sinks) sink(END, data);
+	}
+});
+```
+
+**`tap` timing note:** `tap`'s side-effect function runs synchronously inline during phase 2 value delivery, matching the behavior of both callbag-tap and RxJS tap. This differs from the old subscribe-based implementation where fn() was deferred to the effect flush phase.
+
+#### 2. Time-based extras — inherently glitchy
+
+`debounce`, `throttle`, `delay`, `timeout`, `bufferTime`, `buffer`, `sample`
+
+These use timers (`setTimeout`/`setInterval`) that fire outside any propagation cycle. Their value emissions always start a new DIRTY+value cycle via `pushChange()`. This is correct behavior — like RxJS, time-based operators are natural glitch boundaries.
+
+#### 3. Complex mapping extras — glitchy, hard to fix
+
+`switchMap`, `flat`, `concatMap`, `exhaustMap`, `rescue`, `retry`
+
+These manage inner subscription lifecycles. The outer value triggers creation of a new inner source, whose initial value becomes the output. Making these fully two-phase-aware would require tracking dirty state across inner/outer subscription boundaries — the outer DIRTY means "my output will change" but the actual output value depends on the inner source which may not exist yet.
+
+For now, these follow the RxJS model: glitches are possible when these operators appear in diamond topologies alongside direct paths from the same source. In practice this topology is uncommon — these extras typically wrap independent async sources, not branches of a shared state graph.
+
+**Current implementation detail:** Raw-callbag extras (rescue, retry) have empty `if (data === DIRTY) {}` handlers that swallow DIRTY. subscribe()-based extras (switchMap, flat, etc.) use subscribe for the outer and raw callbag for the inner, with the same swallow pattern on the inner. Both call `pushChange()` to emit values, starting a new cycle.
+
 ---
 
 ## Comparison with established signal libraries
@@ -204,7 +255,7 @@ Extra modules that are callbag operators/sources need to participate in the two-
 | Data transport | Dual: DIRTY via callbag, values via get() | Single: both via callbag | Dual: flags via notify, values via refresh | Dual: flags via notify, values via updateIfNecessary |
 | Derived caching | No cache (always recompute) | Cached, updated on value arrival | Cached, lazy recompute on read | Cached, lazy recompute on read |
 | Diamond solution | Deferred pull after DIRTY propagation | Two-phase push with dep counting | Recursive depth-first refresh | Height-based topological sort |
-| `get()` during propagation | Always works (recomputes) | Blocks if pending | Always works (triggers refresh) | Always works (triggers recompute) |
+| `get()` during propagation | Always works (recomputes) | Recomputes if pending (not cached) | Always works (triggers refresh) | Always works (triggers recompute) |
 | Memoization | Pull-phase only (equals on derived) | Push-phase (equals suppresses downstream) | Push-phase (version check) | Push-phase (equality check) |
 | Batching | Defers effects only | Defers value emission + effects | Defers effects only | Defers effects; Solid 2.0 defers writes |
 
@@ -212,20 +263,103 @@ Extra modules that are callbag operators/sources need to participate in the two-
 
 ## Migration plan
 
-### Phase 1: Core refactor
-1. Add caching + pending state to `derived`
-2. Change `state.set()` to two-phase: push DIRTY, then emit value after propagation
-3. Update `protocol.ts` to orchestrate phase 1 → phase 2 transition
-4. Update `effect` and `subscribe` to receive values via callbag sinks
-5. Make `get()` block on pending stores
-6. Update `equals` on derived to suppress downstream emission (push-phase memoization)
+### Phase 1: Core refactor ✅
+1. ✅ Add caching + pending state to `derived`
+2. ✅ Change `state.set()` to two-phase: push DIRTY, then emit value after propagation
+3. ✅ Update `protocol.ts` to orchestrate phase 1 → phase 2 transition
+4. ✅ Update `effect` and `subscribe` to receive values via callbag sinks
+5. ✅ Make `get()` recompute on demand if pending (not blocking — see rationale above)
+6. ✅ Update `equals` on derived to suppress downstream emission (push-phase memoization)
 
-### Phase 2: Extra modules
-7. Update all operators to handle two-phase protocol (DIRTY + value)
+### Phase 2: Extra modules (partially done)
+7. ✅ Rewrite simple passthrough extras (`take`, `skip`, `tap`, `remember`, `pairwise`, `distinctUntilChanged`) as raw-callbag two-phase nodes — forward DIRTY, emit transformed values. Glitch-free in diamond topologies. END forwarded from upstream to downstream (matches callbag convention).
 8. Update `combine` to use natural dep counting (replaces ad-hoc glitch prevention)
 9. Update sources and sinks
+10. ✅ Time-based extras (`debounce`, `throttle`, `delay`, `timeout`, `bufferTime`, `buffer`, `sample`) keep `pushChange()`-based implementation — they are natural glitch boundaries.
+11. ✅ Complex mapping extras (`switchMap`, `flat`, `concatMap`, `exhaustMap`, `rescue`, `retry`) keep current implementation — glitches accepted in diamond topologies (same as RxJS).
 
-### Phase 3: Validation
-10. Update all tests for new semantics (blocking `get()`, cached derived)
-11. Benchmark against v1 to verify no regression
-12. Update documentation
+### Phase 3: Validation (partially done)
+12. ✅ Update all tests for new semantics (blocking `get()`, cached derived)
+13. ✅ Add diamond-topology tests for passthrough extras to verify glitch-free behavior
+14. ✅ Document glitch boundaries for time-based and complex extras (in test sections 5, 7, 8)
+15. Benchmark against v1 to verify no regression
+16. ✅ Update documentation
+
+---
+
+## Test inventory
+
+### Existing tests (`two-phase.test.ts`) — added in Phase 1
+
+These tests verify the core two-phase protocol and current extra behavior. They use strict `toEqual` assertions for exact emission order and count.
+
+**Two-phase protocol — raw callbag signals (5 tests):**
+- state: `[DIRTY, value]` per `set()`
+- derived: single `[DIRTY, value]` per dep change
+- derived with multiple deps in batch: single `[DIRTY, value]`
+- stream: `[DIRTY, value]` per `emit()`
+- subject: `[DIRTY, value]` per `next()`
+
+**Diamond topology — core glitch-free (7 tests):**
+- derived computes exactly once in simple diamond
+- batch + diamond = single computation
+- deep diamond chain (4 levels): no intermediate glitches
+- effect fires exactly once per change in diamond
+- subscribe fires exactly once per change in diamond
+- `equals` suppresses unchanged values
+- `equals` suppression in diamond: downstream sees suppressed value but still recomputes for changed deps
+
+**Emission counts — raw-callbag passthrough extras (7 tests):**
+- take: fires exactly n times
+- skip: fires exactly (total - n) times
+- distinctUntilChanged: exact duplicate suppression
+- tap: fires same count as upstream
+- remember: fires same count as upstream
+- pairwise: fires on each change after first
+- subject: fires per distinct `next()`
+
+**Emission counts — complex extras (4 tests):**
+- switchMap: exact sequence on outer+inner changes `[11, 20, 21]`
+- flat: exact sequence on inner switch `[11, 20, 21]`
+- rescue: includes fallback initial value `[99, 100]`
+- retry: exact producer count across retries
+
+**Re-entrancy and batch ordering (4 tests):**
+- `state.set()` inside subscribe callback: correct order
+- batch coalesces: single emission for final value
+- nested batch: defers until outermost
+- effect-triggered state change: derived recomputes correctly
+
+**Diamond topology — extras glitch boundaries (3 tests):**
+- tap in diamond: correct values on both paths
+- switchMap: correct final value
+- sample: fires only on notifier
+
+### Tests added in Phase 2
+
+**Passthrough extras — two-phase protocol verification (6 tests):**
+- take forwards `[DIRTY, value]` at raw callbag level
+- skip forwards `[DIRTY, value]` after skip phase (silent during skip)
+- tap forwards `[DIRTY, value]` at raw callbag level
+- remember forwards `[DIRTY, value]` at raw callbag level
+- pairwise forwards `[DIRTY, value]` at raw callbag level
+- distinctUntilChanged forwards `[DIRTY, value]` (emits cached value on duplicate for resolution)
+
+**Passthrough extras — diamond glitch-free (6 tests):**
+- take in diamond: derived downstream computes exactly once
+- skip in diamond: derived downstream computes exactly once
+- tap in diamond: derived downstream computes exactly once
+- pairwise in diamond: derived downstream computes exactly once
+- distinctUntilChanged in diamond: derived downstream computes exactly once
+- remember in diamond: derived downstream computes exactly once
+
+**Complex extras — diamond glitch documentation (3 tests):**
+- switchMap in diamond: documents exact fire count (may be >1), verifies correct final value
+- flat in diamond: documents exact fire count, verifies correct final value
+- rescue in diamond: documents exact fire count, verifies correct final value
+
+### Tests still to add
+
+**Time-based extras — isolation tests:**
+- debounce/throttle/delay: verify `pushChange` fires independently of any propagation cycle
+- Verify downstream derived recomputes correctly after timer-based emission

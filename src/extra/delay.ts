@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
+import { DATA, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -24,7 +24,7 @@ export function delay<A>(ms: number): StoreOperator<A, A | undefined> {
 					timers.delete(id);
 					if (!Object.is(currentValue, v)) {
 						currentValue = v;
-						pushDirty(sinks);
+						pushChange(sinks, () => currentValue);
 					}
 				}, ms);
 				timers.add(id);

@@ -1,5 +1,13 @@
 import { Inspector } from "../inspector";
-import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START } from "../protocol";
+import {
+	beginDeferredStart,
+	DATA,
+	DIRTY,
+	END,
+	endDeferredStart,
+	pushChange,
+	START,
+} from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
@@ -14,10 +22,10 @@ export function retry<A>(n: number): StoreOperator<A, A> {
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let started = false;
 
-		function emit(value: A) {
+		function emitChange(value: A) {
 			if (Object.is(currentValue, value)) return;
 			currentValue = value;
-			for (const sink of sinks) sink(DATA, DIRTY);
+			pushChange(sinks, () => currentValue);
 		}
 
 		function connectInput() {
@@ -27,10 +35,17 @@ export function retry<A>(n: number): StoreOperator<A, A> {
 			}
 			beginDeferredStart();
 			const initial = input.get();
-			if (initial !== undefined) emit(initial as A);
+			if (initial !== undefined) emitChange(initial as A);
 			input.source(START, (type: number, data: unknown) => {
 				if (type === START) inputTalkback = data as (type: number) => void;
-				if (type === DATA && data === DIRTY) emit(input.get());
+				if (type === DATA) {
+					if (data === DIRTY) {
+						// Phase 1: input is dirty
+					} else {
+						// Phase 2: value from input
+						emitChange(data as A);
+					}
+				}
 				if (type === END) {
 					inputTalkback = null;
 					if (data !== undefined && retriesLeft > 0) {

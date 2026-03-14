@@ -59,7 +59,7 @@ describe("Callbag protocol", () => {
 		expect(dirtyCount).toBe(1);
 	});
 
-	it("pushes DIRTY symbol (not values) on state change", () => {
+	it("pushes DIRTY then value on state change (two-phase)", () => {
 		const count = state(0);
 		const received: any[] = [];
 
@@ -69,7 +69,7 @@ describe("Callbag protocol", () => {
 
 		count.set(1);
 		count.set(2);
-		expect(received).toEqual([DIRTY, DIRTY]);
+		expect(received).toEqual([DIRTY, 1, DIRTY, 2]);
 	});
 });
 

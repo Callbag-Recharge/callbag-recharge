@@ -474,7 +474,7 @@ describe("concatMap", () => {
 		outer.set("b"); // queued
 		completeInnerA!(); // innerA completes → process "b"
 
-		expect(values).toContain(99);
+		expect(values).toEqual([99]);
 	});
 
 	it("discards queue on unsubscribe", () => {
@@ -548,7 +548,7 @@ describe("exhaustMap", () => {
 		completeInner!(); // innerA completes → innerActive = false
 		outer.set(2); // now accepted → innerB
 
-		expect(values).toContain(99);
+		expect(values).toEqual([99]);
 	});
 
 	it("tears down inner when last sink disconnects", () => {

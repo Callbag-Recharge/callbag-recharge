@@ -15,6 +15,7 @@ export {
 	DIRTY,
 	deferStart,
 	endDeferredStart,
+	pushChange,
 } from "./protocol";
 // Core primitives
 export { state } from "./state";

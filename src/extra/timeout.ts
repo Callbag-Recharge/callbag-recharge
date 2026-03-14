@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
+import { DATA, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -43,7 +43,7 @@ export function timeout<A>(ms: number): StoreOperator<A, A> {
 			unsub = subscribe(input, (v) => {
 				currentValue = v;
 				resetTimer();
-				pushDirty(sinks);
+				pushChange(sinks, () => currentValue);
 			});
 		}
 

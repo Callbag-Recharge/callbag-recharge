@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, pushDirty, START } from "../protocol";
+import { DATA, DIRTY, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -29,11 +29,11 @@ export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 
 			notifier.source(START, (type: number, data: unknown) => {
 				if (type === START) notifierTalkback = data as (type: number) => void;
-				if (type === DATA && data === DIRTY && currentBuffer.length > 0) {
+				if (type === DATA && data !== DIRTY && currentBuffer.length > 0) {
 					flushedValue = currentBuffer;
 					Object.freeze(flushedValue);
 					currentBuffer = [];
-					pushDirty(sinks);
+					pushChange(sinks, () => flushedValue);
 				}
 				if (type === END) notifierTalkback = null;
 			});

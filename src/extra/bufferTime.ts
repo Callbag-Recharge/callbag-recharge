@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
+import { DATA, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -32,7 +32,7 @@ export function bufferTime<A>(ms: number): StoreOperator<A, A[]> {
 					flushedValue = currentBuffer;
 					Object.freeze(flushedValue);
 					currentBuffer = [];
-					pushDirty(sinks);
+					pushChange(sinks, () => flushedValue);
 				}
 			}, ms);
 		}

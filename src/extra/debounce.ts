@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushDirty, START } from "../protocol";
+import { DATA, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -27,7 +27,7 @@ export function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
 					timer = null;
 					if (!Object.is(currentValue, pendingValue)) {
 						currentValue = pendingValue;
-						pushDirty(sinks);
+						pushChange(sinks, () => currentValue);
 					}
 				}, ms);
 			});

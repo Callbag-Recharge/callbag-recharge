@@ -1,12 +1,11 @@
 // ---------------------------------------------------------------------------
 // stream(producer) — a store backed by an event source
 // ---------------------------------------------------------------------------
-// Push-based: producer calls emit() on its own schedule
-// Pull-based: producer calls request(handler), .pull() invokes the handler
+// v2: Two-phase push — emit() queues value emission + pushes DIRTY
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
-import { DATA, deferStart, END, pushDirty, START } from "./protocol";
+import { DATA, deferStart, END, pushChange, START } from "./protocol";
 import type { StoreOptions, StreamProducer, StreamStore } from "./types";
 
 export function stream<T>(
@@ -25,7 +24,7 @@ export function stream<T>(
 		if (completed) return;
 		if (currentValue !== undefined && eq(currentValue as T, value)) return;
 		currentValue = value;
-		pushDirty(sinks);
+		pushChange(sinks, () => currentValue);
 	}
 
 	function request(handler: () => void): void {

@@ -1,4 +1,12 @@
-import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START } from "../protocol";
+import {
+	beginDeferredStart,
+	DATA,
+	DIRTY,
+	END,
+	endDeferredStart,
+	pushChange,
+	START,
+} from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -17,11 +25,10 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let started = false;
 
-		function emit(value: T | undefined) {
+		function emitChange(value: T | undefined) {
 			if (Object.is(currentValue, value)) return;
 			currentValue = value;
-			// Push DIRTY to our own sinks
-			for (const sink of sinks) sink(DATA, DIRTY);
+			pushChange(sinks, () => currentValue);
 		}
 
 		function subscribeInner(innerStore: Store<T>) {
@@ -34,14 +41,19 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 			beginDeferredStart();
 
 			// Emit initial value of the new inner store
-			emit(innerStore.get());
+			emitChange(innerStore.get());
 
 			innerStore.source(START, (type: number, data: unknown) => {
 				if (type === START) {
 					innerTalkback = data as (type: number) => void;
 				}
-				if (type === DATA && data === DIRTY) {
-					emit(innerStore.get());
+				if (type === DATA) {
+					if (data === DIRTY) {
+						// Phase 1: inner is dirty, will get value in phase 2
+					} else {
+						// Phase 2: value arrived from inner
+						emitChange(data as T);
+					}
 				}
 				// Inner END is silently absorbed — we wait for the next inner
 				// from the outer store
@@ -61,7 +73,7 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 						innerTalkback(END);
 						innerTalkback = null;
 					}
-					emit(undefined);
+					emitChange(undefined);
 				} else {
 					subscribeInner(innerStore);
 				}

@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, pushDirty, START } from "../protocol";
+import { DATA, DIRTY, END, pushChange, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -45,7 +45,7 @@ export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 			// Input: use subscribe() with a completed guard so any already-enqueued
 			// input effects are no-ops after complete() runs.
 			inputUnsub = subscribe(input, () => {
-				if (!completed) pushDirty(sinks);
+				if (!completed) pushChange(sinks, () => input.get());
 			});
 			// Notifier: raw callbag so DIRTY is detected in-band during propagation,
 			// before the flush runs any enqueued effects from the same batch.
