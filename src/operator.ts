@@ -19,7 +19,6 @@ export function operator<B>(
 	let currentValue: B | undefined = opts?.initial;
 	const sinks = new Set<any>();
 	let upstreamTalkbacks: Array<((type: number) => void) | null> = [];
-	let connected = false;
 	let handler: ((depIndex: number, type: number, data: any) => void) | null = null;
 
 	function connectUpstream(): void {
@@ -67,7 +66,6 @@ export function operator<B>(
 	function disconnectUpstream(): void {
 		for (const tb of upstreamTalkbacks) tb?.(END);
 		upstreamTalkbacks = [];
-		connected = false;
 		handler = null;
 	}
 
@@ -83,7 +81,6 @@ export function operator<B>(
 				sinks.add(sink);
 				if (wasEmpty) {
 					connectUpstream();
-					connected = true;
 				}
 				sink(START, (t: number) => {
 					if (t === DATA) sink(DATA, currentValue);

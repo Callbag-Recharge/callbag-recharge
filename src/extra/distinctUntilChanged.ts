@@ -1,51 +1,51 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, START } from "../protocol";
+import { DATA, END, RESOLVED, START, STATE } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
- * Filters out consecutive duplicate values using the provided equality
- * function (default: Object.is). When the upstream value hasn't changed,
- * emits the cached value to resolve downstream dirty deps without
- * triggering further computation (downstream subscribe dedup handles it).
+ * Filters out consecutive duplicate values. When upstream emits a value equal
+ * to the cached one, sends RESOLVED downstream (enabling subtree skipping)
+ * instead of re-emitting the unchanged value.
  *
- * Raw-callbag two-phase node: forwards DIRTY in phase 1, checks equality
- * and emits in phase 2. Glitch-free in diamond topologies.
+ * Stateful: maintains cached value for equality comparison. get() returns
+ * cached value when connected, delegates to input.get() when disconnected.
+ *
+ * v3: forwards DIRTY on type 3 STATE; on type 1 DATA checks equality and
+ * emits or sends RESOLVED.
  */
 export function distinctUntilChanged<A>(eq?: (a: A, b: A) => boolean): StoreOperator<A, A> {
 	const eqFn = eq ?? Object.is;
 	return (input: Store<A>) => {
-		let currentValue: A = input.get();
+		let cachedValue: A = input.get();
+		let hasCached = false;
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let connected = false;
 		let talkback: ((type: number) => void) | null = null;
-		let dirty = false;
 
 		function connectUpstream(): void {
-			currentValue = input.get();
+			cachedValue = input.get();
+			hasCached = true;
 			input.source(START, (type: number, data: any) => {
 				if (type === START) {
 					talkback = data;
 					return;
 				}
+				if (type === STATE) {
+					for (const sink of sinks) sink(STATE, data);
+				}
 				if (type === DATA) {
-					if (data === DIRTY) {
-						if (!dirty) {
-							dirty = true;
-							for (const sink of sinks) sink(DATA, DIRTY);
-						}
-					} else if (dirty) {
-						dirty = false;
-						if (!eqFn(currentValue, data as A)) {
-							currentValue = data as A;
-						}
-						// Always emit (possibly cached) to resolve downstream dirty deps
-						for (const sink of sinks) sink(DATA, currentValue);
+					if (!hasCached || !eqFn(cachedValue, data as A)) {
+						cachedValue = data as A;
+						hasCached = true;
+						for (const sink of sinks) sink(DATA, cachedValue);
+					} else {
+						// Duplicate — resolve downstream without emitting a new value
+						for (const sink of sinks) sink(STATE, RESOLVED);
 					}
 				}
 				if (type === END) {
 					talkback = null;
 					connected = false;
-					dirty = false;
 					for (const sink of sinks) sink(END, data);
 				}
 			});
@@ -57,13 +57,12 @@ export function distinctUntilChanged<A>(eq?: (a: A, b: A) => boolean): StoreOper
 				talkback = null;
 			}
 			connected = false;
-			dirty = false;
 		}
 
 		const store: Store<A> = {
 			get() {
-				// Delegate to input when not active so get() is always live
-				return connected ? currentValue : input.get();
+				// Delegate to input when not connected so get() is always live
+				return connected ? cachedValue : input.get();
 			},
 			source(type: number, payload?: unknown) {
 				if (type === START) {
@@ -75,7 +74,7 @@ export function distinctUntilChanged<A>(eq?: (a: A, b: A) => boolean): StoreOper
 						connected = true;
 					}
 					sink(START, (t: number) => {
-						if (t === DATA) sink(DATA, currentValue);
+						if (t === DATA) sink(DATA, cachedValue);
 						if (t === END) {
 							sinks.delete(sink);
 							if (sinks.size === 0 && connected) {

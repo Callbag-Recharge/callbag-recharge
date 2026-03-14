@@ -16,15 +16,18 @@ export function subscribe<T>(
 
 	beginDeferredStart();
 
+	// `prev` is declared after store.source() but the closure only reads it
+	// after endDeferredStart() triggers producers. By that point prev is already
+	// set to store.get(), so the first emission is suppressed if the value
+	// hasn't changed. Order: register sink → read baseline → start producers.
 	store.source(START, (type: number, data: any) => {
 		if (type === START) talkback = data;
 		if (type === END) {
 			talkback = null;
 			return;
 		}
-		// Equality check is intentional: suppresses duplicate emissions (e.g. a
-		// state store that set() was called on with an equal value, or a batch that
-		// coalesced multiple sets back to the original value).
+		// Equality check suppresses duplicate emissions (e.g. a batch that
+		// coalesced multiple set() calls back to the original value).
 		if (type === 1 /* DATA */) {
 			const next = data as T;
 			if (!Object.is(next, prev)) {
@@ -35,7 +38,10 @@ export function subscribe<T>(
 		}
 	});
 
-	// Read initial value — sets prev baseline
+	// Baseline: captures current value before producers start. Aligns with
+	// RxJS Observable semantics — no initial-value callback on subscribe.
+	// (Unlike Svelte stores, which call subscribers immediately with the
+	// current value. Our callbag convention: reactive changes only.)
 	let prev: T | undefined = store.get();
 
 	endDeferredStart();

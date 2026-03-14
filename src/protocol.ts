@@ -25,6 +25,15 @@ export const STATE = 3;
 
 let batchDepth = 0;
 const deferredEmissions: Array<() => void> = [];
+
+// `draining` prevents re-entrant drain when a nested batch() call ends while
+// the outer drain loop is already running. Without it, the inner batch's
+// finally block would see batchDepth===0 and start a second drain, racing the
+// outer loop — potentially double-processing items or clearing the array mid-
+// iteration. With draining=true, the inner batch skips its drain; any items it
+// pushes are picked up by the outer loop (the `for` condition re-evaluates
+// `deferredEmissions.length` on every iteration, so appends during drain are
+// naturally included in the same pass).
 let draining = false;
 
 export function batch<T>(fn: () => T): T {

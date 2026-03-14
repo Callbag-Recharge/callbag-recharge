@@ -1,7 +1,12 @@
 // ---------------------------------------------------------------------------
 // state(initial) — a writable store
 // ---------------------------------------------------------------------------
-// Sugar over Producer pattern with equality-checked set().
+// Standalone implementation (not built on top of producer()) for a simpler
+// code path: no fn, no lazy-start machinery, no autoDirty option needed.
+// The architecture document describes state as "sugar over producer" to
+// communicate the conceptual relationship, not the implementation strategy.
+// Both implementations are equivalent; this one is leaner for the common case.
+//
 // Type 3 DIRTY propagates immediately. Type 1 value defers during batch.
 // Coalesces multiple set() calls during batch into a single emission.
 // ---------------------------------------------------------------------------

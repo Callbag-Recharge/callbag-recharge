@@ -1,14 +1,17 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, START } from "../protocol";
+import { DATA, END, START, STATE } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
- * Skips the first `n` value changes from upstream, then passes through
- * all subsequent ones. Only counts actual changes (not the initial read).
+ * Skips the first `n` value changes from upstream, then passes through all
+ * subsequent ones.
  *
- * Raw-callbag two-phase node: suppresses DIRTY during skip phase,
- * forwards DIRTY and emits values after skip threshold.
- * Glitch-free in diamond topologies.
+ * Stateful: maintains own cached value. get() returns undefined until the
+ * first post-skip value arrives, then returns the last forwarded value.
+ *
+ * v3: type 3 STATE carries signals. During the skip phase (count < n),
+ * STATE signals are not forwarded and DATA values are silently consumed.
+ * After n values have been skipped, STATE and DATA are forwarded normally.
  */
 export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
@@ -17,7 +20,6 @@ export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 		let emissionCount = 0;
 		let connected = false;
 		let talkback: ((type: number) => void) | null = null;
-		let dirty = false;
 
 		function connectUpstream(): void {
 			input.source(START, (type: number, data: any) => {
@@ -25,27 +27,24 @@ export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 					talkback = data;
 					return;
 				}
-				if (type === DATA) {
-					if (data === DIRTY) {
-						if (!dirty) {
-							dirty = true;
-							if (emissionCount >= n) {
-								for (const sink of sinks) sink(DATA, DIRTY);
-							}
-						}
-					} else if (dirty) {
-						dirty = false;
-						emissionCount++;
-						if (emissionCount > n) {
-							currentValue = data;
-							for (const sink of sinks) sink(DATA, currentValue);
-						}
+				if (type === STATE) {
+					if (emissionCount >= n) {
+						for (const sink of sinks) sink(STATE, data);
 					}
+					// else: will suppress this value — don't forward DIRTY yet
+				}
+				if (type === DATA) {
+					emissionCount++;
+					if (emissionCount > n) {
+						currentValue = data;
+						for (const sink of sinks) sink(DATA, currentValue);
+					}
+					// During skip phase: silently consume. No RESOLVED needed since
+					// DIRTY was never forwarded — downstream has nothing to resolve.
 				}
 				if (type === END) {
 					talkback = null;
 					connected = false;
-					dirty = false;
 					for (const sink of sinks) sink(END, data);
 				}
 			});
@@ -57,7 +56,6 @@ export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 				talkback = null;
 			}
 			connected = false;
-			dirty = false;
 		}
 
 		const store: Store<A | undefined> = {

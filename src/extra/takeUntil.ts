@@ -1,16 +1,19 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, pushChange, START } from "../protocol";
-import { subscribe } from "../subscribe";
+import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START, STATE } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
- * Passes through all values from input until notifier emits a new value, then completes.
+ * Passes through all values from input until notifier emits, then completes.
  * Upstream subscriptions are torn down when the notifier fires.
  * After completion, get() returns the frozen last value.
  *
- * The notifier is subscribed via raw callbag protocol so that completion is detected
- * in-band during DIRTY propagation — preventing any input emission that was enqueued
- * in the same batch from leaking through after the notifier fires.
+ * Stateful: maintains frozen value after completion; get() delegates to
+ * input.get() while active, returns cached frozen value after completion.
+ *
+ * v3: both input and notifier are subscribed via raw callbag. Completion is
+ * triggered on type 3 STATE(DIRTY) from the notifier — in-band during DIRTY
+ * propagation, before any type 1 DATA emissions in the same batch reach
+ * downstream. Input STATE/DATA signals are forwarded directly to sinks.
  */
 export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 	return (input: Store<A>) => {
@@ -18,16 +21,16 @@ export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 		let completed = false;
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let started = false;
-		let inputUnsub: (() => void) | null = null;
+		let inputTalkback: ((type: number) => void) | null = null;
 		let notifierTalkback: ((type: number) => void) | null = null;
 
 		function complete() {
 			if (completed) return;
 			frozenValue = input.get();
 			completed = true;
-			if (inputUnsub) {
-				inputUnsub();
-				inputUnsub = null;
+			if (inputTalkback) {
+				inputTalkback(END);
+				inputTalkback = null;
 			}
 			if (notifierTalkback) {
 				notifierTalkback(END);
@@ -42,18 +45,37 @@ export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 		function start() {
 			if (started) return;
 			started = true;
-			// Input: use subscribe() with a completed guard so any already-enqueued
-			// input effects are no-ops after complete() runs.
-			inputUnsub = subscribe(input, () => {
-				if (!completed) pushChange(sinks, () => input.get());
+
+			beginDeferredStart();
+
+			// Input: raw callbag — forwards STATE and DATA to downstream sinks
+			input.source(START, (type: number, data: unknown) => {
+				if (type === START) {
+					inputTalkback = data as (type: number) => void;
+					return;
+				}
+				if (completed) return;
+				if (type === STATE) {
+					for (const sink of sinks) sink(STATE, data);
+				}
+				if (type === DATA) {
+					for (const sink of sinks) sink(DATA, data);
+				}
+				if (type === END) {
+					inputTalkback = null;
+					complete();
+				}
 			});
-			// Notifier: raw callbag so DIRTY is detected in-band during propagation,
-			// before the flush runs any enqueued effects from the same batch.
+
+			// Notifier: raw callbag so STATE(DIRTY) is detected in-band during
+			// DIRTY propagation, before type 1 DATA emissions flush in the same batch.
 			notifier.source(START, (type: number, data: unknown) => {
 				if (type === START) notifierTalkback = data as (type: number) => void;
-				if (type === DATA && data === DIRTY) complete();
+				if (type === STATE && data === DIRTY) complete();
 				if (type === END) notifierTalkback = null;
 			});
+
+			endDeferredStart();
 		}
 
 		const store: Store<A> = {
@@ -68,16 +90,16 @@ export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 						sink(END);
 						return;
 					}
-					start();
 					sinks.add(sink);
+					if (!started) start();
 					sink(START, (t: number) => {
 						if (t === DATA) sink(DATA, store.get());
 						if (t === END) {
 							sinks.delete(sink);
 							if (sinks.size === 0 && !completed) {
-								if (inputUnsub) {
-									inputUnsub();
-									inputUnsub = null;
+								if (inputTalkback) {
+									inputTalkback(END);
+									inputTalkback = null;
 								}
 								if (notifierTalkback) {
 									notifierTalkback(END);

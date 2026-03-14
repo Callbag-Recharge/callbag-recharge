@@ -1,5 +1,5 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, START } from "../protocol";
+import { DATA, END, START, STATE } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
@@ -7,8 +7,10 @@ import type { Store, StoreOperator } from "../types";
  * get() returns undefined until the first upstream change arrives.
  * The "prev" in the first pair is the value upstream held at subscription time.
  *
- * Raw-callbag two-phase node: forwards DIRTY in phase 1, creates pair
- * and emits in phase 2. Glitch-free in diamond topologies.
+ * Stateful: maintains own cached [prev, curr] pair. get() returns the
+ * last emitted pair, or undefined before the first upstream change.
+ *
+ * v3: forwards all type 3 STATE signals; creates pair and emits on type 1 DATA.
  */
 export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 	return (input: Store<A>) => {
@@ -17,7 +19,6 @@ export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let connected = false;
 		let talkback: ((type: number) => void) | null = null;
-		let dirty = false;
 
 		function connectUpstream(): void {
 			prev = input.get();
@@ -26,23 +27,18 @@ export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 					talkback = data;
 					return;
 				}
+				if (type === STATE) {
+					for (const sink of sinks) sink(STATE, data);
+				}
 				if (type === DATA) {
-					if (data === DIRTY) {
-						if (!dirty) {
-							dirty = true;
-							for (const sink of sinks) sink(DATA, DIRTY);
-						}
-					} else if (dirty) {
-						dirty = false;
-						currentPair = [prev as A, data as A];
-						prev = data as A;
-						for (const sink of sinks) sink(DATA, currentPair);
-					}
+					currentPair = [prev as A, data as A];
+					prev = data as A;
+					for (const sink of sinks) sink(DATA, currentPair);
 				}
 				if (type === END) {
 					talkback = null;
 					connected = false;
-					dirty = false;
+					currentPair = undefined;
 					for (const sink of sinks) sink(END, data);
 				}
 			});
@@ -54,7 +50,6 @@ export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 				talkback = null;
 			}
 			connected = false;
-			dirty = false;
 			currentPair = undefined;
 		}
 

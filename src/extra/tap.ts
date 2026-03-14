@@ -1,20 +1,21 @@
 import { Inspector } from "../inspector";
-import { DATA, DIRTY, END, START } from "../protocol";
+import { DATA, END, START, STATE } from "../protocol";
 import type { Store, StoreOperator } from "../types";
 
 /**
  * Side-effect passthrough operator. Calls `fn` for each upstream value
  * without altering it. Useful for debugging and logging.
  *
- * Raw-callbag two-phase node: forwards DIRTY in phase 1, calls fn and
- * emits value in phase 2. Glitch-free in diamond topologies.
+ * Stateless: no own cached value. get() delegates to input.get().
+ *
+ * v3: forwards all type 3 STATE signals unchanged; calls fn and emits
+ * each type 1 DATA value.
  */
 export function tap<A>(fn: (value: A) => void): StoreOperator<A, A> {
 	return (input: Store<A>) => {
 		const sinks = new Set<(type: number, data?: unknown) => void>();
 		let connected = false;
 		let talkback: ((type: number) => void) | null = null;
-		let dirty = false;
 
 		function connectUpstream(): void {
 			input.source(START, (type: number, data: any) => {
@@ -22,22 +23,16 @@ export function tap<A>(fn: (value: A) => void): StoreOperator<A, A> {
 					talkback = data;
 					return;
 				}
+				if (type === STATE) {
+					for (const sink of sinks) sink(STATE, data);
+				}
 				if (type === DATA) {
-					if (data === DIRTY) {
-						if (!dirty) {
-							dirty = true;
-							for (const sink of sinks) sink(DATA, DIRTY);
-						}
-					} else if (dirty) {
-						dirty = false;
-						fn(data as A);
-						for (const sink of sinks) sink(DATA, data);
-					}
+					fn(data as A);
+					for (const sink of sinks) sink(DATA, data);
 				}
 				if (type === END) {
 					talkback = null;
 					connected = false;
-					dirty = false;
 					for (const sink of sinks) sink(END, data);
 				}
 			});
@@ -49,7 +44,6 @@ export function tap<A>(fn: (value: A) => void): StoreOperator<A, A> {
 				talkback = null;
 			}
 			connected = false;
-			dirty = false;
 		}
 
 		const store: Store<A> = {
