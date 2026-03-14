@@ -24,11 +24,19 @@ callbag-recharge is a reactive state management library where **every store is a
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Re-runs `fn()` when any dep's DIRTY propagates. Returns a dispose function.
 - **`subscribe(store, cb)`** — listen to value changes with previous-value tracking.
 
-### Key design patterns
+### Key design patterns (v1 — being refactored to v2)
 
-- **Push DIRTY, pull values:** `state.set()` propagates `DIRTY` symbol through the callbag graph. Subscribers/effects then call `get()` to pull the actual value. This avoids redundant computation in diamond dependency graphs.
-- **Batching:** `protocol.ts` manages two batching layers: (1) DIRTY propagation batching — effects run only after all DIRTY signals propagate, (2) connection batching — `beginDeferredStart`/`endDeferredStart` queue producer starts until the full sink chain is wired. `batch()` leverages the same depth counter to coalesce multiple `set()` calls.
-- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking. The `fn` still calls `.get()` to pull values.
+> **Note:** The core is being refactored from dual-channel (push DIRTY, pull values) to two-phase push (push DIRTY, then push values through callbag). See [docs/architecture-v2.md](docs/architecture-v2.md) for the target design. Key changes in v2:
+> - Derived stores cache values (no more always-recompute)
+> - Values flow through callbag sinks (single channel, no side-channel `get()` for data transport)
+> - `get()` returns cached value and blocks if store is pending resolution
+> - `equals` on derived becomes push-phase memoization (suppresses downstream emission)
+> - Diamond problem solved by dep counting: each node waits for all dirty deps to deliver values before computing
+
+- **Push DIRTY, pull values (v1):** `state.set()` propagates `DIRTY` symbol through the callbag graph. Subscribers/effects then call `get()` to pull the actual value. This avoids redundant computation in diamond dependency graphs.
+- **Two-phase push (v2 target):** Phase 1: `DIRTY` propagates through entire graph (nodes count dirty deps). Phase 2: values propagate through callbag sinks (nodes wait for all dirty deps, then compute and emit). See [architecture-v2.md](docs/architecture-v2.md).
+- **Batching:** `protocol.ts` manages two batching layers: (1) DIRTY propagation batching — effects run only after all DIRTY signals propagate, (2) connection batching — `beginDeferredStart`/`endDeferredStart` queue producer starts until the full sink chain is wired. `batch()` leverages the same depth counter to coalesce multiple `set()` calls. In v2, batch also defers value emission (phase 2) until the outermost batch ends.
+- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking. In v1, `fn` calls `.get()` to pull values. In v2, values arrive via callbag sinks; `fn` receives them as arguments or reads from cache.
 - **Inspector:** Opt-in observability via WeakMaps. Stores stay lean; debug metadata (names, kinds) lives in `Inspector` singleton. `Inspector.enabled` flag (default: true in dev) makes `register()`/`getName()` no-ops when false.
 
 ### Extra modules (src/extra/)
