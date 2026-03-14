@@ -14,12 +14,12 @@ import {
 	Inspector,
 	pipeRaw,
 	effect as rechargeEffect,
-	filter as rFilter,
-	map as rMap,
 	pipe as rPipe,
 	subscribe as rSubscribe,
 	state,
 } from "./src/index";
+import { filter as rFilter } from "./src/extra/filter";
+import { map as rMap } from "./src/extra/map";
 
 function bench(name: string, fn: () => void, iterations = 100_000) {
 	for (let i = 0; i < 1000; i++) fn();
