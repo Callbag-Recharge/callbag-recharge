@@ -4,14 +4,15 @@ import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
 /**
- * Passes through the first `n` value changes from upstream, then holds
- * the last accepted value. Only counts actual changes (not the initial read).
+ * Passes the first upstream change through immediately, then silences further
+ * changes for `ms` milliseconds. Leading-edge semantics.
+ * Pending throttle timers are cleared on unsubscribe.
  */
-export function take<A>(n: number): StoreOperator<A, A | undefined> {
+export function throttle<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
 		let currentValue: A | undefined;
+		let timer: ReturnType<typeof setTimeout> | null = null;
 		const sinks = new Set<(type: number, data?: unknown) => void>();
-		let count = 0;
 		let started = false;
 		let unsub: (() => void) | null = null;
 
@@ -19,16 +20,28 @@ export function take<A>(n: number): StoreOperator<A, A | undefined> {
 			if (started) return;
 			started = true;
 			unsub = subscribe(input, (v) => {
-				if (count < n && !Object.is(currentValue, v)) {
-					count++;
+				if (timer !== null) return; // still within throttle window
+				if (!Object.is(currentValue, v)) {
 					currentValue = v;
 					pushDirty(sinks);
-					if (count >= n && unsub) {
-						unsub();
-						unsub = null;
-					}
 				}
+				timer = setTimeout(() => {
+					timer = null;
+				}, ms);
 			});
+		}
+
+		function stop() {
+			if (!started) return;
+			started = false;
+			if (timer !== null) {
+				clearTimeout(timer);
+				timer = null;
+			}
+			if (unsub) {
+				unsub();
+				unsub = null;
+			}
 		}
 
 		const store: Store<A | undefined> = {
@@ -44,18 +57,14 @@ export function take<A>(n: number): StoreOperator<A, A | undefined> {
 						if (t === DATA) sink(DATA, currentValue);
 						if (t === END) {
 							sinks.delete(sink);
-							if (sinks.size === 0 && unsub) {
-								unsub();
-								unsub = null;
-								started = false;
-							}
+							if (sinks.size === 0) stop();
 						}
 					});
 				}
 			},
 		};
 
-		Inspector.register(store, { kind: "take" });
+		Inspector.register(store, { kind: "throttle" });
 		return store;
 	};
 }

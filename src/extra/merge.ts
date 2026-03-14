@@ -7,19 +7,28 @@ import type { Store, StreamStore } from "../types";
  * emission from whichever source changed most recently.
  */
 export function merge<T>(...sources: Store<T>[]): StreamStore<T> {
-	return stream<T>((emit) => {
-		const talkbacks: Array<(type: number) => void> = [];
+	return stream<T>((emit, _request, complete) => {
+		const talkbacks: Array<((type: number) => void) | null> = [];
+		let activeCount = sources.length;
 
 		beginDeferredStart();
 
 		for (const source of sources) {
+			const index = talkbacks.length;
+			talkbacks.push(null);
+
 			// Read once to trigger lazy upstream connections (e.g. derived stores)
 			source.get();
 
 			source.source(START, (type: number, data: unknown) => {
-				if (type === START) talkbacks.push(data as (type: number) => void);
+				if (type === START) talkbacks[index] = data as (type: number) => void;
 				if (type === DATA && data === DIRTY) {
 					emit(source.get());
+				}
+				if (type === END) {
+					talkbacks[index] = null;
+					activeCount--;
+					if (activeCount === 0) complete();
 				}
 			});
 		}
@@ -27,7 +36,9 @@ export function merge<T>(...sources: Store<T>[]): StreamStore<T> {
 		endDeferredStart();
 
 		return () => {
-			for (const tb of talkbacks) tb(END);
+			for (const tb of talkbacks) {
+				if (tb) tb(END);
+			}
 		};
 	});
 }

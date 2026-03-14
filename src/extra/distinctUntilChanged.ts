@@ -4,36 +4,43 @@ import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
 /**
- * Passes through the first `n` value changes from upstream, then holds
- * the last accepted value. Only counts actual changes (not the initial read).
+ * Filters out consecutive duplicate values using the provided equality function (default: Object.is).
+ * Unlike the derived-based implementation, this intercepts DIRTY at the subscription layer so
+ * downstream computations are not triggered when the value has not actually changed.
  */
-export function take<A>(n: number): StoreOperator<A, A | undefined> {
+export function distinctUntilChanged<A>(eq?: (a: A, b: A) => boolean): StoreOperator<A, A> {
+	const eqFn = eq ?? Object.is;
 	return (input: Store<A>) => {
-		let currentValue: A | undefined;
+		let currentValue: A = input.get();
 		const sinks = new Set<(type: number, data?: unknown) => void>();
-		let count = 0;
 		let started = false;
 		let unsub: (() => void) | null = null;
 
 		function start() {
 			if (started) return;
 			started = true;
+			currentValue = input.get();
 			unsub = subscribe(input, (v) => {
-				if (count < n && !Object.is(currentValue, v)) {
-					count++;
+				if (!eqFn(currentValue, v)) {
 					currentValue = v;
 					pushDirty(sinks);
-					if (count >= n && unsub) {
-						unsub();
-						unsub = null;
-					}
 				}
 			});
 		}
 
-		const store: Store<A | undefined> = {
+		function stop() {
+			if (!started) return;
+			started = false;
+			if (unsub) {
+				unsub();
+				unsub = null;
+			}
+		}
+
+		const store: Store<A> = {
 			get() {
-				return currentValue;
+				// Delegate to input when not active so get() is always live
+				return started ? currentValue : input.get();
 			},
 			source(type: number, payload?: unknown) {
 				if (type === START) {
@@ -44,18 +51,14 @@ export function take<A>(n: number): StoreOperator<A, A | undefined> {
 						if (t === DATA) sink(DATA, currentValue);
 						if (t === END) {
 							sinks.delete(sink);
-							if (sinks.size === 0 && unsub) {
-								unsub();
-								unsub = null;
-								started = false;
-							}
+							if (sinks.size === 0) stop();
 						}
 					});
 				}
 			},
 		};
 
-		Inspector.register(store, { kind: "take" });
+		Inspector.register(store, { kind: "distinctUntilChanged" });
 		return store;
 	};
 }
