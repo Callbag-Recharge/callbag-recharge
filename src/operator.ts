@@ -37,6 +37,7 @@ export class OperatorImpl<B> {
 
 	_getterFn: ((cached: B | undefined) => B) | undefined;
 	_resetOnTeardown: boolean;
+	_resubscribable: boolean;
 	_initial: B | undefined;
 
 	constructor(
@@ -50,6 +51,7 @@ export class OperatorImpl<B> {
 		this._init = init;
 		this._getterFn = opts?.getter;
 		this._resetOnTeardown = opts?.resetOnTeardown === true;
+		this._resubscribable = opts?.resubscribable === true;
 
 		this.source = this.source.bind(this);
 
@@ -149,9 +151,13 @@ export class OperatorImpl<B> {
 		if (type === START) {
 			const sink = payload;
 			if (this._completed) {
-				sink(START, (_t: number) => {});
-				sink(END);
-				return;
+				if (this._resubscribable && this._sinks === null) {
+					this._completed = false;
+				} else {
+					sink(START, (_t: number) => {});
+					sink(END);
+					return;
+				}
 			}
 			const wasEmpty = !this._sinks;
 			if (!this._sinks) this._sinks = new Set();

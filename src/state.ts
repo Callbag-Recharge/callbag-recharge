@@ -7,6 +7,14 @@
  *
  * v3: inherits producer's autoDirty — set() sends DIRTY on type 3 then
  * value on type 1. Object.is equality guard prevents redundant emissions.
+ *
+ * Note on completion: set() delegates to emit(), which is a no-op after
+ * complete()/error() — both the emission and the _value update are skipped.
+ * This differs from TC39 Signals where Signal.State has no completion
+ * concept and is always writable for its entire lifetime. The divergence
+ * is intentional: callbag-recharge is stream-based (callbag protocol with
+ * START/DATA/END), so completion semantics apply. TC39 Signals are
+ * persistent reactive cells with no lifecycle.
  */
 
 import { Inspector } from "./inspector";

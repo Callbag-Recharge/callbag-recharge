@@ -40,6 +40,7 @@ export class ProducerImpl<T> {
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
 	_getterFn: ((cached: T | undefined) => T) | undefined;
 	_resetOnTeardown: boolean;
+	_resubscribable: boolean;
 	_initial: T | undefined;
 	_pendingEmission = false;
 
@@ -50,6 +51,7 @@ export class ProducerImpl<T> {
 		this._eqFn = opts?.equals;
 		this._getterFn = opts?.getter;
 		this._resetOnTeardown = opts?.resetOnTeardown === true;
+		this._resubscribable = opts?.resubscribable === true;
 		this._initial = opts?.initial;
 
 		// Bind public API methods so they work when detached (callbag interop,
@@ -108,22 +110,31 @@ export class ProducerImpl<T> {
 		if (this._completed) return;
 		this._completed = true;
 		if (this._sinks) {
-			for (const sink of this._sinks) sink(END);
+			// Snapshot + clear before notify — prevents reentrancy issues when
+			// a sink re-subscribes during END (e.g. retry with resubscribable).
+			// _stop() before notify so _started is false if sink re-subscribes.
+			const snapshot = [...this._sinks];
 			this._sinks.clear();
 			this._sinks = null;
+			this._stop();
+			for (const sink of snapshot) sink(END);
+		} else {
+			this._stop();
 		}
-		this._stop();
 	}
 
 	error(e: unknown): void {
 		if (this._completed) return;
 		this._completed = true;
 		if (this._sinks) {
-			for (const sink of this._sinks) sink(END, e);
+			const snapshot = [...this._sinks];
 			this._sinks.clear();
 			this._sinks = null;
+			this._stop();
+			for (const sink of snapshot) sink(END, e);
+		} else {
+			this._stop();
 		}
-		this._stop();
 	}
 
 	_start(): void {
@@ -146,9 +157,13 @@ export class ProducerImpl<T> {
 		if (type === START) {
 			const sink = payload;
 			if (this._completed) {
-				sink(START, (_t: number) => {});
-				sink(END);
-				return;
+				if (this._resubscribable && this._sinks === null) {
+					this._completed = false;
+				} else {
+					sink(START, (_t: number) => {});
+					sink(END);
+					return;
+				}
 			}
 			if (!this._sinks) this._sinks = new Set();
 			this._sinks.add(sink);

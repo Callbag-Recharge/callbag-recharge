@@ -60,6 +60,12 @@ export interface SourceOptions<T = unknown> extends StoreOptions<T> {
 	getter?: (cached: T | undefined) => T;
 	/** Reset _value to `initial` when last sink disconnects. */
 	resetOnTeardown?: boolean;
+	/**
+	 * Allow re-subscription after completion/error when no sinks remain.
+	 * Matches RxJS/callbag semantics where re-subscribing re-executes the
+	 * source factory. Used by retry/rescue/repeat to restart upstream sources.
+	 */
+	resubscribable?: boolean;
 	/** Inspector kind override (default: "producer" or "operator"). */
 	kind?: string;
 }

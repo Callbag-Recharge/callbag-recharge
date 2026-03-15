@@ -85,9 +85,12 @@ export class EffectImpl {
 	}
 
 	dispose(): void {
+		if (this._disposed) return;
 		this._disposed = true;
 		if (this._cleanup) this._cleanup();
+		this._cleanup = undefined;
 		for (const tb of this._talkbacks) tb(END);
+		this._talkbacks.length = 0;
 	}
 }
 
