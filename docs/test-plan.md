@@ -444,6 +444,72 @@ All protocol, batch, and interop scenarios work correctly:
 
 ---
 
+## Batch 7 — Gap Coverage: flat, repeat, pipeRaw/SKIP, Inspector ✅ DONE
+
+**Goal:** Cover modules identified as undertested in the post-batch-6 review: flat edge cases, repeat edge cases, pipeRaw/SKIP thorough coverage, and Inspector disabled/enabled modes.
+
+**Result:** 38 tests written, 1 bug fixed. All 710 tests passing.
+
+**Test file:** `src/__tests__/extras/batch7-gaps.test.ts`
+
+### Bugs Found & Fixed
+
+| Module | Hypothesis | Result | Fix |
+|--------|-----------|--------|-----|
+| `flat` | Inner completes synchronously during `subscribe()` → `onEnd` sets `innerUnsub=null` but `subscribe()` return overwrites it → flat never detects inner completed | ✅ Confirmed | Added `innerEnded` flag; after `subscribe()` returns, if `innerEnded` is true, reset `innerUnsub = null` |
+
+### Tests Written
+
+**flat (9 tests)** ✅
+- Outer error propagates to flat
+- Outer completes with no inner → immediate complete
+- Outer completes while inner active → waits for inner to complete
+- Inner completes after outer completes → flat completes ← bug fixed
+- Inner error while outer still active → error propagates
+- Rapid switching — only latest inner is active
+- Outer emits undefined → unsubscribes inner, emits undefined
+- get() returns current inner value without subscribers
+- Multiple subscribers share single outer subscription
+
+**repeat (6 tests)** ✅
+- count=0 → immediate complete, no subscription
+- Values from all rounds are emitted in order
+- get() retains last value from previous round after completion
+- Error in any round stops repetition
+- Unsubscribe during active round cleans up inner source
+- Infinite repeat (no count) re-subscribes until unsubscribed
+
+**pipeRaw / SKIP (13 tests)** ✅
+- Error from upstream propagates through fused pipeline
+- Completion from upstream propagates through fused pipeline
+- 3-transform chain produces correct values
+- 4-transform chain produces correct values
+- SKIP at first transform → no emission, RESOLVED signal
+- SKIP at middle transform → no emission
+- SKIP at last transform → no emission
+- SKIP returns cached value from get()
+- get() without subscribers re-evaluates pipeline
+- Participates in diamond resolution (type 3 forwarding)
+- Reconnect after disconnect re-evaluates
+- Initial value computed correctly when source has initial
+- Initial SKIP → get() returns undefined
+
+**Inspector (10 tests)** ✅
+- Disabled mode: register() is no-op
+- Disabled mode: getName() returns undefined
+- getKind() works regardless of enabled flag
+- graph() with unnamed stores uses store_N fallback keys
+- graph() returns correct values for mixed store types
+- trace() deduplicates via Object.is (same value not reported)
+- trace() on completed store calls END, stops tracing
+- inspect() reflects current value of store
+- Re-enabling after disable allows new registrations
+- _reset() clears enabled override
+
+**Actual: 38 tests, 1 bug fix (flat sync inner completion)**
+
+---
+
 ## Summary
 
 | Batch | Focus | Tests | Fixes | Status |
@@ -454,9 +520,8 @@ All protocol, batch, and interop scenarios work correctly:
 | 4 | Reconnect/lifecycle across all operators | 26 | 0 | ✅ Done |
 | 5 | Reentrancy, stress, complex chains | 29 | 1 | ✅ Done |
 | 6 | Protocol, batch, interop | 27 | 0 | ✅ Done |
-| **Total** | | **200** | **8** | **All done** |
-
-All "fix" counts are hypotheses. Write the test first — if it passes, the code is correct and no fix is needed. Batches 3–6 will likely uncover additional issues during testing. Existing tests that conflict with new findings should be re-evaluated against the source code.
+| 7 | Gap coverage (flat/repeat/pipeRaw/Inspector) | 38 | 1 | ✅ Done |
+| **Total** | | **238** | **9** | **All done** |
 
 ## Test File Strategy
 
@@ -466,3 +531,4 @@ All "fix" counts are hypotheses. Write the test first — if it passes, the code
 - **Batch 4** → `src/__tests__/extras/reconnect.test.ts`
 - **Batch 5** → `src/__tests__/extras/stress.test.ts`
 - **Batch 6** → `src/__tests__/core/protocol-edge-cases.test.ts`
+- **Batch 7** → `src/__tests__/extras/batch7-gaps.test.ts` (flat/repeat/pipeRaw/SKIP/Inspector)

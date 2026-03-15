@@ -31,9 +31,11 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 					}
 					if (initialized) emit(innerStore.get());
 					initialized = true;
+					let innerEnded = false;
 					innerUnsub = subscribe(innerStore, (v) => emit(v), {
 						onEnd: (err) => {
 							innerUnsub = null;
+							innerEnded = true;
 							if (err !== undefined) {
 								error(err);
 							} else if (outerDone) {
@@ -41,6 +43,9 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 							}
 						},
 					});
+					// Guard: if inner completed synchronously during subscribe(),
+					// onEnd set innerUnsub=null but subscribe's return overwrote it.
+					if (innerEnded) innerUnsub = null;
 				}
 
 				const outerUnsub = subscribe(
