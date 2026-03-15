@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { derived, Inspector, operator, producer, state } from "../index";
+import { derived, Inspector, operator, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();

@@ -3,8 +3,8 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { subscribe } from "../extra/subscribe";
-import { derived, effect, Inspector, state } from "../index";
+import { subscribe } from "../../extra/subscribe";
+import { derived, effect, Inspector, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();

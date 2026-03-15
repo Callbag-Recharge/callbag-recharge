@@ -1,19 +1,19 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { combine } from "../extra/combine";
-import { concat } from "../extra/concat";
-import { filter } from "../extra/filter";
-import { flat } from "../extra/flat";
-import { forEach } from "../extra/forEach";
-import { fromIter } from "../extra/fromIter";
-import { fromPromise } from "../extra/fromPromise";
-import { interval } from "../extra/interval";
-import { map } from "../extra/map";
-import { merge } from "../extra/merge";
-import { skip } from "../extra/skip";
-import { subscribe } from "../extra/subscribe";
-import { take } from "../extra/take";
-import { pipe } from "../pipe";
-import { state } from "../state";
+import { combine } from "../../extra/combine";
+import { concat } from "../../extra/concat";
+import { filter } from "../../extra/filter";
+import { flat } from "../../extra/flat";
+import { forEach } from "../../extra/forEach";
+import { fromIter } from "../../extra/fromIter";
+import { fromPromise } from "../../extra/fromPromise";
+import { interval } from "../../extra/interval";
+import { map } from "../../extra/map";
+import { merge } from "../../extra/merge";
+import { skip } from "../../extra/skip";
+import { subscribe } from "../../extra/subscribe";
+import { take } from "../../extra/take";
+import { pipe } from "../../pipe";
+import { state } from "../../state";
 
 // ---------------------------------------------------------------------------
 // Tests adapted from callbag-basics (https://github.com/staltz/callbag-basics)

@@ -12,9 +12,9 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { effect } from "../effect";
-import { subscribe } from "../extra/subscribe";
-import { batch, DIRTY, derived, Inspector, producer, RESOLVED, STATE, state } from "../index";
+import { effect } from "../../effect";
+import { subscribe } from "../../extra/subscribe";
+import { batch, DIRTY, derived, Inspector, producer, RESOLVED, STATE, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();

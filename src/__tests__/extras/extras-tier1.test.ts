@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { concatMap } from "../extra/concatMap";
-import { debounce } from "../extra/debounce";
-import { distinctUntilChanged } from "../extra/distinctUntilChanged";
-import { exhaustMap } from "../extra/exhaustMap";
-import { pairwise } from "../extra/pairwise";
-import { startWith } from "../extra/startWith";
-import { subscribe } from "../extra/subscribe";
-import { switchMap } from "../extra/switchMap";
-import { takeUntil } from "../extra/takeUntil";
-import { throttle } from "../extra/throttle";
-import { Inspector, pipe, producer, state } from "../index";
+import { concatMap } from "../../extra/concatMap";
+import { debounce } from "../../extra/debounce";
+import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
+import { exhaustMap } from "../../extra/exhaustMap";
+import { pairwise } from "../../extra/pairwise";
+import { startWith } from "../../extra/startWith";
+import { subscribe } from "../../extra/subscribe";
+import { switchMap } from "../../extra/switchMap";
+import { takeUntil } from "../../extra/takeUntil";
+import { throttle } from "../../extra/throttle";
+import { Inspector, pipe, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
