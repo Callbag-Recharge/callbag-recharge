@@ -121,7 +121,8 @@ The producer function receives an `actions` object:
 type Actions<T> = {
   emit: (value: T) => void,       // type 1 DATA to downstream sinks
   signal: (s: Signal) => void,    // type 3 STATE to downstream sinks
-  complete: () => void,            // type 2 END to downstream sinks
+  complete: () => void,            // type 2 END (no error) to downstream sinks
+  error: (e: unknown) => void,    // type 2 END with error data to downstream sinks
 }
 ```
 
@@ -145,16 +146,33 @@ const custom = producer<number>(({ emit, signal }) => {
 }, { autoDirty: false });
 ```
 
+### Options
+
+```ts
+producer<T>(fn?, opts?)
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `initial` | `T` | `undefined` | Initial value before producer starts. Sets `currentValue` so `get()` returns a value immediately. |
+| `autoDirty` | `boolean` | `true` | When true, `emit()` sends `signal(DIRTY)` before the value automatically. |
+| `equals` | `(a: T, b: T) => boolean` | none | Emit guard — skips emission if `equals(currentValue, newValue)` returns true. |
+| `resetOnTeardown` | `boolean` | `false` | Resets `currentValue` to `initial` (or `undefined`) when producer stops (all sinks disconnect). |
+| `getter` | `(cached: T \| undefined) => T` | none | Custom `get()` — receives the cached value and returns a transformed value. |
+| `name` | `string` | none | Inspector display name. |
+
 ### Internals
 
 ```
 producer<T>(fn, opts?)
-  +-- currentValue: T | undefined
+  +-- currentValue: T | undefined (initialized from opts.initial)
   +-- sinks: Set<callbag sink>
-  +-- get() -> return currentValue
+  +-- get() -> getter ? getter(currentValue) : currentValue
   +-- source(type, payload) -> callbag handshake, manages sinks
   +-- Lazy start: producer function runs on first sink connection
   +-- Auto-cleanup: producer cleanup runs when last sink disconnects
+  +-- resetOnTeardown: currentValue = initial on stop
+  +-- equals: emit guard, skips if value unchanged
 ```
 
 The producer function receives actions and returns an optional cleanup function. The producer starts lazily (on first sink) and cleans up when all sinks disconnect.
@@ -174,25 +192,26 @@ count.update(n => n + 1);
 
 ### Relationship to Producer
 
-State is conceptually:
+State is implemented as a thin wrapper over producer:
 
 ```ts
 function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
-  const eq = opts?.equals ?? Object.is;
-  const p = producer<T>(/* no producer fn needed */, { initial });
+  const p = producer<T>(undefined, {
+    initial,
+    autoDirty: true,
+    equals: opts?.equals ?? Object.is,  // equality guard lives in producer's emit
+  });
 
   return {
-    get: p.get,
-    set(value: T) {
-      if (!eq(p.get(), value)) p.emit(value);  // equality guard
-    },
-    update(fn) { this.set(fn(p.get())); },
+    get: () => p.get() as T,   // cast safe: initial always provided
+    set: p.emit,               // producer's equals handles dedup
+    update(fn) { p.emit(fn(p.get() as T)); },
     source: p.source,
   };
 }
 ```
 
-State adds: equality-checked `set()`, `update()`. That's it. The architecture has one source primitive (Producer), and State is API sugar.
+State adds: `set()`, `update()`, and defaults `equals` to `Object.is`. The equality guard is producer's `equals` emit guard — `set(value)` is just `emit(value)`. The architecture has one source primitive (Producer), and State is API sugar.
 
 ---
 
@@ -212,13 +231,14 @@ The `init` function receives actions and returns a handler. The handler is calle
 
 ### Actions API
 
-Same shape as Producer:
+Same shape as Producer, plus `disconnect`:
 
 ```ts
 type Actions<T> = {
   emit: (value: T) => void,        // type 1 DATA downstream
   signal: (s: Signal) => void,     // type 3 STATE downstream (DIRTY, RESOLVED, etc.)
   complete: () => void,             // type 2 END downstream
+  error: (e: unknown) => void,     // type 2 END with error data downstream
   disconnect: (dep?: number) => void,  // disconnect from upstream dep(s)
 }
 ```
@@ -696,35 +716,103 @@ Together:
 
 ## Tier 2 operators (Producer-based)
 
-Complex operators that involve async, timers, or dynamic subscriptions are built as Producers with `{ autoDirty: false }`:
+Complex operators that involve async, timers, or dynamic subscriptions are built as Producers with `autoDirty: true` (the default). Each `emit()` automatically sends `signal(DIRTY)` + value, starting a new DIRTY+value cycle. All 12 tier 2 operators use `producer()` directly.
+
+### Patterns
+
+**Time-based** — simple `subscribe` + timer:
 
 ```ts
-function switchMap<A, B>(source: Store<A>, fn: (a: A) => Store<B>): Store<B> {
-  return producer<B>(({ emit, signal }) => {
-    let innerUnsub: (() => void) | undefined;
-    const outerUnsub = subscribe(source, (value) => {
-      innerUnsub?.();
-      signal(DIRTY);
-      const inner = fn(value);
-      innerUnsub = subscribe(inner, (v) => emit(v));
-    });
-    return () => { innerUnsub?.(); outerUnsub(); };
-  }, { autoDirty: false });
-}
-
-function debounce<A>(source: Store<A>, ms: number): Store<A> {
-  return producer<A>(({ emit }) => {
+function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
+  return (input) => producer<A>(({ emit }) => {
     let timer: any;
-    const unsub = subscribe(source, (value) => {
+    const unsub = subscribe(input, (value) => {
       clearTimeout(timer);
-      timer = setTimeout(() => emit(value), ms);  // autoDirty: true (default)
+      timer = setTimeout(() => emit(value), ms);
     });
     return () => { clearTimeout(timer); unsub(); };
-  });
+  }, { equals: Object.is });
 }
 ```
 
-These are cycle boundaries. Each `emit` starts a new DIRTY+value cycle (when autoDirty is true) or the user manually controls signals (when autoDirty is false). This matches RxJS behavior — time-based and dynamic-subscription operators are natural glitch boundaries.
+**Dynamic subscription** — `initial` + `equals` prevent spurious initial emission during deferred start:
+
+```ts
+function switchMap<A, B>(fn: (a: A) => Store<B>): StoreOperator<A, B | undefined> {
+  return (outer) => {
+    const initialInner = fn(outer.get());
+    return producer<B>(({ emit }) => {
+      let innerUnsub: (() => void) | null = null;
+      function subscribeInner(innerStore: Store<B>) {
+        if (innerUnsub) { innerUnsub(); innerUnsub = null; }
+        emit(innerStore.get());
+        innerUnsub = subscribe(innerStore, (v) => emit(v));
+      }
+      const outerUnsub = subscribe(outer, (v) => subscribeInner(fn(v)));
+      subscribeInner(initialInner);
+      return () => { if (innerUnsub) innerUnsub(); outerUnsub(); };
+    }, { initial: initialInner.get(), equals: Object.is });
+  };
+}
+```
+
+**Error handling** — uses `error()` and `complete()` actions:
+
+```ts
+function retry<A>(n: number): StoreOperator<A, A> {
+  return (input) => producer<A>(({ emit, complete, error }) => {
+    let retriesLeft = n;
+    let talkback: ((t: number) => void) | null = null;
+    function connect() {
+      input.source(START, (type, data) => {
+        if (type === START) talkback = data;
+        if (type === 1) emit(data);
+        if (type === END) {
+          talkback = null;
+          if (data !== undefined && retriesLeft > 0) { retriesLeft--; connect(); }
+          else if (data !== undefined) error(data);
+          else complete();
+        }
+      });
+    }
+    connect();
+    return () => { if (talkback) talkback(END); };
+  }, { initial: input.get(), equals: Object.is });
+}
+```
+
+**Value reset on teardown** — `resetOnTeardown: true` resets `get()` to `initial` (or `undefined`) when all sinks disconnect:
+
+```ts
+function delay<A>(ms: number): StoreOperator<A, A | undefined> {
+  return (input) => producer<A>(({ emit }) => {
+    const timers = new Set<ReturnType<typeof setTimeout>>();
+    const unsub = subscribe(input, (v) => {
+      const id = setTimeout(() => { timers.delete(id); emit(v); }, ms);
+      timers.add(id);
+    });
+    return () => { for (const id of timers) clearTimeout(id); timers.clear(); unsub(); };
+  }, { resetOnTeardown: true });
+}
+```
+
+**Custom getter** — `getter` overrides `get()` to return a value different from the last emission:
+
+```ts
+function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
+  return (input) => {
+    let latestInput: A = input.get();
+    return producer<A>(({ emit }) => {
+      latestInput = input.get();
+      const inputUnsub = subscribe(input, (v) => { latestInput = v; });
+      const notifierUnsub = subscribe(notifier, () => { emit(latestInput); });
+      return () => { inputUnsub(); notifierUnsub(); };
+    }, { initial: latestInput, equals: Object.is, getter: () => latestInput });
+  };
+}
+```
+
+These are cycle boundaries. Each `emit` starts a new DIRTY+value cycle. This matches RxJS behavior — time-based and dynamic-subscription operators are natural glitch boundaries.
 
 ---
 
@@ -744,9 +832,9 @@ These are cycle boundaries. Each `emit` starts a new DIRTY+value cycle (when aut
 | Stateful transform | map, filter, scan | 1 | Operator — forward type 3, transform type 1 |
 | Multi-source | combine, merge | 1 | Operator with multiple deps — dirty tracking like derived |
 | Event sources | interval, fromEvent, fromPromise, fromObs | 1 | Producer (autoDirty: true) |
-| Time-based | debounce, throttle, delay, sample | 2 | Producer — timer-based cycle boundaries |
-| Dynamic subscription | switchMap, flat, concatMap, exhaustMap | 2 | Producer (autoDirty: false) — manages inner subscriptions |
-| Error handling | rescue, retry | 2 | Producer (autoDirty: false) — manages subscription lifecycle |
+| Time-based | debounce, throttle, delay, sample, bufferTime, timeout | 2 | Producer (autoDirty: true) — timer-based cycle boundaries |
+| Dynamic subscription | switchMap, flat, concatMap, exhaustMap | 2 | Producer (autoDirty: true, initial + equals) — manages inner subscriptions |
+| Error handling | rescue, retry | 2 | Producer (autoDirty: true, initial + equals + error) — manages subscription lifecycle |
 | Simple sinks | forEach, subscribe | - | Callbag sink — type 1 only, no state participation |
 
 ### What's eliminated
@@ -815,7 +903,7 @@ Foundation layer. Everything else depends on this. No extras touched yet.
 | `src/types.ts` | Rewrite | `Actions<T>` (emit, signal, complete, disconnect), `Signal` type, `ProducerStore<T>`, updated `Store<T>`, `WritableStore<T>`, `StoreOperator<A,B>`. Remove `StreamProducer`, `StreamStore`. |
 | `src/operator.ts` | New | `operator(deps, init, opts?)` — general transform. Manages upstream connections (lazy on first sink), downstream sinks, cached value for `get()`. Calls handler with `(depIndex, type, data)` for upstream events. |
 | `src/producer.ts` | New | `producer(fn?, opts?)` — general source. autoDirty option (default true). Lazy start on first sink. Exposes `emit()` externally. Replaces `stream.ts`. |
-| `src/state.ts` | Rewrite | Sugar over `producer` — equality-checked `set()`, `update()`. Minimal wrapper, not a separate implementation. |
+| `src/state.ts` | Rewrite | Thin wrapper over `producer` — `set()` = `emit()`, `update()` = sugar. Producer's `equals` option (defaulting to `Object.is`) handles dedup. |
 | `src/derived.ts` | Rewrite | Sugar over `operator` — multi-dep dirty tracking (Set\<depIndex\>), caching, `equals` memoization via RESOLVED. `get()` returns cache when settled, recomputes when pending or unconnected. |
 | `src/effect.ts` | Rewrite | Stateful sink. Type 3 dirty tracking across deps. Runs `fn()` inline when all dirty deps resolve. No `enqueueEffect`. Eager connection on creation. |
 | `src/subscribe.ts` | Simplify | Pure callbag sink — just receives type 1 DATA, runs callback. No DIRTY tracking, no pending flag. Prepare to move to `extra/` in batch 2. |
@@ -938,58 +1026,33 @@ Note: `map`, `filter`, `scan` currently live in `pipe.ts` as `StoreOperator` wra
 
 ---
 
-### Batch 3: Tier 2 extras
+### Batch 3: Tier 2 extras ✅ DONE
 
 Time-based operators, dynamic subscription operators, and error handling. All tier 2 — they are cycle boundaries built as Producers.
 
-**Time-based operators (Producer, autoDirty: true):**
+All 12 tier 2 operators use `producer()` directly with `autoDirty: true` (the default). Key patterns:
 
-| Extra | Implementation | Notes |
-|-------|---------------|-------|
-| `debounce(ms)` | Producer + subscribe to source + `setTimeout` | Timer-based, each emit starts new cycle |
-| `throttle(ms)` | Producer + subscribe to source + `setTimeout`/leading-edge | Timer-based |
-| `delay(ms)` | Producer + subscribe to source + `setTimeout` per value | Timer-based |
-| `timeout(ms)` | Producer + subscribe to source + `setTimeout` | Errors if no value within ms |
-| `bufferTime(ms)` | Producer + subscribe to source + `setInterval` | Timer-based batching |
-| `sample(notifier)` | Producer + subscribe to source + subscribe to notifier | Emit latest source value on notifier |
+- **Time-based** (debounce, throttle, delay, bufferTime, timeout, sample): `subscribe` to source + timer logic. `equals: Object.is` for dedup where appropriate, `resetOnTeardown` for delay, `getter` for sample.
+- **Dynamic subscription** (switchMap, flat, concatMap, exhaustMap): `initial: innerStore.get()` + `equals: Object.is` prevents spurious initial emission during deferred start. concatMap/exhaustMap use raw callbag for inner END detection (queuing/ignoring semantics).
+- **Error handling** (rescue, retry): `initial: input.get()` + `equals: Object.is` + `error()` action for END with error data. Raw callbag for inner END detection.
 
-**Dynamic subscription operators (Producer, autoDirty: false):**
+**Producer options that enabled this:**
 
-| Extra | Implementation | Notes |
-|-------|---------------|-------|
-| `switchMap(fn)` | Producer + subscribe outer + subscribe inner | Manual signal(DIRTY) on outer change |
-| `flat(source)` | Producer + subscribe outer + subscribe inner | Flattens inner sources |
-| `concatMap(fn)` | Producer + subscribe outer + queue inner | Sequential inner subscriptions |
-| `exhaustMap(fn)` | Producer + subscribe outer + ignore while active | Ignore outer while inner active |
+| Option | Used by | Purpose |
+|--------|---------|---------|
+| `equals` | All 12 | Emit guard — prevents duplicate emissions |
+| `initial` | switchMap, flat, concatMap, exhaustMap, rescue, retry, timeout, bufferTime, sample | Sets baseline value before producer starts |
+| `error()` | timeout, rescue, retry | Sends `sink(END, error)` to downstream |
+| `resetOnTeardown` | delay | Resets `get()` to `undefined` when all sinks disconnect |
+| `getter` | sample | Custom `get()` returns latest input value, not last emitted |
 
-**Error handling (Producer, autoDirty: false):**
+**Tests:**
 
-| Extra | Implementation | Notes |
-|-------|---------------|-------|
-| `rescue(fn)` | Producer + subscribe, catch errors, switch to fallback | Manual signal control |
-| `retry(opts)` | Producer + subscribe, resubscribe on error | Manual signal control |
-
-**Steps:**
-
-1. Rewrite time-based operators: debounce, throttle, delay, timeout, bufferTime, sample
-2. Rewrite dynamic subscription operators: switchMap, flat, concatMap, exhaustMap
-3. Rewrite error handling: rescue, retry
-4. Update `extra/index.ts` exports
-
-**Tests (update existing + new):**
-
-| Test file | What to update |
-|-----------|---------------|
-| `extras-tier2.test.ts` | Time-based extras: verify timer behavior, cycle boundary semantics |
-| `extras-tier2-operators.test.ts` | Dynamic subscription + error handling extras |
-| New: `extras-cycle-boundary.test.ts` | Verify tier 2 operators start new DIRTY cycles. Verify they don't passthrough type 3 from upstream. Document expected glitch counts in diamond topologies. |
-
-**Definition of done for batch 3:**
-- All tier 2 extras rewritten as Producer-based
-- Time-based operators use autoDirty: true (each emit is a full cycle)
-- Dynamic subscription operators use autoDirty: false (manual signal control)
-- Cycle boundary behavior is tested and documented
-- All existing test suites pass
+| Test file | Status |
+|-----------|--------|
+| `extras-tier2.test.ts` | ✅ 38 tests |
+| `extras-tier2-operators.test.ts` | ✅ 57 tests |
+| `extras-cycle-boundary.test.ts` | ✅ 12 tests |
 
 ---
 

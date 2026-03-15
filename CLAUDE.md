@@ -18,32 +18,36 @@ callbag-recharge is a reactive state management library where **every store is a
 
 ### Core primitives (src/)
 
-- **`state(initial)`** — writable store. `set()` pushes `DIRTY` sentinel through callbag sinks (not the value itself). Actual values are pulled lazily via `get()`. Supports custom `equals` option to replace `Object.is`.
-- **`derived(deps, fn)`** — computed store with explicit deps array. Always re-runs `fn()` on `get()` (no cache by default). Connects to upstream callbag sources lazily in `source()` (on first sink), disconnects when last sink leaves. `get()` is pure pull with no side effects. When `equals` option is provided, caches last output and returns cached reference if equal — but this is pull-phase only; DIRTY still propagates unconditionally to downstream sinks.
-- **`stream(producer)`** — store backed by an async event source. Producer receives `(emit, request, complete)`. Supports pull-based streams via `request()` handler. Uses deferred start (`protocol.ts`) so producers don't emit before sinks are wired.
-- **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Re-runs `fn()` when any dep's DIRTY propagates. Returns a dispose function.
-- **`subscribe(store, cb)`** — listen to value changes with previous-value tracking.
+- **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()). Actions: `emit`, `signal`, `complete`, `error`.
+- **`state(initial)`** — thin wrapper over `producer()`. `set()` = `emit()` with `equals` defaulting to `Object.is`. `update(fn)` is sugar over `set`.
+- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. Connects lazily, disconnects when last sink leaves.
+- **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
+- **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
+- **`subscribe(store, cb)`** — listen to value changes with previous-value tracking. Pure callbag sink — no DIRTY awareness.
 
-### Key design patterns (v1 — being refactored to v2)
+### Key design patterns (v3 — type 3 control channel)
 
-> **Note:** The core is being refactored from dual-channel (push DIRTY, pull values) to two-phase push (push DIRTY, then push values through callbag). See [docs/architecture-v2.md](docs/architecture-v2.md) for the target design. Key changes in v2:
-> - Derived stores cache values (no more always-recompute)
-> - Values flow through callbag sinks (single channel, no side-channel `get()` for data transport)
-> - `get()` returns cached value and blocks if store is pending resolution
-> - `equals` on derived becomes push-phase memoization (suppresses downstream emission)
-> - Diamond problem solved by dep counting: each node waits for all dirty deps to deliver values before computing
+See [docs/architecture-v3.md](docs/architecture-v3.md) for full design.
 
-- **Push DIRTY, pull values (v1):** `state.set()` propagates `DIRTY` symbol through the callbag graph. Subscribers/effects then call `get()` to pull the actual value. This avoids redundant computation in diamond dependency graphs.
-- **Two-phase push (v2 target):** Phase 1: `DIRTY` propagates through entire graph (nodes count dirty deps). Phase 2: values propagate through callbag sinks (nodes wait for all dirty deps, then compute and emit). See [architecture-v2.md](docs/architecture-v2.md).
-- **Batching:** `protocol.ts` manages two batching layers: (1) DIRTY propagation batching — effects run only after all DIRTY signals propagate, (2) connection batching — `beginDeferredStart`/`endDeferredStart` queue producer starts until the full sink chain is wired. `batch()` leverages the same depth counter to coalesce multiple `set()` calls. In v2, batch also defers value emission (phase 2) until the outermost batch ends.
-- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking. In v1, `fn` calls `.get()` to pull values. In v2, values arrive via callbag sinks; `fn` receives them as arguments or reads from cache.
+- **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. This makes operators callbag-compatible without DIRTY awareness.
+- **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
+- **Tier model:** Tier 1 (state graph + passthrough operators) participates in diamond resolution via type 3. Tier 2 (async/timer/dynamic-subscription operators) are cycle boundaries — each `emit` starts a new DIRTY+value cycle.
+- **Producer as universal base:** All sources are built on `producer()`. State is a thin wrapper. Tier 2 extras use producer options (`initial`, `equals`, `resetOnTeardown`, `getter`, `error()`) to avoid manual implementations.
+- **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
+- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking.
 - **Inspector:** Opt-in observability via WeakMaps. Stores stay lean; debug metadata (names, kinds) lives in `Inspector` singleton. `Inspector.enabled` flag (default: true in dev) makes `register()`/`getName()` no-ops when false.
 
 ### Extra modules (src/extra/)
 
-Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`
-Operators: `take`, `skip`, `merge`, `combine`, `concat`, `flat`, `share`
-Sinks: `forEach`
+**Tier 1** (participate in diamond resolution, forward type 3):
+- Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`
+- Operators: `take`, `skip`, `merge`, `combine`, `concat`, `flat`, `share`
+- Sinks: `forEach`
+
+**Tier 2** (cycle boundaries, all built on `producer()`):
+- Time-based: `debounce`, `throttle`, `delay`, `bufferTime`, `timeout`, `sample`
+- Dynamic subscription: `switchMap`, `flat`, `concatMap`, `exhaustMap`
+- Error handling: `rescue`, `retry`
 
 Each extra module is a separate entry point, tree-shakeable via `callbag-recharge/extra` or `callbag-recharge/extra/<name>`.
 

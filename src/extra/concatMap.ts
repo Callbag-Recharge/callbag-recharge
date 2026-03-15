@@ -1,116 +1,62 @@
 import { Inspector } from "../inspector";
-import {
-	beginDeferredStart,
-	DATA,
-	DIRTY,
-	END,
-	endDeferredStart,
-	pushChange,
-	START,
-} from "../protocol";
+import { producer } from "../producer";
+import { END, START } from "../protocol";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
 /**
  * Maps each upstream value to an inner store via `fn`, subscribing sequentially.
  * New outer values are queued while an inner is active; the next queued value is
- * processed when the current inner completes (sends END). The queue is discarded
- * on unsubscribe.
+ * processed when the current inner completes (sends END).
+ * Tier 2 — dynamic subscription operator. Each inner is a cycle boundary.
  */
 export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
-		let currentValue: B | undefined;
-		let innerTalkback: ((type: number) => void) | null = null;
-		let innerActive = false;
-		let outerUnsub: (() => void) | null = null;
-		const queue: A[] = [];
-		const sinks = new Set<(type: number, data?: unknown) => void>();
-		let started = false;
+		const initialInner = fn(outer.get());
+		const store = producer<B>(
+			({ emit }) => {
+				let innerTalkback: ((type: number) => void) | null = null;
+				let innerActive = false;
+				const queue: A[] = [];
 
-		function emitChange(value: B | undefined) {
-			if (Object.is(currentValue, value)) return;
-			currentValue = value;
-			pushChange(sinks, () => currentValue);
-		}
-
-		function processNext() {
-			if (queue.length === 0) {
-				innerActive = false;
-				return;
-			}
-			subscribeInner(fn(queue.shift()!));
-		}
-
-		function subscribeInner(innerStore: Store<B>) {
-			innerActive = true;
-			beginDeferredStart();
-			emitChange(innerStore.get());
-			innerStore.source(START, (type: number, data: unknown) => {
-				if (type === START) innerTalkback = data as (type: number) => void;
-				if (type === DATA) {
-					if (data === DIRTY) {
-						// Phase 1: inner is dirty
-					} else {
-						// Phase 2: value from inner
-						emitChange(data as B);
+				function processNext() {
+					if (queue.length === 0) {
+						innerActive = false;
+						return;
 					}
+					subscribeInner(fn(queue.shift() as A));
 				}
-				if (type === END) {
-					innerTalkback = null;
-					processNext();
-				}
-			});
-			endDeferredStart();
-		}
 
-		function start() {
-			if (started) return;
-			started = true;
-			const initialValue = outer.get();
-			outerUnsub = subscribe(outer, (v) => {
-				if (!innerActive) {
-					subscribeInner(fn(v));
-				} else {
-					queue.push(v);
-				}
-			});
-			subscribeInner(fn(initialValue));
-		}
-
-		function stop() {
-			if (!started) return;
-			started = false;
-			if (innerTalkback) {
-				innerTalkback(END);
-				innerTalkback = null;
-			}
-			if (outerUnsub) {
-				outerUnsub();
-				outerUnsub = null;
-			}
-			queue.length = 0;
-			innerActive = false;
-		}
-
-		const store: Store<B | undefined> = {
-			get() {
-				return currentValue;
-			},
-			source(type: number, payload?: unknown) {
-				if (type === START) {
-					start();
-					const sink = payload as (type: number, data?: unknown) => void;
-					sinks.add(sink);
-					sink(START, (t: number) => {
-						if (t === DATA) sink(DATA, currentValue);
-						if (t === END) {
-							sinks.delete(sink);
-							if (sinks.size === 0) stop();
+				function subscribeInner(innerStore: Store<B>) {
+					innerActive = true;
+					emit(innerStore.get());
+					innerStore.source(START, (type: number, data: unknown) => {
+						if (type === START) innerTalkback = data as (type: number) => void;
+						if (type === 1) emit(data as B);
+						if (type === END) {
+							innerTalkback = null;
+							processNext();
 						}
 					});
 				}
+
+				const outerUnsub = subscribe(outer, (v) => {
+					if (!innerActive) {
+						subscribeInner(fn(v));
+					} else {
+						queue.push(v);
+					}
+				});
+				subscribeInner(initialInner);
+
+				return () => {
+					if (innerTalkback) innerTalkback(END);
+					outerUnsub();
+					queue.length = 0;
+				};
 			},
-		};
+			{ initial: initialInner.get(), equals: Object.is },
+		);
 
 		Inspector.register(store, { kind: "concatMap" });
 		return store;

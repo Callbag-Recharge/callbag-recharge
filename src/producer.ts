@@ -1,10 +1,13 @@
 // ---------------------------------------------------------------------------
 // producer(fn?, opts?) — general-purpose source primitive
 // ---------------------------------------------------------------------------
-// Can emit values, send control signals, and complete.
+// Can emit values, send control signals, complete, and error.
 // Lazy start: producer function runs on first sink connection.
 // Auto-cleanup: producer cleanup runs when last sink disconnects.
 // autoDirty (default true): emit() sends signal(DIRTY) before the value.
+// equals: when provided, emit() skips if equals(currentValue, newValue).
+// resetOnTeardown: resets currentValue to initial (or undefined) on stop.
+// getter: custom get() — receives cached value, returns transformed value.
 // ---------------------------------------------------------------------------
 
 import { Inspector } from "./inspector";
@@ -17,8 +20,15 @@ export function producer<T>(
 		emit: (value: T) => void;
 		signal: (s: Signal) => void;
 		complete: () => void;
+		error: (e: unknown) => void;
 	}) => (() => void) | undefined,
-	opts?: StoreOptions<T> & { initial?: T; autoDirty?: boolean },
+	opts?: StoreOptions<T> & {
+		initial?: T;
+		autoDirty?: boolean;
+		resetOnTeardown?: boolean;
+		getter?: (cached: T | undefined) => T;
+		_skipInspect?: boolean;
+	},
 ): ProducerStore<T> {
 	let currentValue: T | undefined = opts?.initial;
 	let started = false;
@@ -26,10 +36,14 @@ export function producer<T>(
 	let cleanup: (() => void) | undefined;
 	const sinks = new Set<any>();
 	const autoDirty = opts?.autoDirty !== false;
+	const eqFn = opts?.equals;
+	const getterFn = opts?.getter;
+	const resetOnTeardown = opts?.resetOnTeardown === true;
 	let pendingEmission = false;
 
 	function doEmit(value: T): void {
 		if (completed) return;
+		if (eqFn && currentValue !== undefined && eqFn(currentValue as T, value)) return;
 		currentValue = value;
 		if (sinks.size === 0) return;
 		if (isBatching()) {
@@ -67,10 +81,23 @@ export function producer<T>(
 		stopProducer();
 	}
 
+	function doError(e: unknown): void {
+		if (completed) return;
+		completed = true;
+		for (const sink of sinks) sink(END, e);
+		sinks.clear();
+		stopProducer();
+	}
+
 	function startProducer(): void {
 		if (started || !fn) return;
 		started = true;
-		const result = fn({ emit: doEmit, signal: doSignal, complete: doComplete });
+		const result = fn({
+			emit: doEmit,
+			signal: doSignal,
+			complete: doComplete,
+			error: doError,
+		});
 		cleanup = typeof result === "function" ? result : undefined;
 	}
 
@@ -79,16 +106,18 @@ export function producer<T>(
 		started = false;
 		if (cleanup) cleanup();
 		cleanup = undefined;
+		if (resetOnTeardown) currentValue = opts?.initial;
 	}
 
 	const store: ProducerStore<T> = {
 		get() {
-			return currentValue;
+			return getterFn ? getterFn(currentValue) : currentValue;
 		},
 
 		emit: doEmit,
 		signal: doSignal,
 		complete: doComplete,
+		error: doError,
 
 		source(type: number, payload?: any) {
 			if (type === START) {
@@ -111,6 +140,6 @@ export function producer<T>(
 		},
 	};
 
-	Inspector.register(store, { kind: "producer", ...opts });
+	if (!opts?._skipInspect) Inspector.register(store, { kind: "producer", ...opts });
 	return store;
 }

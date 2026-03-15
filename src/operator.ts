@@ -38,6 +38,9 @@ export function operator<B>(
 			complete() {
 				for (const sink of sinks) sink(END);
 			},
+			error(e: unknown) {
+				for (const sink of sinks) sink(END, e);
+			},
 			disconnect(dep?: number) {
 				if (dep !== undefined) {
 					localTalkbacks[dep]?.(END);

@@ -1,12 +1,5 @@
-import {
-	beginDeferredStart,
-	DATA,
-	DIRTY,
-	END,
-	endDeferredStart,
-	pushChange,
-	START,
-} from "../protocol";
+import { Inspector } from "../inspector";
+import { producer } from "../producer";
 import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
 
@@ -14,111 +7,49 @@ import type { Store, StoreOperator } from "../types";
  * Flattens a store of stores with switch semantics: when the outer store
  * emits a new inner store, unsubscribes from the previous inner and
  * subscribes to the new one.
+ * Tier 2 — dynamic subscription operator. Each inner switch is a cycle boundary.
  */
 export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 	return (outer: Store<Store<T> | undefined>) => {
-		// We use the raw callbag protocol for the output store so we can
-		// manage inner subscriptions manually.
-		let currentValue: T | undefined;
-		let innerTalkback: ((type: number) => void) | null = null;
-		let outerUnsub: (() => void) | null = null;
-		const sinks = new Set<(type: number, data?: unknown) => void>();
-		let started = false;
+		const initialInner = outer.get();
+		const store = producer<T>(
+			({ emit }) => {
+				let innerUnsub: (() => void) | null = null;
 
-		function emitChange(value: T | undefined) {
-			if (Object.is(currentValue, value)) return;
-			currentValue = value;
-			pushChange(sinks, () => currentValue);
-		}
-
-		function subscribeInner(innerStore: Store<T>) {
-			// Disconnect previous inner
-			if (innerTalkback) {
-				innerTalkback(END);
-				innerTalkback = null;
-			}
-
-			beginDeferredStart();
-
-			// Emit initial value of the new inner store
-			emitChange(innerStore.get());
-
-			innerStore.source(START, (type: number, data: unknown) => {
-				if (type === START) {
-					innerTalkback = data as (type: number) => void;
-				}
-				if (type === DATA) {
-					if (data === DIRTY) {
-						// Phase 1: inner is dirty, will get value in phase 2
-					} else {
-						// Phase 2: value arrived from inner
-						emitChange(data as T);
+				function subscribeInner(innerStore: Store<T>) {
+					if (innerUnsub) {
+						innerUnsub();
+						innerUnsub = null;
 					}
+					emit(innerStore.get());
+					innerUnsub = subscribe(innerStore, (v) => emit(v));
 				}
-				// Inner END is silently absorbed — we wait for the next inner
-				// from the outer store
-			});
 
-			endDeferredStart();
-		}
-
-		function start() {
-			if (started) return;
-			started = true;
-
-			outerUnsub = subscribe(outer, (innerStore) => {
-				if (innerStore === undefined) {
-					// Outer emitted undefined — disconnect inner
-					if (innerTalkback) {
-						innerTalkback(END);
-						innerTalkback = null;
-					}
-					emitChange(undefined);
-				} else {
-					subscribeInner(innerStore);
-				}
-			});
-
-			// Also subscribe to the initial inner value
-			const initial = outer.get();
-			if (initial !== undefined) {
-				subscribeInner(initial);
-			}
-		}
-
-		function stop() {
-			if (!started) return;
-			started = false;
-			if (outerUnsub) {
-				outerUnsub();
-				outerUnsub = null;
-			}
-			if (innerTalkback) {
-				innerTalkback(END);
-				innerTalkback = null;
-			}
-		}
-
-		const store: Store<T | undefined> = {
-			get() {
-				return currentValue;
-			},
-			source(type: number, payload?: unknown) {
-				if (type === START) {
-					start();
-					const sink = payload as (type: number, data?: unknown) => void;
-					sinks.add(sink);
-					sink(START, (t: number) => {
-						if (t === DATA) sink(DATA, currentValue);
-						if (t === END) {
-							sinks.delete(sink);
-							if (sinks.size === 0) stop();
+				const outerUnsub = subscribe(outer, (innerStore) => {
+					if (innerStore === undefined) {
+						if (innerUnsub) {
+							innerUnsub();
+							innerUnsub = null;
 						}
-					});
-				}
-			},
-		};
+						emit(undefined as T);
+					} else {
+						subscribeInner(innerStore);
+					}
+				});
 
+				if (initialInner !== undefined) {
+					subscribeInner(initialInner);
+				}
+
+				return () => {
+					if (innerUnsub) innerUnsub();
+					outerUnsub();
+				};
+			},
+			{ initial: initialInner?.get(), equals: Object.is },
+		);
+
+		Inspector.register(store, { kind: "flat" });
 		return store;
 	};
 }

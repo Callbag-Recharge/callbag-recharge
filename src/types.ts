@@ -16,11 +16,12 @@ export interface WritableStore<T> extends Store<T> {
 	update(fn: (current: T) => T): void;
 }
 
-/** Producer store — general-purpose source with emit/signal/complete */
+/** Producer store — general-purpose source with emit/signal/complete/error */
 export interface ProducerStore<T> extends Store<T | undefined> {
 	emit(value: T): void;
 	signal(s: Signal): void;
 	complete(): void;
+	error(e: unknown): void;
 }
 
 /** Stream store — may support .pull() (backward compat) */
@@ -38,6 +39,7 @@ export type Actions<T> = {
 	emit: (value: T) => void;
 	signal: (s: Signal) => void;
 	complete: () => void;
+	error: (e: unknown) => void;
 	disconnect: (dep?: number) => void;
 };
 
