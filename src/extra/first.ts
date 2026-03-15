@@ -16,7 +16,7 @@ export function first<A>(): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
 		return operator<A | undefined>(
 			[input] as Store<unknown>[],
-			({ emit, signal, complete, disconnect }) => {
+			({ emit, signal, complete, error, disconnect }) => {
 				let done = false;
 
 				return (_dep, type, data) => {
@@ -34,7 +34,11 @@ export function first<A>(): StoreOperator<A, A | undefined> {
 					if (type === END) {
 						if (!done) {
 							done = true;
-							complete();
+							if (data !== undefined) {
+								error(data);
+							} else {
+								complete();
+							}
 						}
 					}
 				};

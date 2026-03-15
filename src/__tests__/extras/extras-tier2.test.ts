@@ -199,14 +199,17 @@ describe("fromPromise", () => {
 		expect(values).toEqual([]);
 	});
 
-	it("silently ignores rejected promises", async () => {
+	it("forwards rejected promises as errors", async () => {
 		vi.useRealTimers();
 		const p = Promise.reject(new Error("fail"));
 		const s = fromPromise(p);
-		subscribe(s, () => {});
+		let endData: unknown;
+		subscribe(s, () => {}, { onEnd: (err) => (endData = err) });
 
-		// Should not throw unhandled rejection
+		await p.catch(() => {}); // suppress unhandled rejection in test
 		await new Promise((r) => setTimeout(r, 10));
+		expect(endData).toBeInstanceOf(Error);
+		expect((endData as Error).message).toBe("fail");
 	});
 });
 
