@@ -24,7 +24,7 @@ export class TimeoutError extends Error {
 export function timeout<A>(ms: number): StoreOperator<A, A> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit, error }) => {
+			({ emit, error, complete }) => {
 				let timer: ReturnType<typeof setTimeout> | null = null;
 
 				function resetTimer() {
@@ -36,10 +36,26 @@ export function timeout<A>(ms: number): StoreOperator<A, A> {
 					}, ms);
 				}
 
-				const unsub = subscribe(input, (v) => {
-					resetTimer();
-					emit(v);
-				});
+				const unsub = subscribe(
+					input,
+					(v) => {
+						resetTimer();
+						emit(v);
+					},
+					{
+						onEnd: (err) => {
+							if (timer !== null) {
+								clearTimeout(timer);
+								timer = null;
+							}
+							if (err !== undefined) {
+								error(err);
+							} else {
+								complete();
+							}
+						},
+					},
+				);
 
 				resetTimer();
 

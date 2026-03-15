@@ -12,25 +12,53 @@ import { subscribe } from "./subscribe";
  * inner store's value (initial + equals prevents spurious initial emission).
  *
  * v3: Tier 2 — dynamic subscription operator. Each inner switch is a cycle
- * boundary; each emit starts a new DIRTY+value cycle. equals: Object.is dedup.
+ * boundary; each emit starts a new DIRTY+value cycle. No built-in dedup.
+ * Forwards inner errors and upstream completion.
  */
 export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
 		const initialInner = fn(outer.get());
 		const store = producer<B>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				let innerUnsub: (() => void) | null = null;
+				let initialized = false;
+				let outerDone = false;
 
 				function subscribeInner(innerStore: Store<B>) {
 					if (innerUnsub) {
 						innerUnsub();
 						innerUnsub = null;
 					}
-					emit(innerStore.get());
-					innerUnsub = subscribe(innerStore, (v) => emit(v));
+					// Skip emit on first connect — producer's { initial } already has the value.
+					// On subsequent switches, emit the new inner's current value immediately.
+					if (initialized) emit(innerStore.get());
+					initialized = true;
+					innerUnsub = subscribe(innerStore, (v) => emit(v), {
+						onEnd: (err) => {
+							innerUnsub = null;
+							if (err !== undefined) {
+								error(err);
+							} else if (outerDone) {
+								complete();
+							}
+						},
+					});
 				}
 
-				const outerUnsub = subscribe(outer, (v) => subscribeInner(fn(v)));
+				const outerUnsub = subscribe(
+					outer,
+					(v) => subscribeInner(fn(v)),
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								error(err);
+							} else {
+								outerDone = true;
+								if (!innerUnsub) complete();
+							}
+						},
+					},
+				);
 				subscribeInner(initialInner);
 
 				return () => {
@@ -38,7 +66,7 @@ export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 					outerUnsub();
 				};
 			},
-			{ initial: initialInner.get(), equals: Object.is },
+			{ initial: initialInner.get() },
 		);
 
 		Inspector.register(store, { kind: "switchMap" });

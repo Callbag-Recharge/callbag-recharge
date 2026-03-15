@@ -13,32 +13,55 @@ import { subscribe } from "./subscribe";
  * inner store's value.
  *
  * v3: Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
- * each emit starts a new DIRTY+value cycle. equals: Object.is dedup.
+ * each emit starts a new DIRTY+value cycle. No built-in dedup.
+ * Forwards inner errors and upstream completion.
  */
 export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
 		const initialInner = fn(outer.get());
 		const store = producer<B>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				let innerTalkback: ((type: number) => void) | null = null;
 				let innerActive = false;
+				let outerDone = false;
+
+				let initialized = false;
 
 				function subscribeInner(innerStore: Store<B>) {
 					innerActive = true;
-					emit(innerStore.get());
+					if (initialized) emit(innerStore.get());
+					initialized = true;
 					innerStore.source(START, (type: number, data: unknown) => {
 						if (type === START) innerTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as B);
 						if (type === END) {
 							innerTalkback = null;
-							innerActive = false;
+							if (data !== undefined) {
+								error(data);
+							} else {
+								innerActive = false;
+								if (outerDone) complete();
+							}
 						}
 					});
 				}
 
-				const outerUnsub = subscribe(outer, (v) => {
-					if (!innerActive) subscribeInner(fn(v));
-				});
+				const outerUnsub = subscribe(
+					outer,
+					(v) => {
+						if (!innerActive) subscribeInner(fn(v));
+					},
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								error(err);
+							} else {
+								outerDone = true;
+								if (!innerActive) complete();
+							}
+						},
+					},
+				);
 				subscribeInner(initialInner);
 
 				return () => {
@@ -46,7 +69,7 @@ export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B
 					outerUnsub();
 				};
 			},
-			{ initial: initialInner.get(), equals: Object.is },
+			{ initial: initialInner.get() },
 		);
 
 		Inspector.register(store, { kind: "exhaustMap" });

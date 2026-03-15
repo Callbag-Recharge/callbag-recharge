@@ -1,19 +1,51 @@
-import { derived } from "../derived";
-import { Inspector } from "../inspector";
-import type { StoreOperator, StoreOptions } from "../types";
+import { operator } from "../operator";
+import { DATA, END, RESOLVED, STATE } from "../protocol";
+import type { Store, StoreOperator, StoreOptions } from "../types";
 
 /**
  * Transforms each upstream value through `fn`.
  *
- * Stateful: maintains transformed value via derived()'s cache. get()
+ * Stateful: maintains transformed value via operator()'s cache. get()
  * returns fn(input.get()).
  *
- * v3: Tier 1 — inherits derived()'s diamond resolution. Type 3 DIRTY/RESOLVED
- * propagated automatically; type 1 DATA carries transformed values.
+ * v3: Tier 1 — uses operator() with single dep. Forwards type 3
+ * STATE signals; on type 1 DATA applies fn and emits. Optional equals
+ * enables push-phase memoization via RESOLVED.
  */
 export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperator<A, B> {
 	return (input) => {
-		const name = opts?.name ?? `map(${Inspector.getName(input) ?? "?"})`;
-		return derived([input], () => fn(input.get()), { name, equals: opts?.equals });
+		const eqFn = opts?.equals;
+		const initialValue = fn(input.get());
+		return operator<B>(
+			[input] as Store<unknown>[],
+			({ emit, signal, complete, error }) => {
+				let prev: B = initialValue;
+
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						signal(data);
+					}
+					if (type === DATA) {
+						const mapped = fn(data as A);
+						if (eqFn && eqFn(prev, mapped)) {
+							signal(RESOLVED);
+							return;
+						}
+						prev = mapped;
+						emit(mapped);
+					}
+					if (type === END) {
+						if (data !== undefined) error(data);
+						else complete();
+					}
+				};
+			},
+			{
+				kind: "map",
+				name: opts?.name ?? "map",
+				initial: initialValue,
+				getter: () => fn(input.get()),
+			},
+		);
 	};
 }

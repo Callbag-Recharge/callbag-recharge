@@ -11,7 +11,7 @@ import type { Store, StoreOperator } from "../types";
  * value before first emission, then the latest value from active source.
  *
  * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
- * DIRTY+value cycle. equals: Object.is dedup. Uses raw callbag for END
+ * DIRTY+value cycle. No built-in dedup. Uses raw callbag for END
  * detection (error vs clean completion).
  */
 export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A> {
@@ -19,6 +19,7 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 		const store = producer<A>(
 			({ emit, complete }) => {
 				let activeTalkback: ((type: number) => void) | null = null;
+				let initialized = false;
 
 				function connectSource(source: Store<A>) {
 					if (activeTalkback) {
@@ -26,7 +27,9 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 						activeTalkback = null;
 					}
 					const initial = source.get();
-					if (initial !== undefined) emit(initial as A);
+					// Skip emit on first connect — producer's { initial } already has the value.
+					if (initialized && initial !== undefined) emit(initial as A);
+					initialized = true;
 					source.source(START, (type: number, data: unknown) => {
 						if (type === START) activeTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as A);
@@ -47,7 +50,7 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 					if (activeTalkback) activeTalkback(END);
 				};
 			},
-			{ initial: input.get(), equals: Object.is },
+			{ initial: input.get() },
 		);
 
 		Inspector.register(store, { kind: "rescue" });

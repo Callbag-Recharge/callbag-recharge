@@ -99,7 +99,7 @@ describe("startWith", () => {
 // ---------------------------------------------------------------------------
 
 describe("pairwise", () => {
-	it("emits [prev, curr] on each change", () => {
+	it("emits [prev, curr] after two observed values (rxjs semantics)", () => {
 		const s = state(1);
 		const p = pipe(s, pairwise());
 		const pairs: [number, number][] = [];
@@ -110,23 +110,24 @@ describe("pairwise", () => {
 		s.set(2);
 		s.set(3);
 
-		expect(pairs).toEqual([
-			[1, 2],
-			[2, 3],
-		]);
+		// rxjs pairwise requires 2 observed emissions; first change buffers, second emits pair
+		expect(pairs).toEqual([[2, 3]]);
 	});
 
-	it("get() returns undefined until first change", () => {
+	it("get() returns undefined until two changes observed", () => {
 		const s = state(10);
 		const p = pipe(s, pairwise());
 		// pairwise is stateful — it needs a sink to activate and track changes
 		subscribe(p, () => {});
 		expect(p.get()).toBeUndefined();
 		s.set(20);
-		expect(p.get()).toEqual([10, 20]);
+		// rxjs: first observed value is buffered, no pair yet
+		expect(p.get()).toBeUndefined();
+		s.set(30);
+		expect(p.get()).toEqual([20, 30]);
 	});
 
-	it("prev in first pair is the value at subscription time", () => {
+	it("first pair requires two observed changes (rxjs semantics)", () => {
 		const s = state(5);
 		const p = pipe(s, pairwise());
 		const pairs: [number, number][] = [];
@@ -135,7 +136,10 @@ describe("pairwise", () => {
 		});
 
 		s.set(10);
-		expect(pairs[0]).toEqual([5, 10]);
+		// rxjs: first observed value is buffered, no emission yet
+		expect(pairs).toEqual([]);
+		s.set(20);
+		expect(pairs[0]).toEqual([10, 20]);
 	});
 
 	it("tears down upstream when last sink disconnects", () => {

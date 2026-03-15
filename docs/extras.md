@@ -87,3 +87,257 @@ Many of the original `callbag-*` repos (e.g., `callbag-take-until`, `callbag-deb
 2. **Completion propagation** — END signals flow both upstream and downstream
 3. **Teardown on unsubscribe** — sinks disconnecting mid-stream triggers cleanup (timers cleared, inner subs disposed, buffers released)
 4. **No retained references** — after teardown, no closures hold references to values or sinks
+
+---
+
+## Roadmap: New Extras
+
+### P0 — Critical gaps
+
+#### `fromAsyncIter`
+- **What:** Source from `AsyncIterable` / `AsyncGenerator`
+- **Why:** Async iterables are the universal streaming interface in modern JS:
+  - `fetch().body` (ReadableStream → async iterable)
+  - OpenAI / Anthropic SDK streaming responses
+  - Database cursors (Prisma, Drizzle)
+  - Node.js streams (via `Readable[Symbol.asyncIterator]`)
+  - gRPC streaming responses
+- **Tier:** 2 (each yielded value starts a new cycle)
+- **API:** `fromAsyncIter(iterableOrFactory)` — factory form `() => AsyncIterable` allows `retry`/`repeat` to re-invoke
+- **Effort:** Low — producer + async iteration loop + AbortController cleanup
+- **Notes:** Must support cancellation (abort iterator when last sink leaves)
+
+### P1 — Important for common patterns
+
+#### `withLatestFrom`
+- **What:** When source emits, grab current values from other stores
+- **Why:** "When chunk arrives, include current config" — common in AI apps, forms, real-time
+- **Tier:** 1 (reads deps synchronously via `.get()`)
+- **API:** `withLatestFrom(source, ...others, fn)`
+- **Effort:** Low — operator that calls `.get()` on deps when source emits
+
+#### `bufferCount`
+- **What:** Buffer N items, flush as array when count reached
+- **Why:** "Flush every 100 rows" — more natural than time-based for ETL/batch writes
+- **Tier:** 2 (built on producer)
+- **API:** `bufferCount(source, count, startEvery?)`
+- **Effort:** Low
+
+### P2 — Nice to have
+
+#### `groupBy`
+- **What:** Route values into sub-streams by key function
+- **Why:** Kafka partition semantics, ETL partitioning, categorized event handling
+- **Tier:** 2
+- **API:** `groupBy(source, keyFn)` → store of `Map<K, Store<V>>`
+- **Effort:** Medium — needs inner store lifecycle management
+
+#### `reduce` / `toArray`
+- **What:** Collect all values from a finite source into a single result
+- **Why:** ETL aggregation, collecting finite streams
+- **Tier:** 2
+- **API:** `reduce(source, fn, seed)` → `Store<Acc>`, `toArray(source)` → `Store<T[]>`
+- **Effort:** Low — scan + take-on-complete
+
+#### `race`
+- **What:** Emit from whichever source fires first, unsubscribe others
+- **Why:** "Try CDN and origin, use whichever responds first"
+- **Tier:** 2
+- **Effort:** Low
+
+### P3 — Advanced
+
+#### `window` / `windowCount` / `windowTime`
+- Advanced nested-observable windowing (tumbling, sliding, session)
+- Medium effort
+
+#### `audit`
+- Trailing-edge throttle — emit latest value after silence period
+- Complements `throttle` (leading) and `debounce` (resets)
+- Low effort
+
+---
+
+## Roadmap: Patterns (`src/patterns/`)
+
+Patterns are composed recipes using primitives + extras. Each solves a specific problem in ~20-50 lines. Higher-level than extras, still generic and reusable.
+
+### P0 — Ship with first release (the killer demos)
+
+#### `chatStream` — AI chat streaming primitive
+```ts
+const chat = chatStream({
+  send: (messages) => fetchSSE('/api/chat', { messages }),  // returns AsyncIterable
+  history: state<Message[]>([]),
+})
+// chat.response     — Store<string> (accumulated current response)
+// chat.isStreaming   — Store<boolean>
+// chat.error         — Store<Error | null>
+// chat.send(prompt)  — sends, cancels any in-flight stream
+// chat.cancel()      — manual cancel
+// chat.retry()       — retry last message
+```
+Built from: `state`, `derived`, `producer`, `switchMap`, `scan`, `fromAsyncIter`
+
+#### `cancellableAction` — async action with auto-cancel
+```ts
+const search = cancellableAction(async (query: string, signal: AbortSignal) => {
+  const res = await fetch(`/api/search?q=${query}`, { signal })
+  return res.json()
+})
+// search.trigger('hello')
+// search.result    — Store<T | undefined>
+// search.pending   — Store<boolean>
+// search.error     — Store<Error | null>
+```
+Built from: `state`, `derived`, `producer`, `switchMap`
+
+#### `rateLimiter` — rate-limit with configurable strategy
+```ts
+const limited = rateLimiter(source, {
+  maxPerWindow: 10,
+  windowMs: 1000,
+  strategy: 'drop' | 'queue' | 'error',
+})
+```
+Built from: `operator`, `bufferTime`, `scan`
+
+### P1 — High value patterns
+
+#### `undoRedo` — state with undo/redo history
+```ts
+const editor = undoRedo(state({ text: '', cursor: 0 }), { maxHistory: 50 })
+// editor.current   — Store<T>
+// editor.canUndo / canRedo — Store<boolean>
+// editor.undo() / redo() / checkpoint()
+```
+Built from: `state`, `derived`, `scan`
+
+#### `pagination` — paginated data fetching
+```ts
+const pages = pagination({
+  fetch: (page, signal) => fetchUsers(page, { signal }),
+  pageSize: 20,
+})
+// pages.data / page / hasNext / loading — all Store<T>
+// pages.next() / prev() / goTo(n)
+```
+Built from: `state`, `derived`, `producer`, `switchMap`
+
+#### `formField` — form field with sync + async validation
+```ts
+const email = formField('', {
+  validate: (v) => v.includes('@') || 'Invalid email',
+  asyncValidate: (v, signal) => checkAvailable(v, { signal }),
+  debounceMs: 300,
+})
+// email.value / error / dirty / touched / valid — all Store<T>
+// email.set('user@test.com') / reset()
+```
+Built from: `state`, `derived`, `effect`, `debounce`
+
+### P2 — Specialized patterns
+
+#### `connectionHealth` — heartbeat + auto-reconnect
+Built from: `producer`, `interval`, `timeout`, `retry`, `state`
+
+#### `batchWriter` — accumulate items, flush on count or time
+Built from: `buffer`, `bufferTime`, `bufferCount`, `merge`
+
+#### `stateMachine` — finite state machine with typed transitions
+Built from: `state`, `derived`, `effect`, `scan`
+
+---
+
+## Roadmap: Compat Layers (`src/compat/`)
+
+### P0 — Nanostores (~20-30 lines)
+```ts
+// callbag-recharge/compat/nanostores
+export function atom<T>(initial: T): NanoAtom<T>     // wraps state()
+export function computed<T>(...): NanoComputed<T>     // wraps derived()
+export function map<T>(initial: T): NanoMap<T>        // wraps state() + setKey
+// NanoAtom: .get(), .set(), .subscribe(), .listen()
+```
+Near-1:1 API match. Immediate positioning in Astro/multi-framework ecosystem.
+
+### P1 — TC39 Signals (~50-80 lines)
+```ts
+// callbag-recharge/compat/signals
+export namespace Signal {
+  class State<T> { get(): T; set(v: T): void }         // wraps state()
+  class Computed<T> { get(): T }                        // wraps derived()
+  namespace subtle { class Watcher { ... } }            // wraps subscribe/effect
+}
+```
+Positions as a Signals polyfill with bonus features (batching, diamond resolution, operators).
+
+### P2 — Jotai (~80-120 lines)
+```ts
+// callbag-recharge/compat/jotai
+export function atom<T>(initial: T): Atom<T>
+export function atom<T>(read: (get) => T): DerivedAtom<T>
+export function atom<T>(read, write): WritableAtom<T>
+```
+Needs a `get()` tracking wrapper for implicit dep detection.
+
+### P2 — Zustand (~40-60 lines)
+```ts
+// callbag-recharge/compat/zustand
+export function create<T>(fn: (set, get) => T): StoreApi<T>
+```
+Wraps a single `state()` with Zustand's set/get contract.
+
+---
+
+## Roadmap: Adapters (`src/adapters/`) — Future
+
+Each adapter is a thin source/sink wrapper (~20-50 lines). The library handles the reactive logic.
+
+| Adapter | Source | Sink | Priority | Dep strategy |
+|---------|--------|------|----------|-------------|
+| WebSocket | `fromWebSocket(url)` | `toWebSocket(ws)` | P1 | No deps (browser native) |
+| Kafka | `fromKafka(consumer, topic)` | `toKafka(producer, topic)` | P2 | Peer dep on `kafkajs` |
+| Redis | `fromRedis(sub, channel)` | `toRedis(pub, channel)` | P2 | Peer dep on `ioredis` |
+| PostgreSQL | `fromPgNotify(pool, channel)` | — | P2 | Peer dep on `pg` |
+| gRPC stream | `fromGrpcStream(call)` | `toGrpcStream(call)` | P3 | Peer dep on `@grpc/grpc-js` |
+| NATS | `fromNats(nc, subject)` | `toNats(nc, subject)` | P3 | Peer dep on `nats` |
+
+**Dependency strategy for adapters:**
+- Core `callbag-recharge` remains **zero-dependency**
+- Adapters that need external libs use **peer dependencies** — the user installs kafkajs/ioredis themselves
+- Adapters that work with built-in APIs (WebSocket, fetch, EventSource) have no extra deps
+- All adapters are tree-shakeable via subpath exports: `callbag-recharge/adapters/kafka`
+
+---
+
+## Package Structure
+
+```
+src/
+  ├── (core)           state, derived, effect, producer, operator, pipe, batch, inspector
+  ├── extra/           low-level operators — building blocks
+  │                    (switchMap, debounce, scan, fromEvent, merge, retry, ...)
+  ├── patterns/        composed recipes — solve specific problems
+  │                    (chatStream, cancellableAction, rateLimiter, undoRedo, ...)
+  ├── compat/          drop-in API replacements — get adoption
+  │   ├── nanostores/
+  │   ├── signals/
+  │   ├── jotai/
+  │   └── zustand/
+  └── adapters/        external system connectors — expand reach
+      ├── websocket/
+      ├── kafka/
+      └── redis/
+```
+
+Import paths:
+```ts
+import { state, derived, effect }    from 'callbag-recharge'           // core
+import { switchMap, debounce }       from 'callbag-recharge/extra'     // operators
+import { chatStream }               from 'callbag-recharge/patterns'   // recipes
+import { atom, computed }            from 'callbag-recharge/compat/nanostores'
+import { fromKafka }                 from 'callbag-recharge/adapters/kafka'
+```
+
+Each layer builds on the one below. `patterns/` imports from `extra/` + core. `compat/` wraps core. `adapters/` produce/consume via core. Everything tree-shakes independently.

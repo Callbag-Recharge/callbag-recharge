@@ -10,7 +10,7 @@ import type { Store, StoreOperator } from "../types";
  * value before first emission, then the latest value from the source.
  *
  * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
- * DIRTY+value cycle. equals: Object.is dedup. Uses raw callbag for END
+ * DIRTY+value cycle. No built-in dedup. Uses raw callbag for END
  * detection (error triggers reconnect, clean completion propagates).
  */
 export function retry<A>(n: number): StoreOperator<A, A> {
@@ -19,6 +19,7 @@ export function retry<A>(n: number): StoreOperator<A, A> {
 			({ emit, complete, error }) => {
 				let retriesLeft = n;
 				let inputTalkback: ((type: number) => void) | null = null;
+				let initialized = false;
 
 				function connectInput() {
 					if (inputTalkback) {
@@ -26,7 +27,10 @@ export function retry<A>(n: number): StoreOperator<A, A> {
 						inputTalkback = null;
 					}
 					const initial = input.get();
-					if (initial !== undefined) emit(initial as A);
+					// Skip emit on first connect — producer's { initial } already has the value.
+					// On retry (reconnect after error), emit to update the output value.
+					if (initialized && initial !== undefined) emit(initial as A);
+					initialized = true;
 					input.source(START, (type: number, data: unknown) => {
 						if (type === START) inputTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as A);
@@ -50,7 +54,7 @@ export function retry<A>(n: number): StoreOperator<A, A> {
 					if (inputTalkback) inputTalkback(END);
 				};
 			},
-			{ initial: input.get(), equals: Object.is },
+			{ initial: input.get() },
 		);
 
 		Inspector.register(store, { kind: "retry" });

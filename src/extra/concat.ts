@@ -18,7 +18,7 @@ import type { Store } from "../types";
  */
 export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 	return producer<T | undefined>(
-		({ emit, signal, complete }) => {
+		({ emit, signal, complete, error }) => {
 			let index = 0;
 			let currentTalkback: ((type: number) => void) | null = null;
 
@@ -45,7 +45,11 @@ export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 					}
 					if (type === END) {
 						currentTalkback = null;
-						subscribeNext();
+						if (data !== undefined) {
+							error(data);
+						} else {
+							subscribeNext();
+						}
 					}
 				});
 

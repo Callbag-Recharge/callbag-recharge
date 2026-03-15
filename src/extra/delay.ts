@@ -16,15 +16,40 @@ import { subscribe } from "./subscribe";
 export function delay<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				const timers = new Set<ReturnType<typeof setTimeout>>();
-				const unsub = subscribe(input, (v) => {
-					const id = setTimeout(() => {
-						timers.delete(id);
-						emit(v);
-					}, ms);
-					timers.add(id);
-				});
+				const unsub = subscribe(
+					input,
+					(v) => {
+						const id = setTimeout(() => {
+							timers.delete(id);
+							emit(v);
+						}, ms);
+						timers.add(id);
+					},
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								// Error: cancel all pending timers, forward error
+								for (const id of timers) clearTimeout(id);
+								timers.clear();
+								error(err);
+							} else {
+								// Completion: wait for all pending timers to flush, then complete
+								if (timers.size === 0) {
+									complete();
+								} else {
+									// Schedule completion after the last pending timer
+									const id = setTimeout(() => {
+										timers.delete(id);
+										complete();
+									}, ms);
+									timers.add(id);
+								}
+							}
+						},
+					},
+				);
 				return () => {
 					for (const id of timers) clearTimeout(id);
 					timers.clear();

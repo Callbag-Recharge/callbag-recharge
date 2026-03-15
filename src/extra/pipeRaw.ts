@@ -1,17 +1,21 @@
 /**
- * pipeRaw() fuses all transform functions into a single derived() store
+ * pipeRaw() fuses all transform functions into a single operator() store
  * for ~2x throughput. SKIP sentinel provides filter semantics in pipeRaw.
  *
- * Stateful: returns a store (backed by derived()).
+ * Stateful: returns a store (backed by operator()).
  *
- * v3: Tier 1 — inherits derived()'s diamond resolution.
+ * v3: Tier 1 — uses operator() with single dep. Forwards type 3 STATE
+ * signals; on type 1 DATA applies all fns sequentially, emitting the
+ * result or sending RESOLVED when SKIP is returned. Pull-based get()
+ * when disconnected re-evaluates the pipeline.
  */
 
-import { derived } from "../derived";
+import { operator } from "../operator";
+import { DATA, END, RESOLVED, STATE } from "../protocol";
 import type { Store } from "../types";
 
 // ---------------------------------------------------------------------------
-// SKIP sentinel + pipeRaw — fused pipe with a single derived store
+// SKIP sentinel + pipeRaw — fused pipe with a single operator store
 // ---------------------------------------------------------------------------
 
 export const SKIP: unique symbol = Symbol("SKIP");
@@ -38,16 +42,59 @@ export function pipeRaw<A, B, C, D, E>(
 export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>): Store<unknown>;
 
 export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>): Store<unknown> {
+	// Shared cache between handler (push) and getter (pull)
 	let cached: unknown;
 	let hasCached = false;
-	return derived([source], () => {
-		let v: any = source.get();
+
+	function compute(input: unknown): { value: unknown; skipped: boolean } {
+		let v: any = input;
 		for (const fn of fns) {
 			v = fn(v);
-			if (v === SKIP) return hasCached ? cached : undefined;
+			if (v === SKIP) return { value: undefined, skipped: true };
 		}
-		cached = v;
+		return { value: v, skipped: false };
+	}
+
+	const initial = compute(source.get());
+	if (!initial.skipped) {
+		cached = initial.value;
 		hasCached = true;
-		return v;
-	});
+	}
+
+	return operator(
+		[source],
+		({ emit, signal, complete, error }) => {
+			return (_dep, type, data) => {
+				if (type === STATE) {
+					signal(data);
+				}
+				if (type === DATA) {
+					const result = compute(data);
+					if (result.skipped) {
+						signal(RESOLVED);
+					} else {
+						cached = result.value;
+						hasCached = true;
+						emit(result.value);
+					}
+				}
+				if (type === END) {
+					if (data !== undefined) error(data);
+					else complete();
+				}
+			};
+		},
+		{
+			kind: "pipeRaw",
+			name: "pipeRaw",
+			initial: hasCached ? cached : undefined,
+			getter: () => {
+				const result = compute(source.get());
+				if (result.skipped) return hasCached ? cached : undefined;
+				cached = result.value;
+				hasCached = true;
+				return result.value;
+			},
+		},
+	);
 }

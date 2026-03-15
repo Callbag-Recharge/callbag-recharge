@@ -15,7 +15,7 @@
 import { Inspector } from "./inspector";
 import type { Signal } from "./protocol";
 import { DATA, DIRTY, deferEmission, deferStart, END, isBatching, START, STATE } from "./protocol";
-import type { ProducerStore, Store, StoreOptions } from "./types";
+import type { ProducerStore, SourceOptions, Store } from "./types";
 
 export type ProducerFn<T> = (actions: {
 	emit: (value: T) => void;
@@ -24,11 +24,8 @@ export type ProducerFn<T> = (actions: {
 	error: (e: unknown) => void;
 }) => (() => void) | undefined;
 
-export type ProducerOpts<T> = StoreOptions<T> & {
-	initial?: T;
+export type ProducerOpts<T> = SourceOptions<T> & {
 	autoDirty?: boolean;
-	resetOnTeardown?: boolean;
-	getter?: (cached: T | undefined) => T;
 	_skipInspect?: boolean;
 };
 

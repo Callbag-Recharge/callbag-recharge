@@ -16,12 +16,32 @@ import { subscribe } from "./subscribe";
 export function bufferTime<A>(ms: number): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {
 		const store = producer<A[]>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				let currentBuffer: A[] = [];
 
-				const unsub = subscribe(input, (v) => {
-					currentBuffer.push(v);
-				});
+				const unsub = subscribe(
+					input,
+					(v) => {
+						currentBuffer.push(v);
+					},
+					{
+						onEnd: (err) => {
+							clearInterval(timer);
+							if (err !== undefined) {
+								error(err);
+							} else {
+								// Flush remaining buffer on completion
+								if (currentBuffer.length > 0) {
+									const flushed = currentBuffer;
+									Object.freeze(flushed);
+									currentBuffer = [];
+									emit(flushed);
+								}
+								complete();
+							}
+						},
+					},
+				);
 
 				const timer = setInterval(() => {
 					if (currentBuffer.length > 0) {

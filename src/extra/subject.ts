@@ -7,10 +7,16 @@ import type { Store } from "../types";
  * `next(value)` pushes to all current sinks. `complete()` sends END to all.
  *
  * Stateful: maintains currentValue. get() returns the last value passed
- * to next(), or undefined before first emission. Object.is dedup on next().
+ * to next(), or undefined before first emission. Object.is dedup on next()
+ * only when sinks are connected (matches original semantics — values set
+ * without sinks are always accepted).
  *
  * v3: next() sends DIRTY on type 3 then value on type 1. Batching-aware
  * (defers type 1 emissions during batch). No upstream deps — manually driven.
+ *
+ * Note: subject cannot use producer() because producer's equals guard runs
+ * unconditionally (whenever _value !== undefined), while subject only deduplicates
+ * when sinks are connected. This semantic difference requires manual implementation.
  */
 export interface Subject<T> extends Store<T | undefined> {
 	next(value: T): void;

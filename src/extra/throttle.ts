@@ -11,28 +11,42 @@ import { subscribe } from "./subscribe";
  * undefined before first emission, then the last passed-through value.
  *
  * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * equals: Object.is dedup on emitted values.
+ * No built-in dedup — emits every throttled value.
+ * Forwards upstream completion and errors.
  */
 export function throttle<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				let timer: ReturnType<typeof setTimeout> | null = null;
 
-				const unsub = subscribe(input, (v) => {
-					if (timer !== null) return; // still within throttle window
-					emit(v);
-					timer = setTimeout(() => {
-						timer = null;
-					}, ms);
-				});
+				const unsub = subscribe(
+					input,
+					(v) => {
+						if (timer !== null) return; // still within throttle window
+						emit(v);
+						timer = setTimeout(() => {
+							timer = null;
+						}, ms);
+					},
+					{
+						onEnd: (err) => {
+							if (timer !== null) clearTimeout(timer);
+							timer = null;
+							if (err !== undefined) {
+								error(err);
+							} else {
+								complete();
+							}
+						},
+					},
+				);
 
 				return () => {
 					if (timer !== null) clearTimeout(timer);
 					unsub();
 				};
 			},
-			{ equals: Object.is },
 		);
 
 		Inspector.register(store, { kind: "throttle" });

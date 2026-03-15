@@ -13,45 +13,68 @@ import { subscribe } from "./subscribe";
  * inner store's value. Queue is discarded on teardown.
  *
  * v3: Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
- * each emit starts a new DIRTY+value cycle. equals: Object.is dedup.
+ * each emit starts a new DIRTY+value cycle. No built-in dedup.
+ * Forwards inner errors and upstream completion.
  */
 export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
 		const initialInner = fn(outer.get());
 		const store = producer<B>(
-			({ emit }) => {
+			({ emit, error, complete }) => {
 				let innerTalkback: ((type: number) => void) | null = null;
 				let innerActive = false;
+				let outerDone = false;
 				const queue: A[] = [];
 
 				function processNext() {
 					if (queue.length === 0) {
 						innerActive = false;
+						if (outerDone) complete();
 						return;
 					}
 					subscribeInner(fn(queue.shift() as A));
 				}
 
+				let initialized = false;
+
 				function subscribeInner(innerStore: Store<B>) {
 					innerActive = true;
-					emit(innerStore.get());
+					if (initialized) emit(innerStore.get());
+					initialized = true;
 					innerStore.source(START, (type: number, data: unknown) => {
 						if (type === START) innerTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as B);
 						if (type === END) {
 							innerTalkback = null;
-							processNext();
+							if (data !== undefined) {
+								error(data);
+							} else {
+								processNext();
+							}
 						}
 					});
 				}
 
-				const outerUnsub = subscribe(outer, (v) => {
-					if (!innerActive) {
-						subscribeInner(fn(v));
-					} else {
-						queue.push(v);
-					}
-				});
+				const outerUnsub = subscribe(
+					outer,
+					(v) => {
+						if (!innerActive) {
+							subscribeInner(fn(v));
+						} else {
+							queue.push(v);
+						}
+					},
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								error(err);
+							} else {
+								outerDone = true;
+								if (!innerActive) complete();
+							}
+						},
+					},
+				);
 				subscribeInner(initialInner);
 
 				return () => {
@@ -60,7 +83,7 @@ export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 					queue.length = 0;
 				};
 			},
-			{ initial: initialInner.get(), equals: Object.is },
+			{ initial: initialInner.get() },
 		);
 
 		Inspector.register(store, { kind: "concatMap" });

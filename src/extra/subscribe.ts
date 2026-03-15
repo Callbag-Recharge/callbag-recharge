@@ -14,6 +14,7 @@ import type { Store } from "../types";
 export function subscribe<T>(
 	store: Store<T>,
 	cb: (value: T, prev: T | undefined) => void,
+	opts?: { onEnd?: (error?: unknown) => void },
 ): () => void {
 	let talkback: ((type: number) => void) | null = null;
 
@@ -21,23 +22,22 @@ export function subscribe<T>(
 
 	// `prev` is declared after store.source() but the closure only reads it
 	// after endDeferredStart() triggers producers. By that point prev is already
-	// set to store.get(), so the first emission is suppressed if the value
-	// hasn't changed. Order: register sink → read baseline → start producers.
+	// set to store.get(). Order: register sink → read baseline → start producers.
 	store.source(START, (type: number, data: any) => {
 		if (type === START) talkback = data;
 		if (type === END) {
 			talkback = null;
+			opts?.onEnd?.(data);
 			return;
 		}
-		// Equality check suppresses duplicate emissions (e.g. a batch that
-		// coalesced multiple set() calls back to the original value).
+		// Transparent sink — forwards every DATA to the callback.
+		// Dedup (if desired) belongs in the source (state's equals) or in
+		// an explicit operator (distinctUntilChanged), not here.
 		if (type === 1 /* DATA */) {
 			const next = data as T;
-			if (!Object.is(next, prev)) {
-				const p = prev;
-				prev = next;
-				cb(next, p);
-			}
+			const p = prev;
+			prev = next;
+			cb(next, p);
 		}
 	});
 

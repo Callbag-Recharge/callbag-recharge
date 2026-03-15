@@ -11,12 +11,20 @@
  * STATE signals and decides whether to forward DIRTY/RESOLVED downstream.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
+ *
+ * Options precedence — see SourceOptions in types.ts for full documentation.
+ * get() flow: disconnected + getter → getter(cached) → cache result → return
+ *             connected or no getter → return _value
+ * teardown:   resetOnTeardown → _value = _initial
+ *             next get() with getter will recompute from deps
  */
 
 import { Inspector } from "./inspector";
 import type { Signal } from "./protocol";
 import { DATA, END, START, STATE } from "./protocol";
-import type { Actions, Store, StoreOptions } from "./types";
+import type { Actions, SourceOptions, Store } from "./types";
+
+export type OperatorOpts<B> = SourceOptions<B>;
 
 export class OperatorImpl<B> {
 	_value: B | undefined;
@@ -27,18 +35,25 @@ export class OperatorImpl<B> {
 	_deps: Store<unknown>[];
 	_init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void;
 
+	_getterFn: ((cached: B | undefined) => B) | undefined;
+	_resetOnTeardown: boolean;
+	_initial: B | undefined;
+
 	constructor(
 		deps: Store<unknown>[],
 		init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
-		opts?: StoreOptions & { initial?: B },
+		opts?: OperatorOpts<B>,
 	) {
 		this._value = opts?.initial;
+		this._initial = opts?.initial;
 		this._deps = deps;
 		this._init = init;
+		this._getterFn = opts?.getter;
+		this._resetOnTeardown = opts?.resetOnTeardown === true;
 
 		this.source = this.source.bind(this);
 
-		Inspector.register(this as any, { kind: "operator", ...opts });
+		Inspector.register(this as any, { kind: opts?.kind ?? "operator", ...opts });
 	}
 
 	_connectUpstream(): void {
@@ -48,6 +63,10 @@ export class OperatorImpl<B> {
 		this._upstreamTalkbacks = localTalkbacks;
 
 		const actions: Actions<B> = {
+			seed: (value: B) => {
+				if (this._completed) return;
+				this._value = value;
+			},
 			emit: (value: B) => {
 				if (this._completed) return;
 				this._value = value;
@@ -112,9 +131,17 @@ export class OperatorImpl<B> {
 		for (const tb of this._upstreamTalkbacks) tb?.(END);
 		this._upstreamTalkbacks = [];
 		this._handler = null;
+		if (this._resetOnTeardown) this._value = this._initial;
 	}
 
 	get(): B {
+		if (this._getterFn && !this._sinks) {
+			// Disconnected: pull-based recompute (mirrors derived's get() behavior).
+			// Result is cached so subsequent get() with same dep values is stable.
+			const v = this._getterFn(this._value);
+			this._value = v;
+			return v;
+		}
 		return this._value as B;
 	}
 
@@ -150,7 +177,7 @@ export class OperatorImpl<B> {
 export function operator<B>(
 	deps: Store<unknown>[],
 	init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
-	opts?: StoreOptions & { initial?: B },
+	opts?: OperatorOpts<B>,
 ): Store<B> {
 	return new OperatorImpl<B>(deps, init, opts) as any;
 }
