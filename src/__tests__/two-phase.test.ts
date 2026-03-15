@@ -13,17 +13,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { effect } from "../effect";
-import {
-	batch,
-	DIRTY,
-	derived,
-	Inspector,
-	producer,
-	RESOLVED,
-	STATE,
-	state,
-	subscribe,
-} from "../index";
+import { subscribe } from "../extra/subscribe";
+import { batch, DIRTY, derived, Inspector, producer, RESOLVED, STATE, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();

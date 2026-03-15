@@ -7,9 +7,10 @@ import { rescue } from "../extra/rescue";
 import { retry } from "../extra/retry";
 import { sample } from "../extra/sample";
 import { subject } from "../extra/subject";
+import { subscribe } from "../extra/subscribe";
 import { tap } from "../extra/tap";
 import { TimeoutError, timeout } from "../extra/timeout";
-import { Inspector, pipe, producer, state, subscribe } from "../index";
+import { Inspector, pipe, producer, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();

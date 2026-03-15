@@ -9,7 +9,7 @@ export { Inspector } from "./inspector";
 // General-purpose transform primitive
 export { operator } from "./operator";
 // Operators & piping
-export { pipe, pipeRaw, SKIP } from "./pipe";
+export { pipe } from "./pipe";
 // General-purpose source primitive
 export { producer } from "./producer";
 // Protocol (for advanced use / interop)
@@ -29,7 +29,6 @@ export {
 } from "./protocol";
 // Core primitives
 export { state } from "./state";
-export { subscribe } from "./subscribe";
 
 // Types
 export type {

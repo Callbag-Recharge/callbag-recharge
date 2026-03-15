@@ -39,6 +39,8 @@ export default defineConfig({
 		"src/extra/subject.ts",
 		"src/extra/remember.ts",
 		"src/extra/tap.ts",
+		"src/extra/subscribe.ts",
+		"src/extra/pipeRaw.ts",
 	],
 	format: ["esm", "cjs"],
 	dts: true,

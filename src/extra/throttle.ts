@@ -1,7 +1,7 @@
 import { Inspector } from "../inspector";
 import { producer } from "../producer";
-import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Passes the first upstream change through immediately, then silences further

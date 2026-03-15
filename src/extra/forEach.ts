@@ -1,5 +1,5 @@
-import { subscribe } from "../subscribe";
 import type { Store } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Subscribes to a store and calls `cb` for every value change.

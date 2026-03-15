@@ -1,7 +1,7 @@
 import { Inspector } from "../inspector";
 import { producer } from "../producer";
-import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Delays propagation of each upstream change by `ms` milliseconds.

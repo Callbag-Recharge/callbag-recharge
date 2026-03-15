@@ -8,7 +8,8 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { effect } from "../effect";
-import { DIRTY, derived, Inspector, RESOLVED, STATE, state, subscribe } from "../index";
+import { subscribe } from "../extra/subscribe";
+import { DIRTY, derived, Inspector, RESOLVED, STATE, state } from "../index";
 import { producer } from "../producer";
 
 beforeEach(() => {

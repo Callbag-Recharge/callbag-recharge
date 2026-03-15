@@ -5,7 +5,7 @@
 // Stores stay lean. Inspector is opt-in overhead.
 // ---------------------------------------------------------------------------
 
-import { subscribe } from "./subscribe";
+import { END, START } from "./protocol";
 import type { Store } from "./types";
 
 export interface StoreInfo<T = unknown> {
@@ -82,9 +82,26 @@ export const Inspector = {
 		return result;
 	},
 
-	/** Trace a specific store's value changes */
+	/** Trace a specific store's value changes (raw callbag — no extra/ dependency) */
 	trace<T>(store: Store<T>, cb: (value: T, prev: T | undefined) => void): () => void {
-		return subscribe(store, cb);
+		let talkback: ((type: number) => void) | null = null;
+		let prev: T | undefined = store.get();
+		store.source(START, (type: number, data: any) => {
+			if (type === START) talkback = data;
+			if (type === END) {
+				talkback = null;
+				return;
+			}
+			if (type === 1) {
+				const next = data as T;
+				if (!Object.is(next, prev)) {
+					const p = prev;
+					prev = next;
+					cb(next, p);
+				}
+			}
+		});
+		return () => talkback?.(END);
 	},
 
 	/** Reset all state (for testing) */

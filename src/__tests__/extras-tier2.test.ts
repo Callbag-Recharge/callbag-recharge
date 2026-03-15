@@ -13,9 +13,10 @@ import { interval } from "../extra/interval";
 import { merge } from "../extra/merge";
 import { share } from "../extra/share";
 import { skip } from "../extra/skip";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import { take } from "../extra/take";
-import { DIRTY, Inspector, pipe, producer, state, subscribe } from "../index";
+import { DIRTY, Inspector, pipe, producer, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();

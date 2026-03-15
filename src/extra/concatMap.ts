@@ -1,8 +1,8 @@
 import { Inspector } from "../inspector";
 import { producer } from "../producer";
 import { END, START } from "../protocol";
-import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Maps each upstream value to an inner store via `fn`, subscribing sequentially.

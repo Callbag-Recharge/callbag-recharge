@@ -23,11 +23,9 @@ callbag-recharge is a reactive state management library where **every store is a
 - **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. Connects lazily, disconnects when last sink leaves.
 - **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
-- **`subscribe(store, cb)`** — listen to value changes with previous-value tracking. Pure callbag sink — no DIRTY awareness.
-
 ### Key design patterns (v3 — type 3 control channel)
 
-See [docs/architecture-v3.md](docs/architecture-v3.md) for full design.
+See [docs/architecture.md](docs/architecture.md) for full design.
 
 - **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. This makes operators callbag-compatible without DIRTY awareness.
 - **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
@@ -42,7 +40,8 @@ See [docs/architecture-v3.md](docs/architecture-v3.md) for full design.
 **Tier 1** (participate in diamond resolution, forward type 3):
 - Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`
 - Operators: `take`, `skip`, `merge`, `combine`, `concat`, `flat`, `share`
-- Sinks: `forEach`
+- Sinks: `forEach`, `subscribe`
+- Piping: `pipeRaw`, `SKIP`
 
 **Tier 2** (cycle boundaries, all built on `producer()`):
 - Time-based: `debounce`, `throttle`, `delay`, `bufferTime`, `timeout`, `sample`
@@ -53,7 +52,7 @@ Each extra module is a separate entry point, tree-shakeable via `callbag-recharg
 
 ### Operators & pipe (src/pipe.ts)
 
-`map`, `filter`, `scan` are `StoreOperator<A, B>` — functions that take a `Store<A>` and return a `Store<B>` (internally using `derived()`). Composed via `pipe()`. `pipeRaw()` fuses all transform functions into a single `derived()` store for ~2x throughput. `SKIP` sentinel provides filter semantics in `pipeRaw`.
+`map`, `filter`, `scan` are `StoreOperator<A, B>` — functions that take a `Store<A>` and return a `Store<B>` (internally using `derived()`). Composed via `pipe()`. `pipeRaw()` (in `extra/pipeRaw.ts`) fuses all transform functions into a single `derived()` store for ~2x throughput. `SKIP` sentinel provides filter semantics in `pipeRaw`.
 
 ## Code style
 

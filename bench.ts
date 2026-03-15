@@ -1,4 +1,7 @@
-import { derived, effect, filter, map, pipe, state, stream, subscribe } from "./src/index";
+import { derived, effect, operator, pipe, producer, state } from "./src/index";
+import { filter } from "./src/extra/filter";
+import { map } from "./src/extra/map";
+import { subscribe } from "./src/extra/subscribe";
 
 function bench(name: string, fn: () => void, iterations = 100_000) {
 	for (let i = 0; i < 1000; i++) fn(); // warmup
@@ -20,11 +23,11 @@ bench("state.set()", () => {
 	count.set(Math.random());
 });
 
-// 2. Derived (no cache — always recomputes)
+// 2. Derived (explicit deps)
 const a = state(0);
 const b = state(0);
-const sum = derived(() => a.get() + b.get());
-bench("derived.get() (always recomputes)", () => {
+const sum = derived([a, b], () => a.get() + b.get());
+bench("derived.get() (cached, no dep change)", () => {
 	sum.get();
 });
 
@@ -55,9 +58,10 @@ bench("pipe (3 ops) get only", () => {
 // 4. Effect re-run
 const trigger = state(0);
 let _effectRuns = 0;
-effect(() => {
+effect([trigger], () => {
 	trigger.get();
 	_effectRuns++;
+	return undefined;
 });
 let ei = 0;
 bench("effect re-run", () => {
@@ -74,24 +78,40 @@ bench("fan-out (10 subscribers)", () => {
 
 // 6. Diamond: A -> B, A -> C, B+C -> D
 const dA = state(0);
-const dB = derived(() => dA.get() + 1);
-const dC = derived(() => dA.get() * 2);
-const dD = derived(() => dB.get() + dC.get());
+const dB = derived([dA], () => dA.get() + 1);
+const dC = derived([dA], () => dA.get() * 2);
+const dD = derived([dB, dC], () => dB.get() + dC.get());
 let ddi = 0;
 bench("diamond (A->B,C->D) set + get", () => {
 	dA.set(ddi++);
 	dD.get();
 });
 
-// 7. Pull-based stream
-let pullCount = 0;
-const pullable = stream<number>((emit, request) => {
-	request(() => emit(++pullCount));
+// 7. Producer emit + get
+const prod = producer<number>(({ emit }) => {
+	(prod as any)._emit = emit;
+	return undefined;
+}, { initial: 0 });
+subscribe(prod, () => {}); // connect a sink to activate
+let prodI = 0;
+bench("producer emit + get", () => {
+	(prod as any)._emit(prodI++);
+	prod.get();
 });
-pullable.source(0, () => {});
-bench("stream.pull() + get()", () => {
-	pullable.pull();
-	pullable.get();
+
+// 8. Operator (passthrough transform)
+const opSrc = state(0);
+const opStore = operator<number>([opSrc], (actions) => {
+	return (_depIndex, type, data) => {
+		if (type === 1) actions.emit(data * 2);
+		else if (type === 3) actions.signal(data);
+	};
+}, { initial: 0 });
+subscribe(opStore, () => {}); // connect
+let opI = 0;
+bench("operator (1 dep, transform) set + get", () => {
+	opSrc.set(opI++);
+	opStore.get();
 });
 
 console.log("\n--- Memory ---");

@@ -7,9 +7,10 @@ import { flat } from "../extra/flat";
 import { rescue } from "../extra/rescue";
 import { retry } from "../extra/retry";
 import { sample } from "../extra/sample";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import { throttle } from "../extra/throttle";
-import { derived, Inspector, pipe, state, subscribe } from "../index";
+import { derived, Inspector, pipe, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();

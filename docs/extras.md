@@ -53,10 +53,18 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `rescue(fn)` | On error, switches to a fallback store |
 | `retry(n)` | Re-subscribes on error up to n times |
 
+### Piping
+
+| Module | Description |
+|--------|-------------|
+| `pipeRaw(source, ...fns)` | Fuses transform functions into a single `derived()` store for ~2x throughput |
+| `SKIP` | Sentinel for filter semantics in `pipeRaw` — returning `SKIP` keeps the cached value |
+
 ### Sinks
 
 | Module | Description |
 |--------|-------------|
+| `subscribe(store, cb)` | Listens to value changes with previous-value tracking; pure callbag sink |
 | `forEach(cb)` | Subscribes to a source, calling `cb` for each value |
 
 ---

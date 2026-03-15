@@ -10,14 +10,16 @@ import cbPipe from "callbag-pipe";
 import cbSubscribe from "callbag-subscribe";
 import { filter as rFilter } from "./src/extra/filter";
 import { map as rMap } from "./src/extra/map";
+import { pipeRaw } from "./src/extra/pipeRaw";
+import { subscribe as rSubscribe } from "./src/extra/subscribe";
 import {
 	batch,
 	derived,
 	Inspector,
-	pipeRaw,
+	operator,
 	effect as rechargeEffect,
 	pipe as rPipe,
-	subscribe as rSubscribe,
+	producer,
 	state,
 } from "./src/index";
 
@@ -173,6 +175,7 @@ function printGroup(
 	rechargeEffect([rTrigger], () => {
 		rTrigger.get();
 		_rRuns++;
+		return undefined;
 	});
 	let ri = 0;
 
@@ -187,7 +190,75 @@ function printGroup(
 }
 
 // ============================================================
-// 7. Pipe: 3 operators (map → filter → map)
+// 7. Producer emit + get
+// ============================================================
+{
+	const pSignal = signal(0);
+	signalEffect(() => {
+		pSignal.value;
+	});
+	let pi = 0;
+
+	const rProd = producer<number>(
+		({ emit }) => {
+			(rProd as any)._emit = emit;
+			return undefined;
+		},
+		{ initial: 0 },
+	);
+	rSubscribe(rProd, () => {});
+	let ri = 0;
+
+	printGroup("Producer emit + get (with subscriber)", [
+		bench("Preact signal.value =", () => {
+			pSignal.value = pi++;
+		}),
+		bench("Recharge producer.emit()", () => {
+			(rProd as any)._emit(ri++);
+			rProd.get();
+		}),
+	]);
+}
+
+// ============================================================
+// 8. Operator (1 dep, transform)
+// ============================================================
+{
+	const pA = signal(0);
+	const pDerived = computed(() => pA.value * 2);
+	signalEffect(() => {
+		pDerived.value;
+	});
+	let pi = 0;
+
+	const rA = state(0);
+	const rOp = operator<number>(
+		[rA],
+		(actions) => {
+			return (_depIndex, type, data) => {
+				if (type === 1) actions.emit(data * 2);
+				else if (type === 3) actions.signal(data);
+			};
+		},
+		{ initial: 0 },
+	);
+	rSubscribe(rOp, () => {});
+	let ri = 0;
+
+	printGroup("Operator (1 dep, transform) vs Preact computed", [
+		bench("Preact computed", () => {
+			pA.value = pi++;
+			pDerived.value;
+		}),
+		bench("Recharge operator", () => {
+			rA.set(ri++);
+			rOp.get();
+		}),
+	]);
+}
+
+// ============================================================
+// 9. Pipe: 3 operators (map → filter → map)
 // ============================================================
 {
 	// Recharge: pipe with operators
@@ -233,7 +304,7 @@ function printGroup(
 }
 
 // ============================================================
-// 8. Subscribe/fan-out (10 subscribers)
+// 10. Subscribe/fan-out (10 subscribers)
 // ============================================================
 {
 	const pSrc = signal(0);
@@ -258,7 +329,7 @@ function printGroup(
 }
 
 // ============================================================
-// 9. Inspector disabled vs enabled (10K store creation)
+// 11. Inspector disabled vs enabled (10K store creation)
 // ============================================================
 {
 	Inspector.enabled = true;
@@ -284,7 +355,7 @@ function printGroup(
 }
 
 // ============================================================
-// 10. batch() — N set() calls with effects
+// 12. batch() — N set() calls with effects
 // ============================================================
 {
 	const items = Array.from({ length: 10 }, (_, i) => state(i));
@@ -292,6 +363,7 @@ function printGroup(
 	rechargeEffect(items, () => {
 		for (const s of items) s.get();
 		_runs++;
+		return undefined;
 	});
 
 	let k = 0;
@@ -318,7 +390,7 @@ function printGroup(
 }
 
 // ============================================================
-// 11. pipeRaw vs pipe — 3-operator chain
+// 13. pipeRaw vs pipe — 3-operator chain
 // ============================================================
 {
 	const rSrc1 = state(0);
@@ -352,7 +424,7 @@ function printGroup(
 }
 
 // ============================================================
-// 12. equals — diamond with/without equals on intermediates
+// 14. equals — diamond with/without equals on intermediates
 // ============================================================
 {
 	// Without equals
@@ -364,6 +436,7 @@ function printGroup(
 		b1.get();
 		c1.get();
 		_runs1++;
+		return undefined;
 	});
 	let k1 = 0;
 
@@ -378,6 +451,7 @@ function printGroup(
 		b2.get();
 		c2.get();
 		_runs2++;
+		return undefined;
 	});
 	let k2 = 0;
 
@@ -392,7 +466,7 @@ function printGroup(
 }
 
 // ============================================================
-// 13. Memory per store
+// 15. Memory per store
 // ============================================================
 console.log("\n## Memory per store (10,000 stores)");
 console.log("| Library | bytes/store | heap delta |");

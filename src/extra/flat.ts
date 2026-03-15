@@ -1,7 +1,7 @@
 import { Inspector } from "../inspector";
 import { producer } from "../producer";
-import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Flattens a store of stores with switch semantics: when the outer store

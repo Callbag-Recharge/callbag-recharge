@@ -1,7 +1,7 @@
 import { Inspector } from "../inspector";
 import { producer } from "../producer";
-import { subscribe } from "../subscribe";
 import type { Store, StoreOperator } from "../types";
+import { subscribe } from "./subscribe";
 
 /**
  * Emits the latest value from the input source whenever the notifier emits.
