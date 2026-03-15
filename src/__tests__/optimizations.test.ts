@@ -3,9 +3,9 @@ import { derived } from "../derived";
 import { effect } from "../effect";
 import { Inspector } from "../inspector";
 import { pipeRaw, SKIP } from "../pipe";
+import { producer } from "../producer";
 import { batch } from "../protocol";
 import { state } from "../state";
-import { stream } from "../stream";
 
 // ---------------------------------------------------------------------------
 // Inspector.enabled
@@ -98,30 +98,27 @@ describe("equals option", () => {
 		expect(dRuns).toBe(3);
 	});
 
-	test("stream with custom equals: skip emit for 'equal' values", () => {
-		let emitter!: (v: { id: number }) => void;
-		const s = stream<{ id: number }>(
-			(emit) => {
-				emitter = emit;
-			},
-			{ equals: (a, b) => a.id === b.id },
-		);
+	test("producer with custom equals: skip emit for 'equal' values", () => {
+		const s = producer<{ id: number }>(undefined, {
+			equals: (a, b) => a.id === b.id,
+		});
 
 		let runs = 0;
 		effect([s], () => {
 			s.get();
 			runs++;
 		});
+		expect(runs).toBe(1); // initial effect run
 
-		emitter({ id: 1 });
-		expect(runs).toBe(2); // initial + first emit
+		s.emit({ id: 1 });
+		expect(runs).toBe(2); // first emit
 
 		// Same id → skipped
-		emitter({ id: 1 });
+		s.emit({ id: 1 });
 		expect(runs).toBe(2);
 
 		// Different id → runs
-		emitter({ id: 2 });
+		s.emit({ id: 2 });
 		expect(runs).toBe(3);
 	});
 });

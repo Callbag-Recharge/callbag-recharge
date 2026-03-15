@@ -321,14 +321,14 @@ describe("completion protocol", () => {
 		expect(received).toEqual([42]);
 	});
 
-	test("completed stream sends END to late subscribers", () => {
+	test("completed source sends END to late subscribers", () => {
 		const s = fromIter([1]);
 		const received: number[] = [];
 
 		// First subscriber triggers completion
 		subscribe(s, () => {});
 
-		// Late subscriber should get no values (stream already completed)
+		// Late subscriber should get no values (source already completed)
 		subscribe(s, (v) => {
 			if (v !== undefined) received.push(v);
 		});

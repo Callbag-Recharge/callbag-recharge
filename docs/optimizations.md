@@ -26,7 +26,7 @@ Inspector.enabled = false
 
 The flag defaults to `true` when `NODE_ENV !== 'production'` and `true` in browsers. Set it explicitly for deterministic behavior.
 
-### 2. `equals` option — custom equality on state, derived, and stream
+### 2. `equals` option — custom equality on state, derived, and producer
 
 By default, stores use `Object.is` for equality. The `equals` option has different effects depending on the store type.
 
@@ -42,7 +42,7 @@ user.set({ id: 1, name: 'Bob' }) // same id → no DIRTY, no effect re-runs
 user.set({ id: 2, name: 'Carol' }) // different id → propagates
 ```
 
-**On `derived()` — pull-phase caching:**
+**On `derived()` — push-phase memoization via RESOLVED:**
 
 ```ts
 const category = derived(
@@ -52,22 +52,18 @@ const category = derived(
 )
 ```
 
-When `equals` is provided, `derived` stores cache their last output. If the recomputed value equals the cached one, the cached reference is returned.
+When `equals` is provided, `derived` stores cache their last output. If the recomputed value equals the cached one, derived sends `RESOLVED` on type 3 instead of emitting the value — downstream nodes that were counting this dep as dirty decrement their pending count without receiving a new value. If ALL of a downstream node's dirty deps sent RESOLVED, that node sends RESOLVED too — **skipping `fn()` entirely**. This is true push-phase memoization: entire subtrees can be skipped when values don't change.
 
-**Important limitation:** `equals` on derived is a **pull-phase-only** optimization. It does **not** suppress DIRTY propagation to downstream sinks. When an upstream dep changes, the derived store unconditionally pushes DIRTY downstream. Downstream effects and subscribers still wake up, call `get()`, and run — `equals` only ensures `get()` returns the cached reference instead of the new-but-equal value. For `subscribe`, the built-in `Object.is(next, prev)` check in the subscriber will then skip the user callback, but the subscriber still ran. For `effect`, the effect function runs unconditionally.
-
-To truly skip downstream work when a derived output stabilizes, see [Selective subscription](#selective-subscription-fine-grained-reactivity) in potential future optimizations.
-
-**On `stream()` — skip emit for equal values:**
+**On `producer()` — skip emit for equal values:**
 
 ```ts
-const position = stream<{ x: number; y: number }>(
-  (emit) => { /* high-frequency emitter */ },
+const position = producer<{ x: number; y: number }>(
+  ({ emit }) => { /* high-frequency emitter */ },
   { equals: (a, b) => a.x === b.x && a.y === b.y }
 )
 ```
 
-**When to use:** `state` — skip DIRTY propagation entirely for equal values. `derived` — return stable references from `get()` (reference stability, not propagation savings). `stream` — skip emit for equal values. All types benefit from object/array equality where structural comparison is needed.
+**When to use:** `state` — skip DIRTY propagation entirely for equal values. `derived` — push-phase memoization via RESOLVED (skips entire downstream subtrees). `producer` — skip emit for equal values. All types benefit from object/array equality where structural comparison is needed.
 
 ### 3. `batch()` — coalesce multiple state changes
 
@@ -158,11 +154,11 @@ These are not yet implemented but represent opportunities for further improvemen
 
 ### Selective subscription / push-phase memoization
 
-**Status:** Superseded by the [v2 two-phase push architecture](./architecture-v2.md).
+**Status:** Implemented in v3 via RESOLVED on type 3 control channel.
 
-In v1, `equals` on derived is pull-phase only — it does not suppress DIRTY propagation. The v2 architecture solves this comprehensively: derived stores cache values and receive updates via callbag value propagation (phase 2). When a derived store recomputes and `equals` determines the output hasn't changed, it can suppress downstream emission entirely — true push-phase memoization with no diamond glitch risk.
+In v3, `equals` on derived provides true push-phase memoization. When a derived store recomputes and `equals` determines the output hasn't changed, it sends `RESOLVED` on type 3 instead of emitting a value. Downstream nodes decrement their dirty count; if all deps sent RESOLVED, the entire subtree is skipped without calling `fn()`.
 
-See [architecture-v2.md](./architecture-v2.md) for the full design.
+See [architecture-v3.md](./architecture-v3.md) for the full design.
 
 ### Compile-time Inspector removal
 
@@ -176,11 +172,11 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 |---|---|---|---|
 | `Inspector.enabled = false` | Built-in | 6.8x faster store creation | Production builds |
 | `equals` on state | Built-in | Skip DIRTY propagation entirely | Object/array state |
-| `equals` on derived | Built-in | Stable references from `get()` (pull-phase only, does **not** skip DIRTY) | Stabilizing derived outputs |
-| `equals` on stream | Built-in | Skip emit for equal values | High-frequency streams |
+| `equals` on derived | Built-in | Push-phase memoization via RESOLVED — skips entire downstream subtrees | Stabilizing derived outputs |
+| `equals` on producer | Built-in | Skip emit for equal values | High-frequency producers |
 | `batch()` | Built-in | 3.3x for multi-set patterns | Concurrent state updates |
 | `pipeRaw()` + `SKIP` | Built-in | Single derived store for pipe chain | Hot pipe chains, SKIP filter semantics |
 | Raw callbag interop | Built-in | ~2x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
-| Push-phase memoization | Planned (v2) | Suppress downstream emission when output unchanged | All derived stores with `equals` (see [architecture-v2](./architecture-v2.md)) |
+| Push-phase memoization | Built-in (v3) | Suppress downstream emission when output unchanged via RESOLVED | All derived stores with `equals` (see [architecture-v3](./architecture-v3.md)) |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |

@@ -9,9 +9,11 @@ interface Observable<T> {
  * Creates a source from an Observable (or any object with a
  * `.subscribe({ next })` method).
  *
- * Tier 2 Producer: event source, no upstream deps.
+ * Stateful: maintains last value via producer. get() returns the last
+ * emitted value, or undefined before first emission.
  *
- * v3: uses producer() — each next() emission sends DIRTY then value.
+ * v3: Tier 2 Producer — event source, no upstream deps. Each next()
+ * emission sends DIRTY on type 3 then value on type 1.
  */
 export function fromObs<T>(observable: Observable<T>): ProducerStore<T> {
 	return producer<T>(({ emit }) => {

@@ -62,29 +62,6 @@ export function deferEmission(fn: () => void): void {
 }
 
 // ---------------------------------------------------------------------------
-// Compat shim — pushChange for v2 extras not yet updated to v3
-// Sends DIRTY on type 3, value on type 1 (with batch deferral)
-// ---------------------------------------------------------------------------
-
-export function pushChange(sinks: Set<any>, getValue: () => any): void {
-	for (const sink of sinks) sink(STATE, DIRTY);
-	if (batchDepth > 0) {
-		deferredEmissions.push(() => {
-			const v = getValue();
-			for (const sink of sinks) sink(DATA, v);
-		});
-	} else {
-		const v = getValue();
-		for (const sink of sinks) sink(DATA, v);
-	}
-}
-
-// Compat shim — in v3 effects run inline, no separate queue
-export function enqueueEffect(run: () => void): void {
-	run();
-}
-
-// ---------------------------------------------------------------------------
 // Connection batching (producer start deferral) — unchanged from v2
 // ---------------------------------------------------------------------------
 

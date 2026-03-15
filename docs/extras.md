@@ -14,29 +14,44 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `fromObs(observable)` | Converts an Observable (RxJS-compatible) into a source |
 | `fromIter(iterable)` | Converts a sync iterable into a source |
 
-### Operators
+### Tier 1 operators (participate in diamond resolution, forward type 3)
 
 | Module | Description |
 |--------|-------------|
 | `map(fn)` | Transforms each value |
-| `filter(pred)` | Passes values matching a predicate |
+| `filter(pred)` | Passes values matching a predicate; sends RESOLVED when suppressing |
 | `scan(reducer, seed)` | Accumulates values with a reducer |
-| `take(n)` | Emits only the first _n_ values, then completes |
-| `skip(n)` | Skips the first _n_ values |
-| `flat` | Flattens a source of sources (mergeAll semantics) |
+| `take(n)` | Emits only the first _n_ values, then disconnects + completes |
+| `skip(n)` | Skips the first _n_ values; sends RESOLVED when suppressing |
+| `tap(fn)` | Side-effect passthrough; forwards all signals and values unchanged |
+| `distinctUntilChanged(eq?)` | Suppresses consecutive duplicates; sends RESOLVED on duplicate |
+| `pairwise` | Emits `[prev, curr]` pairs on each upstream change |
+| `startWith(value)` | Returns `value` when upstream is `undefined`; switches to upstream once it emits |
+| `takeUntil(notifier)` | Passes through values until notifier emits, then completes and tears down upstream |
+| `remember` | Caches the last upstream value and replays it to new subscribers |
 | `merge(...sources)` | Merges multiple sources into one |
 | `combine(...sources)` | Emits arrays of latest values when any source updates |
 | `concat(...sources)` | Subscribes to sources sequentially |
+| `flat` | Flattens a source of sources (mergeAll semantics) |
 | `share` | Shares a single upstream subscription across multiple sinks |
-| `takeUntil(notifier)` | Passes through values until notifier emits, then completes and tears down upstream |
+| `buffer(notifier)` | Accumulates values into arrays; flushes on notifier emission |
+| `subject` | Multicast primitive; both a source and manual emitter |
+
+### Tier 2 operators (cycle boundaries, built on `producer()`)
+
+| Module | Description |
+|--------|-------------|
+| `debounce(ms)` | Delays propagation by `ms` ms; resets timer on each new value |
+| `throttle(ms)` | Leading-edge: passes first value, silences further values for `ms` ms |
+| `delay(ms)` | Delays each value by `ms` ms; resets to undefined on teardown |
+| `bufferTime(ms)` | Time-windowed buffering; flushes accumulated arrays at fixed intervals |
+| `timeout(ms)` | Errors if no value arrives within `ms` ms |
+| `sample(notifier)` | Emits the latest value when notifier fires |
 | `switchMap(fn)` | Maps to an inner store; unsubscribes from the previous inner on each outer change |
 | `concatMap(fn)` | Maps to inner stores sequentially; queues outer values while inner is active |
 | `exhaustMap(fn)` | Maps to an inner store; ignores new outer values while inner is active |
-| `debounce(ms)` | Delays propagation by `ms` ms; resets timer on each new value |
-| `throttle(ms)` | Leading-edge: passes first value, silences further values for `ms` ms |
-| `distinctUntilChanged(eq?)` | Suppresses consecutive duplicate values; optional custom equality function |
-| `startWith(value)` | Returns `value` when upstream is `undefined`; switches to upstream once it emits |
-| `pairwise` | Emits `[prev, curr]` pairs on each upstream change |
+| `rescue(fn)` | On error, switches to a fallback store |
+| `retry(n)` | Re-subscribes on error up to n times |
 
 ### Sinks
 
@@ -48,26 +63,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 
 ## Roadmap
 
-Candidates are prioritized by how well they stress-test correctness and memory-leak safety in the callbag graph.
-
-### Tier 2 — Medium priority
-
-Useful operators with moderate leak-testing value.
-
-| Module | Category | Rationale |
-|--------|----------|-----------|
-| `delay(ms)` | Operator | Timer-based value deferral. Similar leak profile to debounce. |
-| `buffer(notifier)` | Operator | Accumulates values into arrays. Tests verify buffers are released on unsubscribe. |
-| `bufferTime(ms)` | Operator | Time-windowed buffering. Combines timer + accumulation leak risks. |
-| `retry(n)` | Operator | Re-subscribes on error. Tests verify old subscriptions are cleaned up before retry. |
-| `rescue(fn)` | Operator | Error recovery. Similar resubscription lifecycle to retry. |
-| `sample(notifier)` | Operator | Dual-subscription lifecycle — tests verify both source and notifier are torn down. |
-| `timeout(ms)` | Operator | Timer + error path. Tests catch leaked timers when source completes in time. |
-| `subject` | Source | Multicast primitive. Tests verify all sinks are removed on completion/error. |
-| `remember` | Operator | Like `share` but caches the last value. Tests verify cache is released on teardown. |
-| `tap(fn)` | Operator | Side-effect passthrough. Also a useful testing utility. |
-
-### Tier 3 — Nice to have
+### Nice to have
 
 Simple modules whose tests validate callbag protocol compliance and early-termination cleanup.
 

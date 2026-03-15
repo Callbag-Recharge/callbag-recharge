@@ -15,7 +15,7 @@ import { share } from "../extra/share";
 import { skip } from "../extra/skip";
 import { switchMap } from "../extra/switchMap";
 import { take } from "../extra/take";
-import { DIRTY, Inspector, pipe, state, stream, subscribe } from "../index";
+import { DIRTY, Inspector, pipe, producer, state, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -318,13 +318,8 @@ describe("merge", () => {
 	});
 
 	it("handles END from individual sources without double-END", () => {
-		let completeA: () => void;
-		const a = stream<number>((emit, _req, complete) => {
-			emit(1);
-			completeA = complete;
-		});
+		const a = producer<number>();
 		const b = state(0);
-		a.source(0, () => {});
 
 		const m = merge(a, b);
 		const values: number[] = [];
@@ -332,10 +327,11 @@ describe("merge", () => {
 			if (v !== undefined) values.push(v);
 		});
 
-		completeA!(); // a completes
+		a.emit(1);
+		a.complete(); // a completes
 		b.set(10); // b should still work
 
-		expect(values).toEqual([10]);
+		expect(values).toEqual([1, 10]);
 	});
 });
 
@@ -345,14 +341,8 @@ describe("merge", () => {
 
 describe("concat", () => {
 	it("subscribes to sources sequentially", () => {
-		let emitA: (v: number) => void;
-		let completeA: () => void;
-		const a = stream<number>((emit, _req, complete) => {
-			emitA = emit;
-			completeA = complete;
-		});
+		const a = producer<number>();
 		const b = state(99);
-		a.source(0, () => {});
 
 		const c = concat(a, b);
 		const values: number[] = [];
@@ -360,16 +350,16 @@ describe("concat", () => {
 			if (v !== undefined) values.push(v);
 		});
 
-		emitA!(1);
-		emitA!(2);
-		completeA!(); // a completes → subscribes to b
+		a.emit(1);
+		a.emit(2);
+		a.complete(); // a completes → subscribes to b
 
 		expect(values).toEqual([1, 2]);
 	});
 
 	it("tears down current source on unsubscribe", () => {
 		const cleanup = vi.fn();
-		const a = stream<number>(() => cleanup);
+		const a = producer<number>(() => cleanup);
 		const c = concat(a);
 		const unsub = subscribe(c, () => {});
 		unsub();

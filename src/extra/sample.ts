@@ -5,8 +5,12 @@ import type { Store, StoreOperator } from "../types";
 
 /**
  * Emits the latest value from the input source whenever the notifier emits.
- * get() always returns the latest input value (not just the last sampled one).
- * Tier 2 — each emit starts a new DIRTY+value cycle.
+ *
+ * Stateful: maintains latest input value. get() always returns the latest
+ * input value (via getter), not just the last sampled emission.
+ *
+ * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ * equals: Object.is dedup. getter overrides get() to return latest input.
  */
 export function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 	return (input: Store<A>) => {

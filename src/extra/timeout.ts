@@ -7,7 +7,12 @@ import type { Store, StoreOperator } from "../types";
  * Errors if the input source does not emit within `ms` milliseconds.
  * The timer resets on each emission. If the timer fires, sinks receive
  * END with a TimeoutError.
- * Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ *
+ * Stateful: maintains last forwarded value via producer. get() returns
+ * input's initial value before first emission.
+ *
+ * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ * No equals — every upstream value is forwarded to keep the timer alive.
  */
 export class TimeoutError extends Error {
 	constructor(ms: number) {

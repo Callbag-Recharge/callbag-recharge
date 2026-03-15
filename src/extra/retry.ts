@@ -5,7 +5,13 @@ import type { Store, StoreOperator } from "../types";
 
 /**
  * Re-subscribes to the input source up to `n` times on error (END with error).
- * Tier 2 — dynamic subscription operator (autoDirty: false, manual signal control).
+ *
+ * Stateful: maintains last value via producer. get() returns input's initial
+ * value before first emission, then the latest value from the source.
+ *
+ * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
+ * DIRTY+value cycle. equals: Object.is dedup. Uses raw callbag for END
+ * detection (error triggers reconnect, clean completion propagates).
  */
 export function retry<A>(n: number): StoreOperator<A, A> {
 	return (input: Store<A>) => {

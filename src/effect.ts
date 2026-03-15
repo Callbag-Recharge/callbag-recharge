@@ -1,10 +1,13 @@
-// ---------------------------------------------------------------------------
-// effect(deps, fn) — run side effects when deps change
-// ---------------------------------------------------------------------------
-// Type 3 dirty tracking across deps. Runs fn() inline when all dirty deps
-// resolve. No enqueueEffect — effects run as part of the callbag signal flow.
-// Skips execution when all deps sent RESOLVED (no value changed).
-// ---------------------------------------------------------------------------
+/**
+ * Side-effect runner. Connects eagerly to deps on creation, runs fn() inline
+ * when all dirty deps resolve. Returns a dispose function.
+ *
+ * Stateless: does not produce a store. No cached value or get().
+ *
+ * v3: type 3 dirty tracking across deps. Skips execution when all deps sent
+ * RESOLVED (no value changed). Effects run as part of the callbag signal
+ * flow — no enqueueEffect.
+ */
 
 import {
 	beginDeferredStart,

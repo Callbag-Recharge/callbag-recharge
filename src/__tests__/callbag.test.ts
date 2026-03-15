@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { filter } from "../extra/filter";
 import { map } from "../extra/map";
 import { scan } from "../extra/scan";
-import { DIRTY, derived, Inspector, pipe, STATE, state, stream, subscribe } from "../index";
+import { DIRTY, derived, Inspector, pipe, producer, STATE, state, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -118,29 +118,26 @@ describe("Callbag protocol", () => {
 	});
 });
 
-describe("Stream", () => {
+describe("Producer", () => {
 	it("emits values from a push-based producer", () => {
-		let emitter: (v: number) => void;
-		const s = stream<number>((emit) => {
-			emitter = emit;
-		});
+		const s = producer<number>();
 
 		const values: number[] = [];
 		subscribe(s, (v) => {
 			if (v !== undefined) values.push(v);
 		});
 
-		emitter?.(1);
-		emitter?.(2);
-		emitter?.(3);
+		s.emit(1);
+		s.emit(2);
+		s.emit(3);
 
 		expect(values).toEqual([1, 2, 3]);
 		expect(s.get()).toBe(3);
 	});
 
-	it("producer starts lazily (on first sink)", () => {
+	it("producer fn starts lazily (on first sink)", () => {
 		const start = vi.fn();
-		const s = stream<number>((_emit) => {
+		const s = producer<number>((_actions) => {
 			start();
 		});
 
@@ -151,7 +148,7 @@ describe("Stream", () => {
 
 	it("producer cleanup runs when all sinks disconnect", () => {
 		const cleanup = vi.fn();
-		const s = stream<number>((_emit) => {
+		const s = producer<number>((_actions) => {
 			return cleanup;
 		});
 
@@ -165,82 +162,16 @@ describe("Stream", () => {
 		expect(cleanup).toHaveBeenCalledTimes(1);
 	});
 
-	it("stream can be used as dependency in derived", () => {
-		let emitter: (v: number) => void;
-		const s = stream<number>((emit) => {
-			emitter = emit;
-		});
+	it("producer can be used as dependency in derived", () => {
+		const s = producer<number>();
 
 		s.source(0, () => {}); // start producer
 
 		const doubled = derived([s], () => (s.get() ?? 0) * 2);
 		expect(doubled.get()).toBe(0);
 
-		emitter?.(5);
+		s.emit(5);
 		expect(doubled.get()).toBe(10);
-	});
-
-	it("pull-based stream responds to .pull()", () => {
-		let count = 0;
-		const s = stream<number>((emit, request) => {
-			request(() => {
-				count++;
-				emit(count);
-			});
-		});
-
-		s.source(0, () => {}); // start producer
-		expect(s.get()).toBeUndefined(); // nothing emitted yet
-
-		s.pull();
-		expect(s.get()).toBe(1);
-
-		s.pull();
-		expect(s.get()).toBe(2);
-	});
-
-	it(".pull() on non-pullable stream throws", () => {
-		const s = stream<number>((_emit) => {
-			// push-only, no request() call
-		});
-
-		s.source(0, () => {});
-
-		expect(() => s.pull()).toThrow("not pullable");
-	});
-
-	it(".pull() error does not disconnect the stream", () => {
-		let emitter: (v: number) => void;
-		const s = stream<number>((emit) => {
-			emitter = emit;
-		});
-
-		s.source(0, () => {});
-
-		expect(() => s.pull()).toThrow();
-
-		// Should still work after the error
-		emitter?.(42);
-		expect(s.get()).toBe(42);
-	});
-
-	it("pull-based stream works with derived", () => {
-		let count = 0;
-		const s = stream<number>((emit, request) => {
-			request(() => emit(++count));
-		});
-
-		s.source(0, () => {});
-
-		const doubled = derived([s], () => (s.get() ?? 0) * 2);
-
-		expect(doubled.get()).toBe(0); // nothing pulled yet
-
-		s.pull();
-		expect(doubled.get()).toBe(2); // count=1, doubled=2
-
-		s.pull();
-		expect(doubled.get()).toBe(4); // count=2, doubled=4
 	});
 });
 

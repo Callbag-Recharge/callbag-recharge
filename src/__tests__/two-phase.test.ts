@@ -18,10 +18,10 @@ import {
 	DIRTY,
 	derived,
 	Inspector,
+	producer,
 	RESOLVED,
 	STATE,
 	state,
-	stream,
 	subscribe,
 } from "../index";
 
@@ -98,11 +98,8 @@ describe("Type 3 protocol — raw callbag signals", () => {
 		]);
 	});
 
-	it("stream sends DIRTY on type 3, value on type 1 per emit() (via compat)", () => {
-		let emit: (v: number) => void;
-		const s = stream<number>((e) => {
-			emit = e;
-		});
+	it("producer sends DIRTY on type 3, value on type 1 per emit()", () => {
+		const s = producer<number>();
 		const signals: Array<{ type: number; data: unknown }> = [];
 
 		s.source(0, (type: number, data: unknown) => {
@@ -110,8 +107,7 @@ describe("Type 3 protocol — raw callbag signals", () => {
 			if (type === 1) signals.push({ type: 1, data });
 		});
 
-		// biome-ignore lint/style/noNonNullAssertion: test setup
-		emit!(42);
+		s.emit(42);
 		expect(signals).toEqual([
 			{ type: STATE, data: DIRTY },
 			{ type: 1, data: 42 },

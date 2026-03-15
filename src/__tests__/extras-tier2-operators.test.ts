@@ -9,7 +9,7 @@ import { sample } from "../extra/sample";
 import { subject } from "../extra/subject";
 import { tap } from "../extra/tap";
 import { TimeoutError, timeout } from "../extra/timeout";
-import { Inspector, pipe, state, stream, subscribe } from "../index";
+import { Inspector, pipe, producer, state, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -380,8 +380,8 @@ describe("sample", () => {
 		expect(values).toEqual([10, 20]);
 	});
 
-	it("works with stream source (initial undefined)", () => {
-		const s = stream<number>(() => {});
+	it("works with producer source (initial undefined)", () => {
+		const s = producer<number>();
 		const notifier = state(false);
 		const sampled = pipe(s, sample(notifier));
 		subscribe(sampled, () => {});
@@ -598,15 +598,12 @@ describe("subject", () => {
 
 describe("remember", () => {
 	it("caches the latest upstream value", () => {
-		let emit: (v: number) => void;
-		const s = stream<number>((e) => {
-			emit = e;
-		});
+		const s = producer<number>();
 		const r = pipe(s, remember());
 		subscribe(r, () => {}); // activate
 
 		expect(r.get()).toBeUndefined();
-		emit!(5);
+		s.emit(5);
 		expect(r.get()).toBe(5);
 	});
 
@@ -620,14 +617,11 @@ describe("remember", () => {
 	});
 
 	it("clears cache on teardown", () => {
-		let emit: (v: number) => void;
-		const s = stream<number>((e) => {
-			emit = e;
-		});
+		const s = producer<number>();
 		const r = pipe(s, remember());
 		const unsub = subscribe(r, () => {});
 
-		emit!(10);
+		s.emit(10);
 		expect(r.get()).toBe(10);
 
 		unsub();
@@ -647,23 +641,20 @@ describe("remember", () => {
 	});
 
 	it("re-subscribe after teardown re-reads upstream", () => {
-		let emit: (v: number) => void;
-		const s = stream<number>((e) => {
-			emit = e;
-		});
+		const s = producer<number>();
 		const r = pipe(s, remember());
 
 		const unsub1 = subscribe(r, () => {});
-		emit!(42);
+		s.emit(42);
 		expect(r.get()).toBe(42);
 		unsub1(); // cache cleared
 		expect(r.get()).toBeUndefined();
 
-		// Re-subscribe — start() reads input.get() which retains stream's last value
+		// Re-subscribe — start() reads input.get() which retains producer's last value
 		subscribe(r, () => {});
-		// Stream retains 42 even after producer restart, so remember caches it again
+		// Producer retains 42 even after restart, so remember caches it again
 		expect(r.get()).toBe(42);
-		emit!(99);
+		s.emit(99);
 		expect(r.get()).toBe(99);
 	});
 
@@ -715,21 +706,8 @@ describe("retry", () => {
 	});
 
 	it("re-subscribes on error up to n times", () => {
-		let attempts = 0;
-		const completes: (() => void)[] = [];
-		const makeSource = () =>
-			stream<number>((emit, _req, complete) => {
-				attempts++;
-				emit(attempts);
-				completes.push(() => complete());
-			});
-
-		// We need to create a source that errors via END with data
+		// Create a source that errors via END with data
 		let errorSink: ((type: number, data?: unknown) => void) | null = null;
-		const errorSource: ReturnType<typeof state> & { failWith: (e: unknown) => void } = {
-			...state(1),
-			failWith(_e: unknown) {},
-		};
 
 		// Simpler approach: use raw callbag protocol to trigger END with error
 		let producerCount = 0;
@@ -775,12 +753,9 @@ describe("retry", () => {
 	});
 
 	it("forwards normal completion downstream", () => {
-		let completeSrc: (() => void) | null = null;
-		const src = stream<number>((emit, _req, complete) => {
+		const src = producer<number>(({ emit }) => {
 			emit(1);
-			completeSrc = complete;
 		});
-		src.source(0, () => {}); // start producer
 
 		const r = pipe(src, retry(3));
 		let gotEnd = false;
@@ -788,7 +763,7 @@ describe("retry", () => {
 			if (type === 2 && data === undefined) gotEnd = true;
 		});
 
-		completeSrc!(); // normal completion — no error
+		src.complete(); // normal completion — no error
 		expect(gotEnd).toBe(true);
 	});
 });
@@ -878,12 +853,9 @@ describe("rescue", () => {
 	});
 
 	it("forwards normal completion from source", () => {
-		let completeSrc: (() => void) | null = null;
-		const src = stream<number>((emit, _req, complete) => {
+		const src = producer<number>(({ emit }) => {
 			emit(1);
-			completeSrc = complete;
 		});
-		src.source(0, () => {}); // start producer
 
 		const r = pipe(
 			src,
@@ -894,7 +866,7 @@ describe("rescue", () => {
 			if (type === 2 && data === undefined) gotEnd = true;
 		});
 
-		completeSrc!();
+		src.complete();
 		expect(gotEnd).toBe(true);
 	});
 
@@ -915,12 +887,9 @@ describe("rescue", () => {
 			},
 		};
 
-		let completeFallback: (() => void) | null = null;
-		const fallback = stream<number>((emit, _req, complete) => {
+		const fallback = producer<number>(({ emit }) => {
 			emit(42);
-			completeFallback = complete;
 		});
-		fallback.source(0, () => {}); // pre-start
 
 		const r = pipe(
 			src,
@@ -934,7 +903,7 @@ describe("rescue", () => {
 		// Error on src → switch to fallback
 		errorSink!(2, new Error("fail"));
 		// Normal completion on fallback → should forward
-		completeFallback!();
+		fallback.complete();
 		expect(gotEnd).toBe(true);
 	});
 });

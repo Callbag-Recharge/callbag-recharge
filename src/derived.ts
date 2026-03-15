@@ -1,17 +1,18 @@
-// ---------------------------------------------------------------------------
-// derived(deps, fn) — computed store with dirty tracking and caching
-// ---------------------------------------------------------------------------
-// Type 3 DIRTY/RESOLVED for diamond resolution.
-// Type 1 DATA carries only real values.
-// get(): returns cache when settled, recomputes when pending or unconnected.
-// equals: push-phase memoization via RESOLVED (skip entire subtree).
-//
-// Note: derived is implemented as a standalone primitive rather than on top of
-// operator() because it needs a custom get() (pull-fallback recompute when
-// unconnected) that operator does not support. Sharing the operator abstraction
-// would require either a getOverride hook in operator or double Inspector
-// registration, both of which add more complexity than they remove.
-// ---------------------------------------------------------------------------
+/**
+ * Computed store with dirty tracking and caching. Recomputes fn() when
+ * all dirty deps have resolved, emitting the new value on type 1 DATA.
+ *
+ * Stateful: maintains cached value. get() returns cache when settled,
+ * recomputes when pending or unconnected.
+ *
+ * v3: Tier 1 — type 3 DIRTY/RESOLVED for diamond resolution. equals option
+ * enables push-phase memoization via RESOLVED (skips entire subtree).
+ * Type 1 DATA carries only real values.
+ *
+ * Note: implemented as a standalone primitive rather than on top of operator()
+ * because it needs a custom get() (pull-fallback recompute when unconnected)
+ * that operator does not support.
+ */
 
 import { Inspector } from "./inspector";
 import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";

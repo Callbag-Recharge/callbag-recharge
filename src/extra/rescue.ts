@@ -6,7 +6,13 @@ import type { Store, StoreOperator } from "../types";
 /**
  * Error recovery operator. When the input source errors, calls `fn` with
  * the error and subscribes to the returned fallback source.
- * Tier 2 — dynamic subscription operator (autoDirty: false, manual signal control).
+ *
+ * Stateful: maintains last value via producer. get() returns input's initial
+ * value before first emission, then the latest value from active source.
+ *
+ * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
+ * DIRTY+value cycle. equals: Object.is dedup. Uses raw callbag for END
+ * detection (error vs clean completion).
  */
 export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A> {
 	return (input: Store<A>) => {

@@ -1,10 +1,13 @@
-// ---------------------------------------------------------------------------
-// state(initial) — a writable store, thin wrapper over producer()
-// ---------------------------------------------------------------------------
-// Conceptually and implementationally built on producer().
-// Adds set()/update() API and defaults equals to Object.is.
-// The cast from T|undefined to T is safe because initial is always provided.
-// ---------------------------------------------------------------------------
+/**
+ * A writable store, thin wrapper over producer().
+ * Adds set()/update() API and defaults equals to Object.is.
+ *
+ * Stateful: maintains value via producer. get() returns current value.
+ * set() = emit(), update(fn) = emit(fn(get())).
+ *
+ * v3: inherits producer's autoDirty — set() sends DIRTY on type 3 then
+ * value on type 1. Object.is equality guard prevents redundant emissions.
+ */
 
 import { Inspector } from "./inspector";
 import { producer } from "./producer";

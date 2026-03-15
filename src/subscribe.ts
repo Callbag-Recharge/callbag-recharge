@@ -1,9 +1,12 @@
-// ---------------------------------------------------------------------------
-// subscribe(store, cb) — listen to value changes
-// ---------------------------------------------------------------------------
-// Pure callbag sink. Receives type 1 DATA only — no DIRTY awareness.
-// Type 3 signals are ignored (subscribe doesn't participate in state mgmt).
-// ---------------------------------------------------------------------------
+/**
+ * Listens to value changes with previous-value tracking.
+ * Returns an unsubscribe function.
+ *
+ * Stateless: does not produce a store. Pure callbag sink.
+ *
+ * v3: receives type 1 DATA only — no DIRTY awareness. Type 3 signals are
+ * ignored (subscribe doesn't participate in state management).
+ */
 
 import { beginDeferredStart, END, endDeferredStart, START } from "./protocol";
 import type { Store } from "./types";

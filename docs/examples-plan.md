@@ -14,7 +14,8 @@ Add TSDoc `@example` blocks directly on each exported function. These appear in 
 |------|-----------|
 | `src/state.ts` | `state(initial, options?)` |
 | `src/derived.ts` | `derived(deps, fn, options?)` |
-| `src/stream.ts` | `stream(producer)` |
+| `src/producer.ts` | `producer(fn?, opts?)` |
+| `src/operator.ts` | `operator(deps, init, opts?)` |
 | `src/effect.ts` | `effect(deps, fn)` |
 | `src/subscribe.ts` | `subscribe(store, cb)` |
 | `src/pipe.ts` | `pipe()`, `pipeRaw()`, `SKIP` |
@@ -56,8 +57,8 @@ Longer, multi-primitive examples that show realistic patterns. Each file is a st
 | `examples/counter.ts` | `state` + `derived` + `effect` — basic reactive counter |
 | `examples/diamond.ts` | Diamond dependency graph — shows single-fire effect guarantee |
 | `examples/batch.ts` | `batch()` — multiple `set()` calls coalesced into one effect run |
-| `examples/stream-push.ts` | `stream` push producer + `subscribe` — e.g. simulated WebSocket |
-| `examples/stream-pull.ts` | `stream` pull producer — e.g. paginated data source |
+| `examples/producer-push.ts` | `producer` push source + `subscribe` — e.g. simulated WebSocket |
+| `examples/producer-actions.ts` | `producer` with init function — lifecycle, emit, complete, error |
 | `examples/pipe-operators.ts` | `pipe()` with `map`, `filter`, `scan` — transformation chain |
 | `examples/pipe-raw.ts` | `pipeRaw()` with `SKIP` — high-throughput fused pipeline |
 | `examples/extras.ts` | `interval`, `fromEvent`, `merge`, `share`, `forEach` — core extras wired together |

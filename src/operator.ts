@@ -1,10 +1,15 @@
-// ---------------------------------------------------------------------------
-// operator(deps, init, opts?) — general-purpose transform primitive
-// ---------------------------------------------------------------------------
-// Receives all signal types from upstream deps and decides what to forward.
-// The init function receives actions and returns a handler called for every
-// event from every dep, with depIndex indicating which dep sent it.
-// ---------------------------------------------------------------------------
+/**
+ * General-purpose transform primitive. Receives all signal types from upstream
+ * deps and decides what to forward. The init function receives actions and
+ * returns a handler called for every event from every dep, with depIndex
+ * indicating which dep sent it.
+ *
+ * Stateful: maintains cached value via actions.emit(). get() returns the
+ * last emitted value. Lazy connection on first sink, disconnects when empty.
+ *
+ * v3: Tier 1 — participates in diamond resolution. Handler receives type 3
+ * STATE signals and decides whether to forward DIRTY/RESOLVED downstream.
+ */
 
 import { Inspector } from "./inspector";
 import type { Signal } from "./protocol";

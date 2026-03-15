@@ -1,11 +1,16 @@
 import { Inspector } from "../inspector";
-import { DATA, END, pushChange, START } from "../protocol";
+import { DATA, DIRTY, deferEmission, END, isBatching, START, STATE } from "../protocol";
 import type { Store } from "../types";
 
 /**
  * Multicast primitive. A subject is both a source and a manual emitter.
  * `next(value)` pushes to all current sinks. `complete()` sends END to all.
- * Tests verify all sinks are removed on completion/error.
+ *
+ * Stateful: maintains currentValue. get() returns the last value passed
+ * to next(), or undefined before first emission. Object.is dedup on next().
+ *
+ * v3: next() sends DIRTY on type 3 then value on type 1. Batching-aware
+ * (defers type 1 emissions during batch). No upstream deps — manually driven.
  */
 export interface Subject<T> extends Store<T | undefined> {
 	next(value: T): void;
@@ -27,7 +32,15 @@ export function subject<T>(): Subject<T> {
 			if (completed) return;
 			if (sinks.size > 0 && Object.is(currentValue, value)) return;
 			currentValue = value;
-			if (sinks.size > 0) pushChange(sinks, () => currentValue);
+			if (sinks.size === 0) return;
+			for (const sink of sinks) sink(STATE, DIRTY);
+			if (isBatching()) {
+				deferEmission(() => {
+					for (const sink of sinks) sink(DATA, currentValue);
+				});
+			} else {
+				for (const sink of sinks) sink(DATA, currentValue);
+			}
 		},
 
 		error(err: unknown) {

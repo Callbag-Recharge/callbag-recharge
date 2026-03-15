@@ -8,7 +8,12 @@ import type { Store, StoreOperator } from "../types";
  * Maps each upstream value to an inner store via `fn`, subscribing sequentially.
  * New outer values are queued while an inner is active; the next queued value is
  * processed when the current inner completes (sends END).
- * Tier 2 — dynamic subscription operator. Each inner is a cycle boundary.
+ *
+ * Stateful: maintains last inner value via producer. get() returns the current
+ * inner store's value. Queue is discarded on teardown.
+ *
+ * v3: Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
+ * each emit starts a new DIRTY+value cycle. equals: Object.is dedup.
  */
 export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {

@@ -1,14 +1,14 @@
-// ---------------------------------------------------------------------------
-// producer(fn?, opts?) — general-purpose source primitive
-// ---------------------------------------------------------------------------
-// Can emit values, send control signals, complete, and error.
-// Lazy start: producer function runs on first sink connection.
-// Auto-cleanup: producer cleanup runs when last sink disconnects.
-// autoDirty (default true): emit() sends signal(DIRTY) before the value.
-// equals: when provided, emit() skips if equals(currentValue, newValue).
-// resetOnTeardown: resets currentValue to initial (or undefined) on stop.
-// getter: custom get() — receives cached value, returns transformed value.
-// ---------------------------------------------------------------------------
+/**
+ * General-purpose source primitive. Can emit values, send control signals,
+ * complete, and error. Lazy start on first sink, auto-cleanup on last
+ * sink disconnect.
+ *
+ * Stateful: maintains currentValue. get() returns currentValue (or
+ * getter(currentValue) when getter option is provided).
+ *
+ * v3: autoDirty (default true) sends DIRTY on type 3 before each type 1
+ * DATA. equals option guards emit(); resetOnTeardown resets value on stop.
+ */
 
 import { Inspector } from "./inspector";
 import type { Signal } from "./protocol";

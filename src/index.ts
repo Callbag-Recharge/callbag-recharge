@@ -23,14 +23,12 @@ export {
 	END,
 	endDeferredStart,
 	isBatching,
-	pushChange,
 	RESOLVED,
 	START,
 	STATE,
 } from "./protocol";
 // Core primitives
 export { state } from "./state";
-export { stream } from "./stream";
 export { subscribe } from "./subscribe";
 
 // Types
@@ -40,7 +38,5 @@ export type {
 	Store,
 	StoreOperator,
 	StoreOptions,
-	StreamProducer,
-	StreamStore,
 	WritableStore,
 } from "./types";

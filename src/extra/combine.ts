@@ -5,10 +5,12 @@ import type { Store } from "../types";
  * Combines multiple sources into a single store whose value is a tuple
  * of all source values. Recomputes whenever any source changes.
  *
- * Note: combine always produces a new array reference, so Object.is equality
- * never matches. For custom equality (e.g. shallow array comparison), pipe
- * through distinctUntilChanged(shallowEq) or wrap in derived() with equals.
- * The variadic rest-args API does not support an opts parameter.
+ * Stateful: maintains tuple value via derived()'s cache. get() returns
+ * the current tuple of all source values.
+ *
+ * v3: Tier 1 — inherits derived()'s diamond resolution. Always produces
+ * a new array reference, so Object.is equality never matches. For custom
+ * equality, pipe through distinctUntilChanged(shallowEq).
  */
 export function combine<Sources extends Store<unknown>[]>(
 	...sources: Sources

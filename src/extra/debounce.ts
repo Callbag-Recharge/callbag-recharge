@@ -6,7 +6,12 @@ import type { Store, StoreOperator } from "../types";
 /**
  * Delays propagation of each upstream change by `ms` milliseconds.
  * If another change arrives before the timer fires, the timer resets.
- * Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ *
+ * Stateful: maintains last debounced value via producer. get() returns
+ * undefined before first emission, then the last debounced value.
+ *
+ * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ * equals: Object.is dedup on emitted values.
  */
 export function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

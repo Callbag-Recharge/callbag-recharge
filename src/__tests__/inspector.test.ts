@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it } from "vitest";
-import { derived, Inspector, state, stream } from "../index";
+import { derived, Inspector, operator, producer, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -29,20 +29,20 @@ describe("Inspector", () => {
 		expect(info.value).toBe(11);
 	});
 
-	it("inspect() works on stream stores", () => {
-		const s = stream<number>(
-			(emit) => {
+	it("inspect() works on producer stores", () => {
+		const s = producer<number>(
+			({ emit }) => {
 				emit(99);
 			},
-			{ name: "myStream" },
+			{ name: "myProducer" },
 		);
 
 		// Start the producer
 		s.source(0, () => {});
 
 		const info = Inspector.inspect(s);
-		expect(info.name).toBe("myStream");
-		expect(info.kind).toBe("stream");
+		expect(info.name).toBe("myProducer");
+		expect(info.kind).toBe("producer");
 		expect(info.value).toBe(99);
 	});
 
@@ -59,8 +59,16 @@ describe("Inspector", () => {
 	it("getKind() returns the store kind", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get());
+		const p = producer<number>();
+		const o = operator<number>([s], ({ emit }) => {
+			return (_dep, type, data) => {
+				if (type === 1) emit(data);
+			};
+		});
 		expect(Inspector.getKind(s)).toBe("state");
 		expect(Inspector.getKind(d)).toBe("derived");
+		expect(Inspector.getKind(p)).toBe("producer");
+		expect(Inspector.getKind(o)).toBe("operator");
 	});
 
 	it("graph() returns all living stores", () => {

@@ -1,6 +1,12 @@
-// ---------------------------------------------------------------------------
-// pipe() + operators — each step is a store backed by derived()
-// ---------------------------------------------------------------------------
+/**
+ * pipe() composes StoreOperators left to right. Each step produces a new store.
+ * pipeRaw() fuses all transform functions into a single derived() store
+ * for ~2x throughput. SKIP sentinel provides filter semantics in pipeRaw.
+ *
+ * Stateful: each pipe step returns a store (backed by derived()).
+ *
+ * v3: Tier 1 — all stores inherit derived()'s diamond resolution.
+ */
 
 import { derived } from "./derived";
 import type { Store, StoreOperator } from "./types";

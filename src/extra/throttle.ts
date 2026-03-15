@@ -6,7 +6,12 @@ import type { Store, StoreOperator } from "../types";
 /**
  * Passes the first upstream change through immediately, then silences further
  * changes for `ms` milliseconds. Leading-edge semantics.
- * Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ *
+ * Stateful: maintains last throttled value via producer. get() returns
+ * undefined before first emission, then the last passed-through value.
+ *
+ * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
+ * equals: Object.is dedup on emitted values.
  */
 export function throttle<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

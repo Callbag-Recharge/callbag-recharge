@@ -58,4 +58,4 @@ Each extra module is a separate entry point, tree-shakeable via `callbag-recharg
 ## Code style
 
 - Biome: tabs, 100 char line width, `noExplicitAny: off`
-- Completion signaling uses standard callbag END (type 2) — do not add completion methods to `StreamProducer`
+- Completion signaling uses standard callbag END (type 2)

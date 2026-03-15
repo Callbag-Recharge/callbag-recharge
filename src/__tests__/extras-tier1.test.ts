@@ -8,7 +8,7 @@ import { startWith } from "../extra/startWith";
 import { switchMap } from "../extra/switchMap";
 import { takeUntil } from "../extra/takeUntil";
 import { throttle } from "../extra/throttle";
-import { Inspector, pipe, state, stream, subscribe } from "../index";
+import { Inspector, pipe, producer, state, subscribe } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -70,22 +70,19 @@ describe("distinctUntilChanged", () => {
 
 describe("startWith", () => {
 	it("returns initial value when upstream is undefined", () => {
-		const s = stream<number>(() => {});
+		const s = producer<number>();
 		const d = pipe(s, startWith(42));
 		expect(d.get()).toBe(42);
 	});
 
 	it("switches to upstream value once it emits", () => {
-		let emit: (v: number) => void;
-		const s = stream<number>((e) => {
-			emit = e;
-		});
+		const s = producer<number>();
 		s.source(0, () => {});
 		const d = pipe(s, startWith(0));
 
 		expect(d.get()).toBe(0);
 
-		emit!(7);
+		s.emit(7);
 		expect(d.get()).toBe(7);
 	});
 
@@ -454,13 +451,10 @@ describe("concatMap", () => {
 
 	it("processes next queued value when inner completes", () => {
 		const outer = state("a");
-		let completeInnerA: () => void;
-		const innerA = stream<number>((emit, _req, complete) => {
+		const innerA = producer<number>(({ emit }) => {
 			emit(1);
-			completeInnerA = complete;
 		});
 		const innerB = state(99);
-		innerA.source(0, () => {}); // start producer
 
 		const mapped = pipe(
 			outer,
@@ -472,9 +466,9 @@ describe("concatMap", () => {
 		});
 
 		outer.set("b"); // queued
-		completeInnerA!(); // innerA completes → process "b"
+		innerA.complete(); // innerA completes → process "b"
 
-		expect(values).toEqual([99]);
+		expect(values).toEqual([1, 99]);
 	});
 
 	it("discards queue on unsubscribe", () => {
@@ -527,13 +521,10 @@ describe("exhaustMap", () => {
 
 	it("accepts new outer value once inner completes", () => {
 		const outer = state(0);
-		let completeInner: () => void;
-		const innerA = stream<number>((emit, _req, complete) => {
+		const innerA = producer<number>(({ emit }) => {
 			emit(1);
-			completeInner = complete;
 		});
 		const innerB = state(99);
-		innerA.source(0, () => {});
 
 		const mapped = pipe(
 			outer,
@@ -545,10 +536,10 @@ describe("exhaustMap", () => {
 		});
 
 		outer.set(1); // ignored — innerA active
-		completeInner!(); // innerA completes → innerActive = false
+		innerA.complete(); // innerA completes → innerActive = false
 		outer.set(2); // now accepted → innerB
 
-		expect(values).toEqual([99]);
+		expect(values).toEqual([1, 99]);
 	});
 
 	it("tears down inner when last sink disconnects", () => {
