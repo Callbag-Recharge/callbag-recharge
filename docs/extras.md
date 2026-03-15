@@ -13,6 +13,10 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `fromPromise(promise)` | Converts a Promise into a single-value source |
 | `fromObs(observable)` | Converts an Observable (RxJS-compatible) into a source |
 | `fromIter(iterable)` | Converts a sync iterable into a source |
+| `of(...values)` | Synchronously emits each provided value, then completes |
+| `empty()` | Completes immediately without emitting any values |
+| `throwError(err)` | Errors immediately with the given value |
+| `never()` | Never emits, errors, or completes |
 
 ### Tier 1 operators (participate in diamond resolution, forward type 3)
 
@@ -22,6 +26,11 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `filter(pred)` | Passes values matching a predicate; sends RESOLVED when suppressing |
 | `scan(reducer, seed)` | Accumulates values with a reducer |
 | `take(n)` | Emits only the first _n_ values, then disconnects + completes |
+| `first` | Emits only the first value then completes (like `take(1)` but semantic) |
+| `last` | Emits only the final value when upstream completes |
+| `find(pred)` | First value matching predicate, then completes |
+| `elementAt(n)` | Emits the _n_-th value (0-based) then completes |
+| `partition(pred)` | Splits into two stores `[matching, notMatching]`; shares upstream |
 | `skip(n)` | Skips the first _n_ values; sends RESOLVED when suppressing |
 | `tap(fn)` | Side-effect passthrough; forwards all signals and values unchanged |
 | `distinctUntilChanged(eq?)` | Suppresses consecutive duplicates; sends RESOLVED on duplicate |
@@ -52,6 +61,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `exhaustMap(fn)` | Maps to an inner store; ignores new outer values while inner is active |
 | `rescue(fn)` | On error, switches to a fallback store |
 | `retry(n)` | Re-subscribes on error up to n times |
+| `repeat(factory, n?)` | Re-subscribes via factory on completion, up to n total times |
 
 ### Piping
 
@@ -66,27 +76,6 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 |--------|-------------|
 | `subscribe(store, cb)` | Listens to value changes with previous-value tracking; pure callbag sink |
 | `forEach(cb)` | Subscribes to a source, calling `cb` for each value |
-
----
-
-## Roadmap
-
-### Nice to have
-
-Simple modules whose tests validate callbag protocol compliance and early-termination cleanup.
-
-| Module | Category | Rationale |
-|--------|----------|-----------|
-| `of(...values)` | Source | Synchronous multi-value source. Tests validate completion signaling. |
-| `empty` | Source | Completes immediately. Tests validate END propagation with no DATA. |
-| `throwError(err)` | Source | Errors immediately. Tests validate error-path teardown. |
-| `never` | Source | Never emits or completes. Tests verify no leaks from idle sources. |
-| `last` | Operator | Emits only the final value. Tests verify early-termination cleanup. |
-| `first` | Operator | Emits only the first value then completes (like `take(1)` but semantic). |
-| `find(pred)` | Operator | First value matching predicate, then completes. |
-| `elementAt(n)` | Operator | Emits the _n_-th value then completes. |
-| `partition(pred)` | Operator | Splits into two sources. Tests verify both branches clean up. |
-| `repeat(n)` | Operator | Re-subscribes on completion. Tests verify previous-subscription disposal. |
 
 ---
 

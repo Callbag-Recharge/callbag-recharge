@@ -23,6 +23,7 @@ export class OperatorImpl<B> {
 	_sinks: Set<any> | null = null;
 	_upstreamTalkbacks: Array<((type: number) => void) | null> = [];
 	_handler: ((depIndex: number, type: number, data: any) => void) | null = null;
+	_completed = false;
 	_deps: Store<unknown>[];
 	_init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void;
 
@@ -48,24 +49,38 @@ export class OperatorImpl<B> {
 
 		const actions: Actions<B> = {
 			emit: (value: B) => {
+				if (this._completed) return;
 				this._value = value;
 				if (this._sinks) {
 					for (const sink of this._sinks) sink(DATA, value);
 				}
 			},
 			signal: (s: Signal) => {
+				if (this._completed) return;
 				if (this._sinks) {
 					for (const sink of this._sinks) sink(STATE, s);
 				}
 			},
 			complete: () => {
+				if (this._completed) return;
+				this._completed = true;
+				this._handler = null;
 				if (this._sinks) {
-					for (const sink of this._sinks) sink(END);
+					const snapshot = [...this._sinks];
+					this._sinks.clear();
+					this._sinks = null;
+					for (const sink of snapshot) sink(END);
 				}
 			},
 			error: (e: unknown) => {
+				if (this._completed) return;
+				this._completed = true;
+				this._handler = null;
 				if (this._sinks) {
-					for (const sink of this._sinks) sink(END, e);
+					const snapshot = [...this._sinks];
+					this._sinks.clear();
+					this._sinks = null;
+					for (const sink of snapshot) sink(END, e);
 				}
 			},
 			disconnect: (dep?: number) => {
@@ -106,6 +121,11 @@ export class OperatorImpl<B> {
 	source(type: number, payload?: any): void {
 		if (type === START) {
 			const sink = payload;
+			if (this._completed) {
+				sink(START, (_t: number) => {});
+				sink(END);
+				return;
+			}
 			const wasEmpty = !this._sinks;
 			if (!this._sinks) this._sinks = new Set();
 			this._sinks.add(sink);

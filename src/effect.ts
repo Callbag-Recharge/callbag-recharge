@@ -7,6 +7,8 @@
  * v3: type 3 dirty tracking across deps. Skips execution when all deps sent
  * RESOLVED (no value changed). Effects run as part of the callbag signal
  * flow — no enqueueEffect.
+ *
+ * Class-based for V8 hidden class optimization and prototype method sharing.
  */
 
 import {
@@ -21,62 +23,75 @@ import {
 } from "./protocol";
 import type { Store } from "./types";
 
-export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void)): () => void {
-	let cleanupEffect: undefined | (() => void);
-	const talkbacks: Array<(type: number) => void> = [];
-	let disposed = false;
-	let dirtyDeps = 0;
-	let anyDataReceived = false;
+export class EffectImpl {
+	_deps: Store<unknown>[];
+	_fn: () => undefined | (() => void);
+	_cleanup: (() => void) | undefined;
+	_talkbacks: Array<(type: number) => void> = [];
+	_disposed = false;
+	_dirtyDeps = 0;
+	_anyDataReceived = false;
 
-	function run(): void {
-		if (disposed) return;
-		if (cleanupEffect) cleanupEffect();
-		cleanupEffect = fn();
-	}
+	constructor(deps: Store<unknown>[], fn: () => undefined | (() => void)) {
+		this._deps = deps;
+		this._fn = fn;
 
-	// Initial setup: run fn, then connect to deps
-	beginDeferredStart();
+		beginDeferredStart();
 
-	run();
+		this._run();
 
-	for (let i = 0; i < deps.length; i++) {
-		const depIndex = i;
-		const depBit = 1 << depIndex;
-		deps[depIndex].source(START, (type: number, data: any) => {
-			if (type === START) talkbacks.push(data);
-			if (type === STATE) {
-				if (data === DIRTY) {
-					if (!disposed) {
-						if (dirtyDeps === 0) anyDataReceived = false;
-						dirtyDeps |= depBit;
-					}
-				} else if (data === RESOLVED) {
-					if (dirtyDeps & depBit) {
-						dirtyDeps &= ~depBit;
-						if (dirtyDeps === 0 && !disposed) {
-							if (anyDataReceived) run();
-							// else: all deps RESOLVED, skip
+		for (let i = 0; i < deps.length; i++) {
+			const depBit = 1 << i;
+			deps[i].source(START, (type: number, data: any) => {
+				if (type === START) {
+					this._talkbacks.push(data);
+					return;
+				}
+				if (type === STATE) {
+					if (data === DIRTY) {
+						if (!this._disposed) {
+							if (this._dirtyDeps === 0) this._anyDataReceived = false;
+							this._dirtyDeps |= depBit;
+						}
+					} else if (data === RESOLVED) {
+						if (this._dirtyDeps & depBit) {
+							this._dirtyDeps &= ~depBit;
+							if (this._dirtyDeps === 0 && !this._disposed) {
+								if (this._anyDataReceived) this._run();
+								// else: all deps RESOLVED, skip
+							}
 						}
 					}
 				}
-			}
-			if (type === DATA) {
-				if (dirtyDeps & depBit) {
-					dirtyDeps &= ~depBit;
-					anyDataReceived = true;
-					if (dirtyDeps === 0 && !disposed) {
-						run();
+				if (type === DATA) {
+					if (this._dirtyDeps & depBit) {
+						this._dirtyDeps &= ~depBit;
+						this._anyDataReceived = true;
+						if (this._dirtyDeps === 0 && !this._disposed) {
+							this._run();
+						}
 					}
 				}
-			}
-		});
+			});
+		}
+
+		endDeferredStart();
 	}
 
-	endDeferredStart();
+	_run(): void {
+		if (this._disposed) return;
+		if (this._cleanup) this._cleanup();
+		this._cleanup = this._fn();
+	}
 
-	return () => {
-		disposed = true;
-		if (cleanupEffect) cleanupEffect();
-		for (const tb of talkbacks) tb(END);
-	};
+	dispose(): void {
+		this._disposed = true;
+		if (this._cleanup) this._cleanup();
+		for (const tb of this._talkbacks) tb(END);
+	}
+}
+
+export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void)): () => void {
+	const impl = new EffectImpl(deps, fn);
+	return () => impl.dispose();
 }

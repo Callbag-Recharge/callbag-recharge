@@ -22,7 +22,7 @@ callbag-recharge is a reactive state management library where **every store is a
 - **`state(initial)`** — thin wrapper over `producer()`. `set()` = `emit()` with `equals` defaulting to `Object.is`. `update(fn)` is sugar over `set`.
 - **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. Connects lazily, disconnects when last sink leaves.
 - **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
-- **`effect(deps, fn)`** — side-effect runner with explicit deps array. Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
+- **`effect(deps, fn)`** — side-effect runner with explicit deps array (`EffectImpl` class). Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
 ### Key design patterns (v3 — type 3 control channel)
 
 See [docs/architecture.md](docs/architecture.md) for full design.
@@ -38,8 +38,8 @@ See [docs/architecture.md](docs/architecture.md) for full design.
 ### Extra modules (src/extra/)
 
 **Tier 1** (participate in diamond resolution, forward type 3):
-- Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`
-- Operators: `take`, `skip`, `merge`, `combine`, `concat`, `flat`, `share`
+- Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`, `of`, `empty`, `throwError`, `never`
+- Operators: `take`, `skip`, `first`, `last`, `find`, `elementAt`, `partition`, `merge`, `combine`, `concat`, `flat`, `share`
 - Sinks: `forEach`, `subscribe`
 - Piping: `pipeRaw`, `SKIP`
 
@@ -47,6 +47,7 @@ See [docs/architecture.md](docs/architecture.md) for full design.
 - Time-based: `debounce`, `throttle`, `delay`, `bufferTime`, `timeout`, `sample`
 - Dynamic subscription: `switchMap`, `flat`, `concatMap`, `exhaustMap`
 - Error handling: `rescue`, `retry`
+- Resubscription: `repeat`
 
 Each extra module is a separate entry point, tree-shakeable via `callbag-recharge/extra` or `callbag-recharge/extra/<name>`.
 

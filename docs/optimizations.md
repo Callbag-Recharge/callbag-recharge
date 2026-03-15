@@ -149,7 +149,7 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 
 ### 7. Class-based primitives with lazy sinks — reduced memory footprint
 
-All four primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`) use classes with prototype method sharing and V8 hidden class optimization. The factory functions (`producer()`, `state()`, `derived()`, `operator()`) are preserved as the public API.
+All five primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`, `EffectImpl`) use classes with prototype method sharing and V8 hidden class optimization. The factory functions (`producer()`, `state()`, `derived()`, `operator()`, `effect()`) are preserved as the public API.
 
 **Results:**
 - Memory per store: ~3,600 bytes → ~740 bytes (**4.9x smaller**, ~6x gap vs Preact's ~121 bytes)
@@ -157,7 +157,7 @@ All four primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`)
 - Store creation (Inspector ON): 236K → 1.4M ops/sec (**5.9x faster**)
 - Throughput: equal or better across all benchmarks
 
-**Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
+**Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start. `EffectImpl._run()` on the prototype is inlined by V8 much better than a closure-captured `run()` function — **2x faster** effect re-runs.
 
 **Lazy `_sinks = null`:** All classes initialize `_sinks` as `null`. The Set is allocated on first subscriber connect and nulled when the last subscriber disconnects. Pull-only stores never allocate a Set (~200 bytes saved per pull-only store).
 
@@ -229,7 +229,7 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 | `pipeRaw()` + `SKIP` | Built-in | Single derived store for pipe chain | Hot pipe chains, SKIP filter semantics |
 | Raw callbag interop | Built-in | ~2.5x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
-| Class + lazy sinks | Built-in | 4.9x memory reduction, 17.5x faster store creation | All stores |
+| Class + lazy sinks | Built-in | 4.9x memory reduction, 17.5x faster store creation, 2x faster effects | All stores and effects |
 | `endDeferredStart()` O(n) drain | Built-in | Faster connection batching | Effects/derived with many deps |
 | Integer bitmask dirty tracking | Built-in | ~10x faster dirty ops vs Set, eliminates Set allocation | Effects and derived with ≤32 deps |
 | `Inspector.enabled` getter caching | Built-in | Avoid repeated try/catch | Bulk store creation |
