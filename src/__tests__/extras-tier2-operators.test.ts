@@ -739,16 +739,16 @@ describe("retry", () => {
 		expect(producerCount).toBe(1);
 
 		// First error — should retry
-		errorSink!(2, new Error("fail-1"));
+		errorSink?.(2, new Error("fail-1"));
 		expect(producerCount).toBe(2);
 
 		// Second error — should retry (last retry)
-		errorSink!(2, new Error("fail-2"));
+		errorSink?.(2, new Error("fail-2"));
 		expect(producerCount).toBe(3);
 
 		// Third error — retries exhausted, forward to sinks
 		const finalErr = new Error("fail-3");
-		errorSink!(2, finalErr);
+		errorSink?.(2, finalErr);
 		expect(producerCount).toBe(3); // no more retries
 		expect(endData).toBe(finalErr);
 	});
@@ -840,7 +840,7 @@ describe("rescue", () => {
 
 		// Trigger error via END with data
 		const err = new Error("boom");
-		errorSink!(2, err);
+		errorSink?.(2, err);
 
 		expect(receivedError).toBe(err);
 		expect(r.get()).toBe(99);
@@ -902,7 +902,7 @@ describe("rescue", () => {
 		});
 
 		// Error on src → switch to fallback
-		errorSink!(2, new Error("fail"));
+		errorSink?.(2, new Error("fail"));
 		// Normal completion on fallback → should forward
 		fallback.complete();
 		expect(gotEnd).toBe(true);

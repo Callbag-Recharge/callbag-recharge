@@ -17,9 +17,9 @@ import {
 	derived,
 	Inspector,
 	operator,
+	producer,
 	effect as rechargeEffect,
 	pipe as rPipe,
-	producer,
 	state,
 } from "./src/index";
 

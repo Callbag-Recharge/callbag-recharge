@@ -25,13 +25,17 @@ export const Inspector = {
 	// Enabled flag — when false, register/getName are no-ops
 	_explicitEnabled: null as boolean | null,
 
+	_cachedDefault: null as boolean | null,
+
 	get enabled(): boolean {
 		if (this._explicitEnabled !== null) return this._explicitEnabled;
+		if (this._cachedDefault !== null) return this._cachedDefault;
 		try {
-			return (globalThis as any).process?.env?.NODE_ENV !== "production";
+			this._cachedDefault = (globalThis as any).process?.env?.NODE_ENV !== "production";
 		} catch {
-			return true;
+			this._cachedDefault = true;
 		}
+		return this._cachedDefault;
 	},
 
 	set enabled(value: boolean) {
@@ -110,5 +114,6 @@ export const Inspector = {
 		this._kinds = new WeakMap();
 		this._stores = new Set();
 		this._explicitEnabled = null;
+		this._cachedDefault = null;
 	},
 };

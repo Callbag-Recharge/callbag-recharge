@@ -16,7 +16,7 @@ import { skip } from "../extra/skip";
 import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import { take } from "../extra/take";
-import { DIRTY, Inspector, pipe, producer, state } from "../index";
+import { Inspector, pipe, producer, state } from "../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -65,10 +65,15 @@ describe("interval", () => {
 describe("fromEvent", () => {
 	it("emits events from target", () => {
 		// Minimal EventTarget mock
-		const listeners: Record<string, Function[]> = {};
+		const listeners: Record<string, Array<(ev: unknown) => void>> = {};
 		const target: EventTarget = {
 			addEventListener(name: string, fn: any) {
-				(listeners[name] ??= []).push(fn);
+				let arr = listeners[name];
+				if (!arr) {
+					arr = [];
+					listeners[name] = arr;
+				}
+				arr.push(fn);
 			},
 			removeEventListener(name: string, fn: any) {
 				const arr = listeners[name];
@@ -90,8 +95,8 @@ describe("fromEvent", () => {
 
 		const ev1 = { type: "click" };
 		const ev2 = { type: "click" };
-		for (const fn of listeners["click"] ?? []) fn(ev1);
-		for (const fn of listeners["click"] ?? []) fn(ev2);
+		for (const fn of listeners.click ?? []) fn(ev1);
+		for (const fn of listeners.click ?? []) fn(ev2);
 
 		expect(values).toEqual([ev1, ev2]);
 	});
@@ -137,8 +142,8 @@ describe("fromObs", () => {
 			if (v !== undefined) values.push(v);
 		});
 
-		observer!.next(1);
-		observer!.next(2);
+		observer?.next(1);
+		observer?.next(2);
 
 		expect(values).toEqual([1, 2]);
 	});
@@ -515,7 +520,7 @@ describe("take", () => {
 		const t = pipe(s, take(2));
 
 		// Track whether upstream DIRTY still reaches take's subscriber
-		const dirtyAfterN = false;
+		const _dirtyAfterN = false;
 		subscribe(t, () => {});
 
 		s.set(1); // taken (1st)

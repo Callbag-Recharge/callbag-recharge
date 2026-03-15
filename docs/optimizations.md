@@ -152,9 +152,9 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 All four primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`) use classes with prototype method sharing and V8 hidden class optimization. The factory functions (`producer()`, `state()`, `derived()`, `operator()`) are preserved as the public API.
 
 **Results:**
-- Memory per store: ~3,600 bytes → ~740 bytes (**4.9x smaller**, ~6x gap vs Preact's ~118 bytes)
-- Store creation (Inspector OFF): 405K → 7.1M ops/sec (**17.5x faster**)
-- Store creation (Inspector ON): 236K → 1.5M ops/sec (**6.4x faster**)
+- Memory per store: ~3,600 bytes → ~740 bytes (**4.9x smaller**, ~6x gap vs Preact's ~121 bytes)
+- Store creation (Inspector OFF): 405K → 7.6M ops/sec (**18.8x faster**)
+- Store creation (Inspector ON): 236K → 1.4M ops/sec (**5.9x faster**)
 - Throughput: equal or better across all benchmarks
 
 **Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
@@ -167,28 +167,28 @@ All four primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`)
 
 `endDeferredStart()` uses an index-based `for` loop + `length = 0` (O(n)) instead of `while/shift()` (O(n²)), matching the `batch()` drain pattern. Impact scales with the number of deps in a single `effect()` or `derived()`.
 
+### 9. Integer bitmask for dirty dep tracking
+
+Both `effect()` and `DerivedImpl` use a single `number` bitmask instead of `Set<number>` for dirty dep tracking. Bitwise operations replace Set methods:
+
+- `dirtyDeps |= (1 << depIndex)` — mark dirty (was `set.add()`)
+- `dirtyDeps & (1 << depIndex)` — check dirty (was `set.has()`)
+- `dirtyDeps &= ~(1 << depIndex)` — resolve (was `set.delete()`)
+- `dirtyDeps === 0` — check settled (was `set.size === 0`)
+
+Bitwise ops are ~10x faster than Set operations. Supports up to 32 deps per effect/derived, which covers virtually all real-world cases. Also eliminates the Set allocation (~200 bytes per effect).
+
+### 10. `Inspector.enabled` getter caching
+
+The default `enabled` getter resolves `process.env.NODE_ENV` through a try/catch only once. The result is cached in `_cachedDefault` and returned directly on subsequent calls. `_reset()` clears the cache for test isolation.
+
 ---
 
 ## Potential optimizations
 
 These are not yet implemented but represent concrete opportunities for improvement, ordered by expected impact.
 
-### 1. Effect performance (~1.3x slower than Preact)
-
-**Status:** Not implemented. **Impact:** Medium.
-
-Effects are the one benchmark where Preact wins (~12.5M vs ~9.6M ops/sec). The overhead comes from:
-
-- **Type 3 DIRTY/RESOLVED round-trip:** Each dep change sends DIRTY (type 3) → effect tracks dirty count → DATA (type 1) → dirty count decrements → when zero, `fn()` runs. Preact's effects use a simpler version/flag check.
-- **`dirtyDeps` Set operations:** `add()`, `has()`, `delete()`, `size` checks per signal per dep.
-- **Enqueue/flush cycle:** The deferred start mechanism adds overhead at connection time.
-
-**Possible approaches:**
-
-- **Integer bitmask for dirty deps:** For effects with ≤32 deps (covers nearly all real-world cases), replace the `Set<number>` with a single `number` bitmask. `dirtyDeps |= (1 << depIndex)` to mark dirty, `dirtyDeps &= ~(1 << depIndex)` to resolve, `dirtyDeps === 0` to check settled. Bitwise ops are ~10x faster than Set operations.
-- **Fast-path for single-dep effects:** Skip dirty counting entirely when `deps.length === 1` — any DATA means "run now". No Set allocation needed.
-
-### 2. Derived `get()` always recomputes when unconnected
+### 1. Derived `get()` always recomputes when unconnected
 
 **Status:** Not implemented. **Impact:** Medium (pull-only derived stores).
 
@@ -209,32 +209,11 @@ Derived stores that are only used in pull mode (`.get()` without subscribers) re
 
 **Possible approach:** Always cache the result and track a "generation" counter. Each state `.set()` increments a global generation. Derived checks if its deps' generation changed since last cache; if not, return cache. This adds a cheap integer comparison to `get()` but eliminates redundant `fn()` calls.
 
-### 3. Compile-time Inspector removal
+### 2. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low (bundle size + micro-optimization).
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
-
-The current `Inspector.enabled` getter accesses `process.env.NODE_ENV` through a try/catch on every call. While this is only hit during store creation (not hot paths), a build-time solution eliminates the runtime cost entirely.
-
-### 4. `Inspector.enabled` getter caching
-
-**Status:** Not implemented. **Impact:** Low.
-
-The default `enabled` getter runs a try/catch to access `process.env.NODE_ENV` on every call:
-
-```ts
-get enabled(): boolean {
-  if (this._explicitEnabled !== null) return this._explicitEnabled;
-  try {
-    return (globalThis as any).process?.env?.NODE_ENV !== "production";
-  } catch {
-    return true;
-  }
-}
-```
-
-Once resolved, the result won't change. Cache it after first access to avoid repeated try/catch overhead during bulk store creation.
 
 ---
 
@@ -252,8 +231,7 @@ Once resolved, the result won't change. Cache it after first access to avoid rep
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
 | Class + lazy sinks | Built-in | 4.9x memory reduction, 17.5x faster store creation | All stores |
 | `endDeferredStart()` O(n) drain | Built-in | Faster connection batching | Effects/derived with many deps |
-| Integer bitmask dirty tracking | Potential | Faster effect re-runs, close 1.3x gap vs Preact | Effects and derived with ≤32 deps |
-| Single-dep fast path | Potential | Skip dirty counting overhead | Single-dep effects/derived |
+| Integer bitmask dirty tracking | Built-in | ~10x faster dirty ops vs Set, eliminates Set allocation | Effects and derived with ≤32 deps |
+| `Inspector.enabled` getter caching | Built-in | Avoid repeated try/catch | Bulk store creation |
 | Unconnected derived caching | Potential | Skip redundant `fn()` on pull | Pull-only derived stores |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |
-| `Inspector.enabled` getter caching | Potential | Avoid repeated try/catch | Bulk store creation |

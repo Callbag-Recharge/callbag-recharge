@@ -15,7 +15,7 @@
 import { Inspector } from "./inspector";
 import type { Signal } from "./protocol";
 import { DATA, DIRTY, deferEmission, deferStart, END, isBatching, START, STATE } from "./protocol";
-import type { ProducerStore, StoreOptions } from "./types";
+import type { ProducerStore, Store, StoreOptions } from "./types";
 
 export type ProducerFn<T> = (actions: {
 	emit: (value: T) => void;
@@ -171,6 +171,11 @@ export class ProducerImpl<T> {
 	}
 }
 
+export function producer<T>(
+	fn: ProducerFn<T> | undefined,
+	opts: ProducerOpts<T> & { initial: T },
+): ProducerStore<T> & Store<T>;
+export function producer<T>(fn?: ProducerFn<T>, opts?: ProducerOpts<T>): ProducerStore<T>;
 export function producer<T>(fn?: ProducerFn<T>, opts?: ProducerOpts<T>): ProducerStore<T> {
 	return new ProducerImpl<T>(fn, opts) as any;
 }

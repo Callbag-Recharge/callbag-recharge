@@ -26,7 +26,7 @@ export class DerivedImpl<T> {
 	_cachedValue: T | undefined;
 	_hasCached = false;
 	_connected = false;
-	_dirtyDeps = new Set<number>();
+	_dirtyDeps = 0;
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
 	_anyDataReceived = false;
 	_deps: Store<unknown>[];
@@ -62,6 +62,7 @@ export class DerivedImpl<T> {
 		this._upstreamTalkbacks = [];
 		for (let i = 0; i < this._deps.length; i++) {
 			const depIndex = i;
+			const depBit = 1 << depIndex;
 			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
 					this._upstreamTalkbacks.push(data);
@@ -69,8 +70,8 @@ export class DerivedImpl<T> {
 				}
 				if (type === STATE) {
 					if (data === DIRTY) {
-						const wasEmpty = this._dirtyDeps.size === 0;
-						this._dirtyDeps.add(depIndex);
+						const wasEmpty = this._dirtyDeps === 0;
+						this._dirtyDeps |= depBit;
 						if (wasEmpty) {
 							this._anyDataReceived = false;
 							if (this._sinks) {
@@ -78,9 +79,9 @@ export class DerivedImpl<T> {
 							}
 						}
 					} else if (data === RESOLVED) {
-						if (this._dirtyDeps.has(depIndex)) {
-							this._dirtyDeps.delete(depIndex);
-							if (this._dirtyDeps.size === 0) {
+						if (this._dirtyDeps & depBit) {
+							this._dirtyDeps &= ~depBit;
+							if (this._dirtyDeps === 0) {
 								if (this._anyDataReceived) {
 									this._recompute();
 								} else {
@@ -94,16 +95,16 @@ export class DerivedImpl<T> {
 					}
 				}
 				if (type === DATA) {
-					if (this._dirtyDeps.has(depIndex)) {
-						this._dirtyDeps.delete(depIndex);
+					if (this._dirtyDeps & depBit) {
+						this._dirtyDeps &= ~depBit;
 						this._anyDataReceived = true;
-						if (this._dirtyDeps.size === 0) {
+						if (this._dirtyDeps === 0) {
 							this._recompute();
 						}
 					} else {
 						// DATA without prior DIRTY: dep bypasses the control channel
 						// (e.g. a raw callbag source). Treat as immediate trigger.
-						if (this._dirtyDeps.size === 0) {
+						if (this._dirtyDeps === 0) {
 							// No other dirty deps — signal and recompute immediately.
 							if (this._sinks) {
 								for (const sink of this._sinks) sink(STATE, DIRTY);
@@ -124,11 +125,11 @@ export class DerivedImpl<T> {
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._connected = false;
-		this._dirtyDeps.clear();
+		this._dirtyDeps = 0;
 	}
 
 	get(): T {
-		if (this._connected && this._dirtyDeps.size === 0) {
+		if (this._connected && this._dirtyDeps === 0) {
 			// Connected + settled — return cache
 			return this._cachedValue as T;
 		}

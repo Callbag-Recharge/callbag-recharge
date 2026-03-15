@@ -25,7 +25,7 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 	let cleanupEffect: undefined | (() => void);
 	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
-	const dirtyDeps = new Set<number>();
+	let dirtyDeps = 0;
 	let anyDataReceived = false;
 
 	function run(): void {
@@ -41,18 +41,19 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 
 	for (let i = 0; i < deps.length; i++) {
 		const depIndex = i;
+		const depBit = 1 << depIndex;
 		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) talkbacks.push(data);
 			if (type === STATE) {
 				if (data === DIRTY) {
 					if (!disposed) {
-						if (dirtyDeps.size === 0) anyDataReceived = false;
-						dirtyDeps.add(depIndex);
+						if (dirtyDeps === 0) anyDataReceived = false;
+						dirtyDeps |= depBit;
 					}
 				} else if (data === RESOLVED) {
-					if (dirtyDeps.has(depIndex)) {
-						dirtyDeps.delete(depIndex);
-						if (dirtyDeps.size === 0 && !disposed) {
+					if (dirtyDeps & depBit) {
+						dirtyDeps &= ~depBit;
+						if (dirtyDeps === 0 && !disposed) {
 							if (anyDataReceived) run();
 							// else: all deps RESOLVED, skip
 						}
@@ -60,10 +61,10 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 				}
 			}
 			if (type === DATA) {
-				if (dirtyDeps.has(depIndex)) {
-					dirtyDeps.delete(depIndex);
+				if (dirtyDeps & depBit) {
+					dirtyDeps &= ~depBit;
 					anyDataReceived = true;
-					if (dirtyDeps.size === 0 && !disposed) {
+					if (dirtyDeps === 0 && !disposed) {
 						run();
 					}
 				}

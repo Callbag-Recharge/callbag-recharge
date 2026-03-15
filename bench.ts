@@ -1,7 +1,7 @@
-import { derived, effect, operator, pipe, producer, state } from "./src/index";
 import { filter } from "./src/extra/filter";
 import { map } from "./src/extra/map";
 import { subscribe } from "./src/extra/subscribe";
+import { derived, effect, operator, pipe, producer, state } from "./src/index";
 
 function bench(name: string, fn: () => void, iterations = 100_000) {
 	for (let i = 0; i < 1000; i++) fn(); // warmup
@@ -88,10 +88,13 @@ bench("diamond (A->B,C->D) set + get", () => {
 });
 
 // 7. Producer emit + get
-const prod = producer<number>(({ emit }) => {
-	(prod as any)._emit = emit;
-	return undefined;
-}, { initial: 0 });
+const prod = producer<number>(
+	({ emit }) => {
+		(prod as any)._emit = emit;
+		return undefined;
+	},
+	{ initial: 0 },
+);
 subscribe(prod, () => {}); // connect a sink to activate
 let prodI = 0;
 bench("producer emit + get", () => {
@@ -101,12 +104,16 @@ bench("producer emit + get", () => {
 
 // 8. Operator (passthrough transform)
 const opSrc = state(0);
-const opStore = operator<number>([opSrc], (actions) => {
-	return (_depIndex, type, data) => {
-		if (type === 1) actions.emit(data * 2);
-		else if (type === 3) actions.signal(data);
-	};
-}, { initial: 0 });
+const opStore = operator<number>(
+	[opSrc],
+	(actions) => {
+		return (_depIndex, type, data) => {
+			if (type === 1) actions.emit(data * 2);
+			else if (type === 3) actions.signal(data);
+		};
+	},
+	{ initial: 0 },
+);
 subscribe(opStore, () => {}); // connect
 let opI = 0;
 bench("operator (1 dep, transform) set + get", () => {
