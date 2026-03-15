@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { batch, derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../protocol";
+import { DATA, END, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

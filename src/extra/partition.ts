@@ -1,6 +1,6 @@
-import { Inspector } from "../inspector";
-import { DATA, END, RESOLVED, START, STATE } from "../protocol";
-import type { Store } from "../types";
+import { Inspector } from "../core/inspector";
+import { DATA, END, RESOLVED, START, STATE } from "../core/protocol";
+import type { Store } from "../core/types";
 
 /**
  * Splits a source into two based on a predicate. Returns a tuple of

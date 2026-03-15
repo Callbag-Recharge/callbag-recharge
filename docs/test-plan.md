@@ -27,7 +27,7 @@ Organized into 6 batches, each scoped to fit a single chat session (~40–60 tes
 
 **Result:** 42 tests written, 3 bugs fixed. All 514 tests passing.
 
-**Test file:** `src/__tests__/extras/selection-operators.test.ts`
+**Test file:** `src/__tests__/extra/selection-operators.test.ts`
 
 ### Bugs Found & Fixed
 
@@ -105,7 +105,7 @@ Organized into 6 batches, each scoped to fit a single chat session (~40–60 tes
 
 **Result:** 31 new tests written (gap tests only — basics already covered in existing files). 3 sources fixed (fromPromise, fromObs, buffer), 545 total tests passing.
 
-**Test file:** `src/__tests__/extras/sources.test.ts`
+**Test file:** `src/__tests__/extra/sources.test.ts`
 
 ### Bugs Found & Fixed
 
@@ -273,7 +273,7 @@ Every major reactive library makes dispose idempotent:
 
 **Result:** 26 tests written, 0 bugs fixed. All 616 tests passing.
 
-**Test file:** `src/__tests__/extras/reconnect.test.ts`
+**Test file:** `src/__tests__/extra/reconnect.test.ts`
 
 ### Findings
 
@@ -326,7 +326,7 @@ All operators correctly reset their internal state on reconnect:
 
 **Result:** 29 tests written, 1 bug fixed. All 672 tests passing.
 
-**Test file:** `src/__tests__/extras/stress.test.ts`
+**Test file:** `src/__tests__/extra/stress.test.ts`
 
 ### Findings
 
@@ -450,7 +450,7 @@ All protocol, batch, and interop scenarios work correctly:
 
 **Result:** 39 tests written, 2 bugs fixed. All 711 tests passing.
 
-**Test file:** `src/__tests__/extras/batch7-gaps.test.ts`
+**Test file:** `src/__tests__/extra/batch7-gaps.test.ts`
 
 ### Bugs Found & Fixed
 
@@ -606,11 +606,13 @@ Confirmed zero `instanceof` usage in the library, no subclassing, class had only
 
 ## Test File Strategy
 
-- **Batch 1** → `src/__tests__/extras/selection-operators.test.ts` (first/last/find/elementAt/partition)
-- **Batch 2** → `src/__tests__/extras/sources.test.ts` (fromIter/fromPromise/fromObs/fromEvent/interval/of/empty/throwError/never/buffer)
+Tests mirror `src/`: **core** (primitives, protocol, inspector), **extra** (operators, sources, lifecycle, stress), **integrations** (interop).
+
+- **Batch 1** → `src/__tests__/extra/selection-operators.test.ts` (first/last/find/elementAt/partition)
+- **Batch 2** → `src/__tests__/extra/sources.test.ts` (fromIter/fromPromise/fromObs/fromEvent/interval/of/empty/throwError/never/buffer)
 - **Batch 3** → `src/__tests__/core/primitives-edge-cases.test.ts`
-- **Batch 4** → `src/__tests__/extras/reconnect.test.ts`
-- **Batch 5** → `src/__tests__/extras/stress.test.ts`
+- **Batch 4** → `src/__tests__/extra/reconnect.test.ts`
+- **Batch 5** → `src/__tests__/extra/stress.test.ts`
 - **Batch 6** → `src/__tests__/core/protocol-edge-cases.test.ts`
-- **Batch 7** → `src/__tests__/extras/batch7-gaps.test.ts` (flat/switchMap/repeat/pipeRaw/SKIP/Inspector)
+- **Batch 7** → `src/__tests__/extra/batch7-gaps.test.ts` (flat/switchMap/repeat/pipeRaw/SKIP/Inspector)
 - **Post-batch** → `src/__tests__/core/completion-ordering.test.ts` (operator upstream disconnect, snapshot-free reentrancy, completion ordering, derived END, effect dispose)

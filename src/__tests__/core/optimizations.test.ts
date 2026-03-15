@@ -1,11 +1,6 @@
 import { beforeEach, describe, expect, test } from "vitest";
-import { derived } from "../../derived";
-import { effect } from "../../effect";
+import { batch, derived, effect, Inspector, producer, state } from "../../index";
 import { pipeRaw, SKIP } from "../../extra/pipeRaw";
-import { Inspector } from "../../inspector";
-import { producer } from "../../producer";
-import { batch } from "../../protocol";
-import { state } from "../../state";
 
 // ---------------------------------------------------------------------------
 // Inspector.enabled

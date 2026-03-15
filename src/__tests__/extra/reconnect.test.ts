@@ -29,7 +29,7 @@ import { take } from "../../extra/take";
 import { throttle } from "../../extra/throttle";
 import { timeout } from "../../extra/timeout";
 import { derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../protocol";
+import { DATA, END, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

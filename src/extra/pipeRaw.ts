@@ -10,9 +10,9 @@
  * when disconnected re-evaluates the pipeline.
  */
 
-import { operator } from "../operator";
-import { DATA, END, RESOLVED, STATE } from "../protocol";
-import type { Store } from "../types";
+import { operator } from "../core/operator";
+import { DATA, END, RESOLVED, STATE } from "../core/protocol";
+import type { Store } from "../core/types";
 
 // ---------------------------------------------------------------------------
 // SKIP sentinel + pipeRaw — fused pipe with a single operator store

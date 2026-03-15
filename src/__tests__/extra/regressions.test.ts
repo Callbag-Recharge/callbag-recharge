@@ -19,7 +19,7 @@ import { switchMap } from "../../extra/switchMap";
 import { tap } from "../../extra/tap";
 import { throttle } from "../../extra/throttle";
 import { Inspector, pipe, producer, state } from "../../index";
-import { START } from "../../protocol";
+import { START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

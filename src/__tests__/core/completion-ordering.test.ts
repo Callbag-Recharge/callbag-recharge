@@ -8,7 +8,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { derived, effect, operator, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../protocol";
+import { DATA, END, START, STATE } from "../../core/protocol";
 
 describe("operator complete/error disconnects upstream", () => {
 	it("complete() sends END to upstream deps", () => {

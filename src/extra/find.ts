@@ -1,6 +1,6 @@
-import { operator } from "../operator";
-import { DATA, END, RESOLVED, STATE } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { operator } from "../core/operator";
+import { DATA, END, RESOLVED, STATE } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * Emits the first value matching the predicate, then disconnects and completes.

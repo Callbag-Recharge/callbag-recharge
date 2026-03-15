@@ -21,7 +21,7 @@ import { throttle } from "../../extra/throttle";
 import { throwError } from "../../extra/throwError";
 import { timeout, TimeoutError } from "../../extra/timeout";
 import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../protocol";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

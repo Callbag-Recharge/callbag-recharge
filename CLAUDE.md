@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Build:** `npm run build` (tsup → ESM + CJS + .d.ts into `dist/`)
 - **Test:** `npm test` (vitest run)
 - **Test watch:** `npm run test:watch`
-- **Single test:** `npx vitest run src/__tests__/basics.test.ts`
+- **Single test:** `npx vitest run src/__tests__/core/basics.test.ts`
 - **Lint:** `npm run lint` (biome check)
 - **Lint fix:** `npm run lint:fix`
 - **Format:** `npm run format`
@@ -16,7 +16,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 callbag-recharge is a reactive state management library where **every store is a callbag source**. The callbag protocol (START=0, DATA=1, END=2) is the internal wiring; users interact through a simple `Store` interface (`get()`, `set()`, `source()`).
 
-### Core primitives (src/)
+### Core primitives (src/core/)
 
 - **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()), `resubscribable` (allow re-subscription after error/complete — enables retry/rescue/repeat). Actions: `emit`, `signal`, `complete`, `error`.
 - **`state(initial)`** — thin wrapper over `producer()`. `set()` = `emit()` with `equals` defaulting to `Object.is`. `update(fn)` is sugar over `set`.
@@ -51,7 +51,7 @@ See [docs/architecture.md](docs/architecture.md) for full design.
 
 Each extra module is a separate entry point, tree-shakeable via `callbag-recharge/extra` or `callbag-recharge/extra/<name>`.
 
-### Operators & pipe (src/pipe.ts)
+### Operators & pipe (src/core/pipe.ts)
 
 `map`, `filter`, `scan` are `StoreOperator<A, B>` — functions that take a `Store<A>` and return a `Store<B>` (internally using `derived()`). Composed via `pipe()`. `pipeRaw()` (in `extra/pipeRaw.ts`) fuses all transform functions into a single `derived()` store for ~2x throughput. `SKIP` sentinel provides filter semantics in `pipeRaw`.
 

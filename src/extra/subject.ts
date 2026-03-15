@@ -1,6 +1,6 @@
-import { Inspector } from "../inspector";
-import { DATA, DIRTY, deferEmission, END, isBatching, START, STATE } from "../protocol";
-import type { Store } from "../types";
+import { Inspector } from "../core/inspector";
+import { DATA, DIRTY, deferEmission, END, isBatching, START, STATE } from "../core/protocol";
+import type { Store } from "../core/types";
 
 /**
  * Multicast primitive. A subject is both a source and a manual emitter.

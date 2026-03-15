@@ -1,4 +1,4 @@
-import type { Store, StoreOperator } from "../types";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * No-op in callbag-recharge — stores are inherently shared (multicast).

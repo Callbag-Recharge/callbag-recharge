@@ -19,7 +19,7 @@ import {
 	producer,
 	state,
 } from "../../index";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../protocol";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

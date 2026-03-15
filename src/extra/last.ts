@@ -1,6 +1,6 @@
-import { operator } from "../operator";
-import { DATA, END } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { operator } from "../core/operator";
+import { DATA, END } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * Emits only the final value from upstream when it completes.

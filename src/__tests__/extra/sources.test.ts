@@ -12,7 +12,7 @@ import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { throwError } from "../../extra/throwError";
 import { Inspector, pipe, producer, state } from "../../index";
-import { END, START } from "../../protocol";
+import { END, START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

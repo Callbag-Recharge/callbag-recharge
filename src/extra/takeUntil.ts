@@ -1,6 +1,6 @@
-import { Inspector } from "../inspector";
-import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START, STATE } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { Inspector } from "../core/inspector";
+import { beginDeferredStart, DATA, DIRTY, END, endDeferredStart, START, STATE } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * Passes through all values from input until notifier emits, then completes.

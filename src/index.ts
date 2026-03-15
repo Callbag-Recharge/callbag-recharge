@@ -2,16 +2,16 @@
 // callbag-recharge — reactive stores connected by callbag protocol
 // ---------------------------------------------------------------------------
 
-export { derived } from "./derived";
-export { effect } from "./effect";
+export { derived } from "./core/derived";
+export { effect } from "./core/effect";
 // Observability
-export { Inspector } from "./inspector";
+export { Inspector } from "./core/inspector";
 // General-purpose transform primitive
-export { operator } from "./operator";
+export { operator } from "./core/operator";
 // Operators & piping
-export { pipe } from "./pipe";
+export { pipe } from "./core/pipe";
 // General-purpose source primitive
-export { producer } from "./producer";
+export { producer } from "./core/producer";
 // Protocol (for advanced use / interop)
 export {
 	batch,
@@ -26,9 +26,9 @@ export {
 	RESOLVED,
 	START,
 	STATE,
-} from "./protocol";
+} from "./core/protocol";
 // Core primitives
-export { state } from "./state";
+export { state } from "./core/state";
 
 // Types
 export type {
@@ -38,4 +38,4 @@ export type {
 	StoreOperator,
 	StoreOptions,
 	WritableStore,
-} from "./types";
+} from "./core/types";

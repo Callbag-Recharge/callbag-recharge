@@ -1,7 +1,7 @@
-import { Inspector } from "../inspector";
-import { producer } from "../producer";
-import { END, START } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { Inspector } from "../core/inspector";
+import { producer } from "../core/producer";
+import { END, START } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**

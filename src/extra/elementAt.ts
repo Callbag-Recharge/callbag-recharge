@@ -1,6 +1,6 @@
-import { operator } from "../operator";
-import { DATA, END, STATE } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { operator } from "../core/operator";
+import { DATA, END, STATE } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * Emits only the value at the given index (0-based), then disconnects and

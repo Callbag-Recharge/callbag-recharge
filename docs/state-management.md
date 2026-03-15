@@ -525,7 +525,7 @@ AI tools see the full menu in `llms.txt`, pick the right operator, generate corr
 ### Directory layout
 ```
 src/
-  ├── (core)           state, derived, effect, producer, operator, pipe, batch, inspector
+  ├── core/            state, derived, effect, producer, operator, pipe, protocol (batch), inspector, types
   ├── extra/           low-level operators (switchMap, debounce, scan, fromEvent...)
   ├── patterns/        composed recipes (chatStream, cancellableAction, rateLimiter...)
   ├── compat/          drop-in replacements (nanostores, signals, jotai, zustand)

@@ -1,6 +1,6 @@
-import { operator } from "../operator";
-import { DATA, DIRTY, END, RESOLVED, STATE } from "../protocol";
-import type { Store } from "../types";
+import { operator } from "../core/operator";
+import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
+import type { Store } from "../core/types";
 
 /**
  * Merges multiple sources into one. The resulting store's value is the latest

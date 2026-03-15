@@ -12,7 +12,7 @@ import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
 import { throwError } from "../../extra/throwError";
 import { Inspector, pipe, producer, state } from "../../index";
-import { DIRTY, END, RESOLVED, START, STATE } from "../../protocol";
+import { DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

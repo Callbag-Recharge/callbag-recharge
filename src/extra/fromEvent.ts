@@ -1,5 +1,5 @@
-import { producer } from "../producer";
-import type { ProducerStore } from "../types";
+import { producer } from "../core/producer";
+import type { ProducerStore } from "../core/types";
 
 /**
  * Creates a source from DOM events on the given target.

@@ -1,5 +1,5 @@
-import { producer } from "../producer";
-import type { ProducerStore } from "../types";
+import { producer } from "../core/producer";
+import type { ProducerStore } from "../core/types";
 
 interface Observable<T> {
 	subscribe(observer: {

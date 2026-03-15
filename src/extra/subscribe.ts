@@ -8,8 +8,8 @@
  * ignored (subscribe doesn't participate in state management).
  */
 
-import { beginDeferredStart, END, endDeferredStart, START } from "../protocol";
-import type { Store } from "../types";
+import { beginDeferredStart, END, endDeferredStart, START } from "../core/protocol";
+import type { Store } from "../core/types";
 
 export function subscribe<T>(
 	store: Store<T>,

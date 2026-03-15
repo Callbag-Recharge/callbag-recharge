@@ -7,7 +7,7 @@ import { last } from "../../extra/last";
 import { partition } from "../../extra/partition";
 import { subscribe } from "../../extra/subscribe";
 import { Inspector, pipe, producer, state } from "../../index";
-import { END, START } from "../../protocol";
+import { END, START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

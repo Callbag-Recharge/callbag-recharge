@@ -7,7 +7,7 @@ import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { derived, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA } from "../../protocol";
+import { DATA } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

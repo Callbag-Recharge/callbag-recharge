@@ -1,6 +1,6 @@
-import { Inspector } from "../inspector";
-import { producer } from "../producer";
-import type { Store, StoreOperator } from "../types";
+import { Inspector } from "../core/inspector";
+import { producer } from "../core/producer";
+import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**

@@ -1,5 +1,5 @@
-import { producer } from "../producer";
-import type { ProducerStore } from "../types";
+import { producer } from "../core/producer";
+import type { ProducerStore } from "../core/types";
 
 /**
  * Creates a push-based source that emits incrementing integers (0, 1, 2, ...)

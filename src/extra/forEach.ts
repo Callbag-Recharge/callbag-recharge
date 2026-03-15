@@ -1,4 +1,4 @@
-import type { Store } from "../types";
+import type { Store } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**

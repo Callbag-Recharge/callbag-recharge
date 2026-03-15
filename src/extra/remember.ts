@@ -1,6 +1,6 @@
-import { operator } from "../operator";
-import { DATA, END, STATE } from "../protocol";
-import type { Store, StoreOperator } from "../types";
+import { operator } from "../core/operator";
+import { DATA, END, STATE } from "../core/protocol";
+import type { Store, StoreOperator } from "../core/types";
 
 /**
  * Caches the last upstream value and replays it to new subscribers.

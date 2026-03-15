@@ -1,7 +1,7 @@
-import { producer } from "../producer";
-import type { Signal } from "../protocol";
-import { beginDeferredStart, DATA, END, endDeferredStart, START, STATE } from "../protocol";
-import type { Store } from "../types";
+import { producer } from "../core/producer";
+import type { Signal } from "../core/protocol";
+import { beginDeferredStart, DATA, END, endDeferredStart, START, STATE } from "../core/protocol";
+import type { Store } from "../core/types";
 
 /**
  * Concatenates multiple sources sequentially. Subscribes to the next source

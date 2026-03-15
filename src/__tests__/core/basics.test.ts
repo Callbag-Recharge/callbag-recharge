@@ -12,8 +12,7 @@ import { merge } from "../../extra/merge";
 import { skip } from "../../extra/skip";
 import { subscribe } from "../../extra/subscribe";
 import { take } from "../../extra/take";
-import { pipe } from "../../pipe";
-import { state } from "../../state";
+import { pipe, state } from "../../index";
 
 // ---------------------------------------------------------------------------
 // Tests adapted from callbag-basics (https://github.com/staltz/callbag-basics)
