@@ -10,6 +10,7 @@
  * DATA. equals option guards emit(); resetOnTeardown resets value on stop.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
+ * Boolean fields packed into _flags bitmask to reduce hidden class size.
  */
 
 import { Inspector } from "./inspector";
@@ -29,30 +30,36 @@ export type ProducerOpts<T> = SourceOptions<T> & {
 	_skipInspect?: boolean;
 };
 
+// Flag bits for _flags bitmask
+const P_STARTED = 1;
+const P_COMPLETED = 2;
+const P_AUTO_DIRTY = 4;
+const P_RESET = 8;
+const P_RESUB = 16;
+const P_PENDING = 32;
+
 export class ProducerImpl<T> {
 	_value: T | undefined;
 	_sinks: Set<any> | null = null;
-	_started = false;
-	_completed = false;
+	_flags: number;
 	_cleanup: (() => void) | undefined;
 	_fn: ProducerFn<T> | undefined;
-	_autoDirty: boolean;
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
 	_getterFn: ((cached: T | undefined) => T) | undefined;
-	_resetOnTeardown: boolean;
-	_resubscribable: boolean;
 	_initial: T | undefined;
-	_pendingEmission = false;
 
 	constructor(fn?: ProducerFn<T>, opts?: ProducerOpts<T>) {
 		this._value = opts?.initial;
 		this._fn = fn;
-		this._autoDirty = opts?.autoDirty !== false;
 		this._eqFn = opts?.equals;
 		this._getterFn = opts?.getter;
-		this._resetOnTeardown = opts?.resetOnTeardown === true;
-		this._resubscribable = opts?.resubscribable === true;
 		this._initial = opts?.initial;
+
+		let flags = 0;
+		if (opts?.autoDirty !== false) flags |= P_AUTO_DIRTY;
+		if (opts?.resetOnTeardown) flags |= P_RESET;
+		if (opts?.resubscribable) flags |= P_RESUB;
+		this._flags = flags;
 
 		// Bind public API methods so they work when detached (callbag interop,
 		// destructuring, etc.). Replaces per-instance closure functions.
@@ -70,7 +77,7 @@ export class ProducerImpl<T> {
 	}
 
 	emit(value: T): void {
-		if (this._completed) return;
+		if (this._flags & P_COMPLETED) return;
 		if (this._eqFn && this._value !== undefined && this._eqFn(this._value as T, value)) return;
 		this._value = value;
 		// Capture sinks locally — a sink callback during DIRTY propagation may
@@ -81,20 +88,20 @@ export class ProducerImpl<T> {
 			// Coalesce: send DIRTY and register deferred DATA only once per batch cycle.
 			// Subsequent emit() calls just update _value; the deferred closure
 			// reads it at drain time, so only the latest value is emitted.
-			if (!this._pendingEmission) {
-				this._pendingEmission = true;
-				if (this._autoDirty) {
+			if (!(this._flags & P_PENDING)) {
+				this._flags |= P_PENDING;
+				if (this._flags & P_AUTO_DIRTY) {
 					for (const sink of sinks) sink(STATE, DIRTY);
 				}
 				deferEmission(() => {
-					this._pendingEmission = false;
+					this._flags &= ~P_PENDING;
 					if (this._sinks) {
 						for (const sink of this._sinks) sink(DATA, this._value);
 					}
 				});
 			}
 		} else {
-			if (this._autoDirty) {
+			if (this._flags & P_AUTO_DIRTY) {
 				for (const sink of sinks) sink(STATE, DIRTY);
 			}
 			for (const sink of sinks) sink(DATA, this._value);
@@ -102,63 +109,57 @@ export class ProducerImpl<T> {
 	}
 
 	signal(s: Signal): void {
-		if (this._completed || !this._sinks) return;
+		if ((this._flags & P_COMPLETED) || !this._sinks) return;
 		for (const sink of this._sinks) sink(STATE, s);
 	}
 
 	complete(): void {
-		if (this._completed) return;
-		this._completed = true;
-		if (this._sinks) {
-			// Snapshot + clear before notify — prevents reentrancy issues when
-			// a sink re-subscribes during END (e.g. retry with resubscribable).
-			// _stop() before notify so _started is false if sink re-subscribes.
-			const snapshot = [...this._sinks];
-			this._sinks.clear();
-			this._sinks = null;
-			this._stop();
-			for (const sink of snapshot) sink(END);
-		} else {
-			this._stop();
+		if (this._flags & P_COMPLETED) return;
+		this._flags |= P_COMPLETED;
+		// Move sinks reference to local, null field before notify — prevents
+		// reentrancy issues when a sink re-subscribes during END (e.g. retry
+		// with resubscribable). No snapshot array allocation needed.
+		const sinks = this._sinks;
+		this._sinks = null;
+		this._stop();
+		if (sinks) {
+			for (const sink of sinks) sink(END);
 		}
 	}
 
 	error(e: unknown): void {
-		if (this._completed) return;
-		this._completed = true;
-		if (this._sinks) {
-			const snapshot = [...this._sinks];
-			this._sinks.clear();
-			this._sinks = null;
-			this._stop();
-			for (const sink of snapshot) sink(END, e);
-		} else {
-			this._stop();
+		if (this._flags & P_COMPLETED) return;
+		this._flags |= P_COMPLETED;
+		const sinks = this._sinks;
+		this._sinks = null;
+		this._stop();
+		if (sinks) {
+			for (const sink of sinks) sink(END, e);
 		}
 	}
 
 	_start(): void {
-		if (this._started || !this._fn) return;
-		this._started = true;
+		if ((this._flags & P_STARTED) || !this._fn) return;
+		this._flags |= P_STARTED;
 		// Pass this directly — emit/signal/complete/error are bound in constructor
 		const result = this._fn(this as any);
 		this._cleanup = typeof result === "function" ? result : undefined;
 	}
 
 	_stop(): void {
-		if (!this._started) return;
-		this._started = false;
+		if (!(this._flags & P_STARTED)) return;
+		this._flags &= ~P_STARTED;
 		if (this._cleanup) this._cleanup();
 		this._cleanup = undefined;
-		if (this._resetOnTeardown) this._value = this._initial;
+		if (this._flags & P_RESET) this._value = this._initial;
 	}
 
 	source(type: number, payload?: any): void {
 		if (type === START) {
 			const sink = payload;
-			if (this._completed) {
-				if (this._resubscribable && this._sinks === null) {
-					this._completed = false;
+			if (this._flags & P_COMPLETED) {
+				if ((this._flags & P_RESUB) && this._sinks === null) {
+					this._flags &= ~P_COMPLETED;
 				} else {
 					sink(START, (_t: number) => {});
 					sink(END);

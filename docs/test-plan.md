@@ -514,6 +514,82 @@ All protocol, batch, and interop scenarios work correctly:
 
 ---
 
+## Post-Batch: Optimization Pass & Code Review ✅ DONE
+
+**Goal:** After benchmark regression analysis (~5-10% throughput, ~22% store creation), implement targeted optimizations across all core primitives. Adversarial code review to find correctness issues introduced by optimizations.
+
+**Result:** 28 tests written, 2 bugs fixed. 4 optimizations applied. All 737 tests passing.
+
+**Test file:** `src/__tests__/core/completion-ordering.test.ts`
+
+### Optimizations Implemented
+
+| # | Optimization | Files | Impact |
+|---|-------------|-------|--------|
+| 1 | Local `completed` flag in operator actions hot path | operator.ts | Avoids `this._flags & O_COMPLETED` on every emit/signal |
+| 2 | `_flags` bitmask packing booleans | producer.ts, operator.ts, derived.ts | Fewer own properties → smaller V8 hidden class (~40 bytes/store saved) |
+| 3 | Snapshot-free completion (no `[...this._sinks]`) | producer.ts, operator.ts | Zero allocation on complete/error. Move `_sinks` ref to local + null field before iterating |
+| 5 | EffectImpl class → pure closure | effect.ts | Eliminated 3-layer indirection (closure→class method→stored closure). All state in closure-local variables for fastest V8 access |
+
+### Bugs Found & Fixed (Code Review)
+
+| Primitive | Issue | Result | Fix |
+|-----------|-------|--------|-----|
+| `operator` | `complete()`/`error()` never disconnects upstream deps → resource leak (producers keep running, intervals keep ticking) | ✅ Confirmed | Added `for (const tb of localTalkbacks) tb?.(END); localTalkbacks.fill(null)` before notifying sinks |
+| `operator` | `_connectUpstream()` dep loop continues after init-time `complete()` — all deps subscribed but never unsubscribed → resource leak | ✅ Confirmed | Added `if (completed) break;` at start of dep loop (matches `derived`'s `D_COMPLETED` break) |
+
+### Design Decisions Documented
+
+**Completion ordering — cleanup-first (diverges from callbag ecosystem):**
+Research of callbag-subject, callbag-share, callbag-take, callbag-from-iter showed the ecosystem convention is notify-sinks-first-then-cleanup. Our library deliberately uses cleanup-first ordering for reentrancy safety: if a sink re-subscribes during END notification (resubscribable producers/operators), the producer must already be in a clean state. Tests codify this as the expected behavior.
+
+**EffectImpl class removal:**
+Confirmed zero `instanceof` usage in the library, no subclassing, class had only 1 own property and 1 prototype method. Pure closure eliminates class shell overhead and provides faster V8 variable access in hot paths.
+
+### Tests Written
+
+**Operator complete/error disconnects upstream (4 tests)** ✅
+- complete() sends END to upstream deps
+- error() sends END to upstream deps
+- complete() disconnects multiple upstream deps
+- Upstream events after complete() are ignored (handler is null)
+
+**Snapshot-free completion reentrancy (3 tests)** ✅
+- Producer: sink re-subscribes during END with resubscribable
+- Producer: completed producer rejects new sinks (non-resubscribable)
+- Operator: sink re-subscribes during END with resubscribable
+
+**Producer completion ordering (2 tests)** ✅
+- Cleanup runs before sinks receive END
+- resetOnTeardown resets value before END notification
+
+**Derived handles upstream END gracefully (1 test)** ✅
+- Derived continues to return cached value after dep completes
+
+**Effect dispose semantics (2 tests)** ✅
+- Effect cleanup runs on dispose
+- Effect ignores events after dispose
+
+**Full upstream END handling + protocol ordering (14 tests, second pass)** ✅
+- Derived: dep completion → sinks receive END; dep error → sinks receive END with error
+- Derived: after dep END, get() recomputes from dep cache
+- Derived: late subscriber after dep END gets immediate END
+- Derived: dep END disconnects all upstream deps
+- Derived: dep completes during initial connection → START then END order
+- Effect: dep completion → cleanup runs; dep error → cleanup runs
+- Effect: after dep END, further events from other deps ignored
+- Effect: handles DATA without prior DIRTY (raw callbag sources)
+- Operator: init-time complete() stops dep loop — no resource leak ← bug fixed
+- Operator: resetOnTeardown resets value on complete()/error()
+- Producer: snapshot-free resubscription reentrancy extended
+
+**⚠️ Watch list — not yet a confirmed bug, keep an eye on:**
+- `derived` and `effect` send `END` back to the dep that *just sent* them `END` (in the upstream-disconnect loop). For standard producers and derived nodes this is safe (their talkback checks `!this._sinks` → early return). However, a custom callbag source whose talkback does not guard against receiving END after completing could misbehave. Add a test if an issue is ever observed with custom sources.
+
+**Actual: 28 tests, 2 bug fixes (operator upstream disconnect × 2)**
+
+---
+
 ## Summary
 
 | Batch | Focus | Tests | Fixes | Status |
@@ -525,7 +601,8 @@ All protocol, batch, and interop scenarios work correctly:
 | 5 | Reentrancy, stress, complex chains | 29 | 1 | ✅ Done |
 | 6 | Protocol, batch, interop | 27 | 0 | ✅ Done |
 | 7 | Gap coverage (flat/switchMap/repeat/pipeRaw/Inspector) | 39 | 2 | ✅ Done |
-| **Total** | | **239** | **10** | **All done** |
+| Post | Optimization pass & code review | 28 | 2 | ✅ Done |
+| **Total** | | **267** | **12** | **All done** |
 
 ## Test File Strategy
 
@@ -536,3 +613,4 @@ All protocol, batch, and interop scenarios work correctly:
 - **Batch 5** → `src/__tests__/extras/stress.test.ts`
 - **Batch 6** → `src/__tests__/core/protocol-edge-cases.test.ts`
 - **Batch 7** → `src/__tests__/extras/batch7-gaps.test.ts` (flat/switchMap/repeat/pipeRaw/SKIP/Inspector)
+- **Post-batch** → `src/__tests__/core/completion-ordering.test.ts` (operator upstream disconnect, snapshot-free reentrancy, completion ordering, derived END, effect dispose)

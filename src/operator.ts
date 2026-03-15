@@ -11,6 +11,7 @@
  * STATE signals and decides whether to forward DIRTY/RESOLVED downstream.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
+ * Boolean fields packed into _flags bitmask to reduce hidden class size.
  *
  * Options precedence — see SourceOptions in types.ts for full documentation.
  * get() flow: disconnected + getter → getter(cached) → cache result → return
@@ -26,18 +27,20 @@ import type { Actions, SourceOptions, Store } from "./types";
 
 export type OperatorOpts<B> = SourceOptions<B>;
 
+// Flag bits for _flags bitmask
+const O_COMPLETED = 1;
+const O_RESET = 2;
+const O_RESUB = 4;
+
 export class OperatorImpl<B> {
 	_value: B | undefined;
 	_sinks: Set<any> | null = null;
 	_upstreamTalkbacks: Array<((type: number) => void) | null> = [];
 	_handler: ((depIndex: number, type: number, data: any) => void) | null = null;
-	_completed = false;
+	_flags: number;
 	_deps: Store<unknown>[];
 	_init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void;
-
 	_getterFn: ((cached: B | undefined) => B) | undefined;
-	_resetOnTeardown: boolean;
-	_resubscribable: boolean;
 	_initial: B | undefined;
 
 	constructor(
@@ -50,8 +53,11 @@ export class OperatorImpl<B> {
 		this._deps = deps;
 		this._init = init;
 		this._getterFn = opts?.getter;
-		this._resetOnTeardown = opts?.resetOnTeardown === true;
-		this._resubscribable = opts?.resubscribable === true;
+
+		let flags = 0;
+		if (opts?.resetOnTeardown) flags |= O_RESET;
+		if (opts?.resubscribable) flags |= O_RESUB;
+		this._flags = flags;
 
 		this.source = this.source.bind(this);
 
@@ -64,44 +70,60 @@ export class OperatorImpl<B> {
 		).fill(null);
 		this._upstreamTalkbacks = localTalkbacks;
 
+		// Local completed flag — faster than this._flags property access in the
+		// hot-path action closures (emit/signal called on every upstream event).
+		let completed = false;
+
 		const actions: Actions<B> = {
 			seed: (value: B) => {
-				if (this._completed) return;
+				if (completed) return;
 				this._value = value;
 			},
 			emit: (value: B) => {
-				if (this._completed) return;
+				if (completed) return;
 				this._value = value;
 				if (this._sinks) {
 					for (const sink of this._sinks) sink(DATA, value);
 				}
 			},
 			signal: (s: Signal) => {
-				if (this._completed) return;
+				if (completed) return;
 				if (this._sinks) {
 					for (const sink of this._sinks) sink(STATE, s);
 				}
 			},
 			complete: () => {
-				if (this._completed) return;
-				this._completed = true;
+				if (completed) return;
+				completed = true;
+				this._flags |= O_COMPLETED;
 				this._handler = null;
-				if (this._sinks) {
-					const snapshot = [...this._sinks];
-					this._sinks.clear();
-					this._sinks = null;
-					for (const sink of snapshot) sink(END);
+				// Disconnect upstream to release resources (producers stop,
+				// intervals clear, etc.). Must happen before notifying sinks
+				// to prevent upstream from sending more events.
+				for (const tb of localTalkbacks) tb?.(END);
+				localTalkbacks.fill(null);
+				// Apply resetOnTeardown (matches producer._stop() behavior)
+				if (this._flags & O_RESET) this._value = this._initial;
+				// Move sinks reference to local, null field before notify —
+				// no snapshot array allocation needed.
+				const sinks = this._sinks;
+				this._sinks = null;
+				if (sinks) {
+					for (const sink of sinks) sink(END);
 				}
 			},
 			error: (e: unknown) => {
-				if (this._completed) return;
-				this._completed = true;
+				if (completed) return;
+				completed = true;
+				this._flags |= O_COMPLETED;
 				this._handler = null;
-				if (this._sinks) {
-					const snapshot = [...this._sinks];
-					this._sinks.clear();
-					this._sinks = null;
-					for (const sink of snapshot) sink(END, e);
+				for (const tb of localTalkbacks) tb?.(END);
+				localTalkbacks.fill(null);
+				if (this._flags & O_RESET) this._value = this._initial;
+				const sinks = this._sinks;
+				this._sinks = null;
+				if (sinks) {
+					for (const sink of sinks) sink(END, e);
 				}
 			},
 			disconnect: (dep?: number) => {
@@ -118,6 +140,7 @@ export class OperatorImpl<B> {
 		this._handler = this._init(actions);
 
 		for (let i = 0; i < this._deps.length; i++) {
+			if (completed) break;
 			const depIndex = i;
 			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
@@ -133,7 +156,7 @@ export class OperatorImpl<B> {
 		for (const tb of this._upstreamTalkbacks) tb?.(END);
 		this._upstreamTalkbacks = [];
 		this._handler = null;
-		if (this._resetOnTeardown) this._value = this._initial;
+		if (this._flags & O_RESET) this._value = this._initial;
 	}
 
 	get(): B {
@@ -150,9 +173,9 @@ export class OperatorImpl<B> {
 	source(type: number, payload?: any): void {
 		if (type === START) {
 			const sink = payload;
-			if (this._completed) {
-				if (this._resubscribable && this._sinks === null) {
-					this._completed = false;
+			if (this._flags & O_COMPLETED) {
+				if ((this._flags & O_RESUB) && this._sinks === null) {
+					this._flags &= ~O_COMPLETED;
 				} else {
 					sink(START, (_t: number) => {});
 					sink(END);
@@ -162,9 +185,8 @@ export class OperatorImpl<B> {
 			const wasEmpty = !this._sinks;
 			if (!this._sinks) this._sinks = new Set();
 			this._sinks.add(sink);
-			if (wasEmpty) {
-				this._connectUpstream();
-			}
+			// Send START before connecting upstream — ensures correct protocol
+			// order (START then END) if a dep sends END during connection.
 			sink(START, (t: number) => {
 				if (t === DATA) sink(DATA, this._value);
 				if (t === END) {
@@ -176,6 +198,9 @@ export class OperatorImpl<B> {
 					}
 				}
 			});
+			if (wasEmpty) {
+				this._connectUpstream();
+			}
 		}
 	}
 }
