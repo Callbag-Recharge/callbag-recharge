@@ -448,7 +448,7 @@ All protocol, batch, and interop scenarios work correctly:
 
 **Goal:** Cover modules identified as undertested in the post-batch-6 review: flat edge cases, repeat edge cases, pipeRaw/SKIP thorough coverage, and Inspector disabled/enabled modes.
 
-**Result:** 38 tests written, 1 bug fixed. All 710 tests passing.
+**Result:** 39 tests written, 2 bugs fixed. All 711 tests passing.
 
 **Test file:** `src/__tests__/extras/batch7-gaps.test.ts`
 
@@ -457,6 +457,7 @@ All protocol, batch, and interop scenarios work correctly:
 | Module | Hypothesis | Result | Fix |
 |--------|-----------|--------|-----|
 | `flat` | Inner completes synchronously during `subscribe()` → `onEnd` sets `innerUnsub=null` but `subscribe()` return overwrites it → flat never detects inner completed | ✅ Confirmed | Added `innerEnded` flag; after `subscribe()` returns, if `innerEnded` is true, reset `innerUnsub = null` |
+| `switchMap` | Same sync-completion race as flat — `innerUnsub` overwritten by `subscribe()` return after `onEnd` nullified it | ✅ Confirmed | Same `innerEnded` flag guard applied |
 
 ### Tests Written
 
@@ -470,6 +471,9 @@ All protocol, batch, and interop scenarios work correctly:
 - Outer emits undefined → unsubscribes inner, emits undefined
 - get() returns current inner value without subscribers
 - Multiple subscribers share single outer subscription
+
+**switchMap (1 test)** ✅
+- Inner completes synchronously after outer completes → switchMap completes ← bug fixed
 
 **repeat (6 tests)** ✅
 - count=0 → immediate complete, no subscription
@@ -501,12 +505,12 @@ All protocol, batch, and interop scenarios work correctly:
 - graph() with unnamed stores uses store_N fallback keys
 - graph() returns correct values for mixed store types
 - trace() deduplicates via Object.is (same value not reported)
-- trace() on completed store calls END, stops tracing
+- trace() on completed store stops tracing
 - inspect() reflects current value of store
 - Re-enabling after disable allows new registrations
 - _reset() clears enabled override
 
-**Actual: 38 tests, 1 bug fix (flat sync inner completion)**
+**Actual: 39 tests, 2 bug fixes (flat + switchMap sync inner completion)**
 
 ---
 
@@ -520,8 +524,8 @@ All protocol, batch, and interop scenarios work correctly:
 | 4 | Reconnect/lifecycle across all operators | 26 | 0 | ✅ Done |
 | 5 | Reentrancy, stress, complex chains | 29 | 1 | ✅ Done |
 | 6 | Protocol, batch, interop | 27 | 0 | ✅ Done |
-| 7 | Gap coverage (flat/repeat/pipeRaw/Inspector) | 38 | 1 | ✅ Done |
-| **Total** | | **238** | **9** | **All done** |
+| 7 | Gap coverage (flat/switchMap/repeat/pipeRaw/Inspector) | 39 | 2 | ✅ Done |
+| **Total** | | **239** | **10** | **All done** |
 
 ## Test File Strategy
 
@@ -531,4 +535,4 @@ All protocol, batch, and interop scenarios work correctly:
 - **Batch 4** → `src/__tests__/extras/reconnect.test.ts`
 - **Batch 5** → `src/__tests__/extras/stress.test.ts`
 - **Batch 6** → `src/__tests__/core/protocol-edge-cases.test.ts`
-- **Batch 7** → `src/__tests__/extras/batch7-gaps.test.ts` (flat/repeat/pipeRaw/SKIP/Inspector)
+- **Batch 7** → `src/__tests__/extras/batch7-gaps.test.ts` (flat/switchMap/repeat/pipeRaw/SKIP/Inspector)

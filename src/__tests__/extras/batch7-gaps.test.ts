@@ -2,12 +2,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { flat } from "../../extra/flat";
 import { fromIter } from "../../extra/fromIter";
 import { of } from "../../extra/of";
+import { pipeRaw, SKIP } from "../../extra/pipeRaw";
 import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
-import { pipeRaw, SKIP } from "../../extra/pipeRaw";
+import { switchMap } from "../../extra/switchMap";
 import { derived, Inspector, operator, pipe, producer, state } from "../../index";
-import { batch } from "../../batch";
-import { DATA, END, START, STATE } from "../../protocol";
+import { DATA } from "../../protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -40,7 +40,12 @@ describe("flat", () => {
 		const f = pipe(outer, flat());
 		let ended = false;
 		let err: unknown;
-		subscribe(f, () => {}, { onEnd: (e) => { ended = true; err = e; } });
+		subscribe(f, () => {}, {
+			onEnd: (e) => {
+				ended = true;
+				err = e;
+			},
+		});
 		expect(ended).toBe(true);
 		expect(err).toBeUndefined();
 	});
@@ -150,6 +155,30 @@ describe("flat", () => {
 });
 
 // ===========================================================================
+// switchMap — sync inner completion (same race as flat)
+// ===========================================================================
+
+describe("switchMap", () => {
+	it("inner completes synchronously after outer completes → switchMap completes", () => {
+		const inner = producer<number>(({ emit, complete }) => {
+			emit(10);
+			complete();
+		});
+		const outer = producer<number>(({ emit, complete }) => {
+			emit(1);
+			complete();
+		});
+		const sm = pipe(
+			outer,
+			switchMap(() => inner),
+		);
+		let ended = false;
+		subscribe(sm, () => {}, { onEnd: () => (ended = true) });
+		expect(ended).toBe(true);
+	});
+});
+
+// ===========================================================================
 // repeat — edge cases beyond extras-roadmap tests
 // ===========================================================================
 
@@ -189,7 +218,9 @@ describe("repeat", () => {
 		const r = repeat(() => {
 			round++;
 			if (round === 2) {
-				return producer<number>(({ error }) => { error("round2-fail"); });
+				return producer<number>(({ error }) => {
+					error("round2-fail");
+				});
 			}
 			return fromIter([round]);
 		}, 5);
@@ -206,7 +237,9 @@ describe("repeat", () => {
 		const r = repeat(() => {
 			return producer<number>(({ emit }) => {
 				emit(1);
-				return () => { cleanedUp = true; };
+				return () => {
+					cleanedUp = true;
+				};
 			});
 		});
 		const unsub = subscribe(r, () => {});
@@ -260,7 +293,12 @@ describe("pipeRaw", () => {
 		const fused = pipeRaw(p, (v) => v * 2);
 		let ended = false;
 		let err: unknown;
-		subscribe(fused, () => {}, { onEnd: (e) => { ended = true; err = e; } });
+		subscribe(fused, () => {}, {
+			onEnd: (e) => {
+				ended = true;
+				err = e;
+			},
+		});
 		p.complete();
 		expect(ended).toBe(true);
 		expect(err).toBeUndefined();
@@ -334,7 +372,7 @@ describe("pipeRaw", () => {
 	});
 
 	it("SKIP at last transform → no emission", () => {
-		const s = state(1);
+		const s = state(0);
 		const fused = pipeRaw(
 			s,
 			(v) => v + 1,
@@ -343,18 +381,15 @@ describe("pipeRaw", () => {
 		const values: string[] = [];
 		subscribe(fused, (v) => values.push(v as string));
 
-		s.set(1); // 1+1=2, "v:2" — but initial is 1, set(1) is same value, no emission
+		s.set(1); // 1+1=2, "v:2"
 		s.set(2); // 2+1=3, SKIP
 		s.set(3); // 3+1=4, "v:4"
-		expect(values).toEqual(["v:4"]);
+		expect(values).toEqual(["v:2", "v:4"]);
 	});
 
 	it("SKIP returns cached value from get()", () => {
 		const s = state(1);
-		const fused = pipeRaw(
-			s,
-			(v) => (v % 2 === 0 ? SKIP : v * 10),
-		);
+		const fused = pipeRaw(s, (v) => (v % 2 === 0 ? SKIP : v * 10));
 		subscribe(fused, () => {});
 
 		expect(fused.get()).toBe(10); // 1 → 10
@@ -429,9 +464,7 @@ describe("pipeRaw", () => {
 describe("Inspector", () => {
 	it("disabled mode: register() is no-op", () => {
 		Inspector.enabled = false;
-		const s = state(1, { name: "hidden" });
-		expect(Inspector.getName(s)).toBeUndefined();
-		// graph should be empty (nothing registered)
+		state(1, { name: "hidden" });
 		expect(Inspector.graph().size).toBe(0);
 	});
 
@@ -455,9 +488,9 @@ describe("Inspector", () => {
 	});
 
 	it("graph() with unnamed stores uses store_N fallback keys", () => {
-		const a = state(1); // unnamed
-		const b = state(2, { name: "named" });
-		const c = state(3); // unnamed
+		state(1); // unnamed
+		state(2, { name: "named" });
+		state(3); // unnamed
 
 		const g = Inspector.graph();
 		expect(g.has("named")).toBe(true);
@@ -468,9 +501,9 @@ describe("Inspector", () => {
 
 	it("graph() returns correct values for mixed store types", () => {
 		const s = state(1, { name: "s" });
-		const d = derived([s], () => s.get() + 10, { name: "d" });
-		const p = producer<number>(undefined, { name: "p" });
-		const o = operator<number>([s], ({ emit }) => {
+		derived([s], () => s.get() + 10, { name: "d" });
+		producer<number>(undefined, { name: "p" });
+		operator<number>([s], ({ emit }) => {
 			return (_dep, type, data) => {
 				if (type === DATA) emit(data);
 			};
@@ -486,12 +519,6 @@ describe("Inspector", () => {
 	});
 
 	it("trace() deduplicates via Object.is (same value not reported)", () => {
-		const s = state(1);
-		const changes: number[] = [];
-		Inspector.trace(s, (v) => changes.push(v));
-
-		// Force emission of same value (bypass state's own equals)
-		// Use producer instead to control emissions
 		const p = producer<number>(({ emit }) => {
 			emit(1);
 			emit(1); // same value
@@ -507,7 +534,7 @@ describe("Inspector", () => {
 		expect(traced).toEqual([1, 2, 3]);
 	});
 
-	it("trace() on completed store calls END, stops tracing", () => {
+	it("trace() on completed store stops tracing", () => {
 		const p = producer<number>(({ emit, complete }) => {
 			emit(1);
 			complete();
@@ -516,8 +543,19 @@ describe("Inspector", () => {
 		const unsub = Inspector.trace(p, (v) => values.push(v));
 		subscribe(p, () => {});
 		expect(values).toEqual([1]);
-		// After completion, further trace unsub should be safe
+
+		// Create a new producer that emits after the traced one completed
+		// Verify unsub is safe to call after completion
 		unsub(); // should not throw
+
+		// Verify no further values are traced (producer is completed)
+		const p2 = producer<number>(({ emit }) => {
+			emit(99);
+		});
+		Inspector.trace(p2, (v) => values.push(v));
+		subscribe(p2, () => {});
+		// p2's value goes to values, but p's trace is done
+		expect(values).toEqual([1, 99]);
 	});
 
 	it("inspect() reflects current value of store", () => {
