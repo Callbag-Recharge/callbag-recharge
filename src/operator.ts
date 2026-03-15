@@ -9,6 +9,8 @@
  *
  * v3: Tier 1 — participates in diamond resolution. Handler receives type 3
  * STATE signals and decides whether to forward DIRTY/RESOLVED downstream.
+ *
+ * Class-based for V8 hidden class optimization and prototype method sharing.
  */
 
 import { Inspector } from "./inspector";
@@ -16,37 +18,57 @@ import type { Signal } from "./protocol";
 import { DATA, END, START, STATE } from "./protocol";
 import type { Actions, Store, StoreOptions } from "./types";
 
-export function operator<B>(
-	deps: Store<unknown>[],
-	init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
-	opts?: StoreOptions & { initial?: B },
-): Store<B> {
-	let currentValue: B | undefined = opts?.initial;
-	const sinks = new Set<any>();
-	let upstreamTalkbacks: Array<((type: number) => void) | null> = [];
-	let handler: ((depIndex: number, type: number, data: any) => void) | null = null;
+export class OperatorImpl<B> {
+	_value: B | undefined;
+	_sinks: Set<any> | null = null;
+	_upstreamTalkbacks: Array<((type: number) => void) | null> = [];
+	_handler: ((depIndex: number, type: number, data: any) => void) | null = null;
+	_deps: Store<unknown>[];
+	_init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void;
 
-	function connectUpstream(): void {
-		const localTalkbacks: Array<((type: number) => void) | null> = new Array(deps.length).fill(
-			null,
-		);
-		upstreamTalkbacks = localTalkbacks;
+	constructor(
+		deps: Store<unknown>[],
+		init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
+		opts?: StoreOptions & { initial?: B },
+	) {
+		this._value = opts?.initial;
+		this._deps = deps;
+		this._init = init;
+
+		this.source = this.source.bind(this);
+
+		Inspector.register(this as any, { kind: "operator", ...opts });
+	}
+
+	_connectUpstream(): void {
+		const localTalkbacks: Array<((type: number) => void) | null> = new Array(
+			this._deps.length,
+		).fill(null);
+		this._upstreamTalkbacks = localTalkbacks;
 
 		const actions: Actions<B> = {
-			emit(value: B) {
-				currentValue = value;
-				for (const sink of sinks) sink(DATA, value);
+			emit: (value: B) => {
+				this._value = value;
+				if (this._sinks) {
+					for (const sink of this._sinks) sink(DATA, value);
+				}
 			},
-			signal(s: Signal) {
-				for (const sink of sinks) sink(STATE, s);
+			signal: (s: Signal) => {
+				if (this._sinks) {
+					for (const sink of this._sinks) sink(STATE, s);
+				}
 			},
-			complete() {
-				for (const sink of sinks) sink(END);
+			complete: () => {
+				if (this._sinks) {
+					for (const sink of this._sinks) sink(END);
+				}
 			},
-			error(e: unknown) {
-				for (const sink of sinks) sink(END, e);
+			error: (e: unknown) => {
+				if (this._sinks) {
+					for (const sink of this._sinks) sink(END, e);
+				}
 			},
-			disconnect(dep?: number) {
+			disconnect: (dep?: number) => {
 				if (dep !== undefined) {
 					localTalkbacks[dep]?.(END);
 					localTalkbacks[dep] = null;
@@ -57,50 +79,58 @@ export function operator<B>(
 			},
 		};
 
-		handler = init(actions);
+		this._handler = this._init(actions);
 
-		for (let i = 0; i < deps.length; i++) {
+		for (let i = 0; i < this._deps.length; i++) {
 			const depIndex = i;
-			deps[depIndex].source(START, (type: number, data: any) => {
+			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
 					localTalkbacks[depIndex] = data;
 					return;
 				}
-				handler!(depIndex, type, data);
+				this._handler?.(depIndex, type, data);
 			});
 		}
 	}
 
-	function disconnectUpstream(): void {
-		for (const tb of upstreamTalkbacks) tb?.(END);
-		upstreamTalkbacks = [];
-		handler = null;
+	_disconnectUpstream(): void {
+		for (const tb of this._upstreamTalkbacks) tb?.(END);
+		this._upstreamTalkbacks = [];
+		this._handler = null;
 	}
 
-	const store: Store<B> = {
-		get() {
-			return currentValue as B;
-		},
+	get(): B {
+		return this._value as B;
+	}
 
-		source(type: number, payload?: any) {
-			if (type === START) {
-				const sink = payload;
-				const wasEmpty = sinks.size === 0;
-				sinks.add(sink);
-				if (wasEmpty) {
-					connectUpstream();
-				}
-				sink(START, (t: number) => {
-					if (t === DATA) sink(DATA, currentValue);
-					if (t === END) {
-						sinks.delete(sink);
-						if (sinks.size === 0) disconnectUpstream();
-					}
-				});
+	source(type: number, payload?: any): void {
+		if (type === START) {
+			const sink = payload;
+			const wasEmpty = !this._sinks;
+			if (!this._sinks) this._sinks = new Set();
+			this._sinks.add(sink);
+			if (wasEmpty) {
+				this._connectUpstream();
 			}
-		},
-	};
+			sink(START, (t: number) => {
+				if (t === DATA) sink(DATA, this._value);
+				if (t === END) {
+					if (!this._sinks) return;
+					this._sinks.delete(sink);
+					if (this._sinks.size === 0) {
+						this._sinks = null;
+						this._disconnectUpstream();
+					}
+				}
+			});
+		}
+	}
+}
 
-	Inspector.register(store, { kind: "operator", ...opts });
-	return store;
+export function operator<B>(
+	deps: Store<unknown>[],
+	init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
+	opts?: StoreOptions & { initial?: B },
+): Store<B> {
+	return new OperatorImpl<B>(deps, init, opts) as any;
 }

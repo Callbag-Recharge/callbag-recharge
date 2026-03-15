@@ -75,10 +75,10 @@ export function beginDeferredStart(): void {
 export function endDeferredStart(): void {
 	connectDepth--;
 	if (connectDepth === 0) {
-		while (pendingStarts.length > 0) {
-			const start = pendingStarts.shift();
-			if (start) start();
+		for (let i = 0; i < pendingStarts.length; i++) {
+			pendingStarts[i]();
 		}
+		pendingStarts.length = 0;
 	}
 }
 

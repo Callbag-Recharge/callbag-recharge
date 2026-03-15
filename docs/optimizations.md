@@ -147,140 +147,37 @@ const memoized = derived([inputA, inputB], () => {
 
 This is more general than `equals` — it compares *inputs* rather than *outputs*. Use this when the computation itself is expensive (>1ms) and inputs change less often than DIRTY propagates.
 
+### 7. Class-based primitives with lazy sinks — reduced memory footprint
+
+All four primitives (`ProducerImpl`, `StateImpl`, `DerivedImpl`, `OperatorImpl`) use classes with prototype method sharing and V8 hidden class optimization. The factory functions (`producer()`, `state()`, `derived()`, `operator()`) are preserved as the public API.
+
+**Results:**
+- Memory per store: ~3,600 bytes → ~740 bytes (**4.9x smaller**, ~6x gap vs Preact's ~118 bytes)
+- Store creation (Inspector OFF): 405K → 7.1M ops/sec (**17.5x faster**)
+- Store creation (Inspector ON): 236K → 1.5M ops/sec (**6.4x faster**)
+- Throughput: equal or better across all benchmarks
+
+**Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
+
+**Lazy `_sinks = null`:** All classes initialize `_sinks` as `null`. The Set is allocated on first subscriber connect and nulled when the last subscriber disconnects. Pull-only stores never allocate a Set (~200 bytes saved per pull-only store).
+
+**Remaining gap vs Preact (~6x):** Preact's ~118 bytes/store is achievable only with further work — Preact stores no per-instance bound functions and uses bitfield flags instead of boolean fields. The talkback closure in `source()` and per-connection state remain inherent costs in the callbag protocol.
+
+### 8. `endDeferredStart()` O(n) drain
+
+`endDeferredStart()` uses an index-based `for` loop + `length = 0` (O(n)) instead of `while/shift()` (O(n²)), matching the `batch()` drain pattern. Impact scales with the number of deps in a single `effect()` or `derived()`.
+
 ---
 
 ## Potential optimizations
 
 These are not yet implemented but represent concrete opportunities for improvement, ordered by expected impact.
 
-### 1. Memory footprint reduction (~30x gap vs Preact)
-
-**Status:** Not implemented. **Impact:** High.
-
-Recharge stores use ~3,600 bytes/store vs Preact's ~118 bytes/store. The gap comes from:
-
-- **Closure-based stores:** Each `producer()` / `derived()` creates ~10 closure variables (`currentValue`, `started`, `completed`, `sinks`, `cleanup`, `pendingEmission`, etc.). V8 allocates a shared closure context object for these.
-- **Eager `Set` allocation:** Every store allocates a `new Set()` for sinks at creation, even if no subscriber ever connects. Most stores in a typical app are intermediate derived nodes that may have 0–1 sinks.
-- **Inspector WeakRef:** When enabled, each store gets a `new WeakRef()` added to a global Set.
-
-The approaches below address these in order of impact.
-
-#### 1a. Class + prototype methods
-
-Replace closure-based factories with classes. Methods on the prototype are allocated once and shared across all instances. V8 applies hidden class optimization — fields at fixed offsets, not a hash map — yielding dense, monomorphic memory layout. This is the primary reason Preact achieves 118 bytes/store.
-
-```ts
-// Current: per-instance closure context + ~6 inner function objects per producer
-function producer<T>(fn?, opts?) {
-  let currentValue: T | undefined = opts?.initial
-  const sinks = new Set<any>()
-  // ...
-  function doEmit(value: T) { ... }    // new function object per producer
-  function doSignal(s: Signal) { ... } // new function object per producer
-  // ...
-}
-
-// With class: methods on prototype — one allocation, shared across all instances
-class Producer<T> {
-  _value: T | undefined
-  _sinks: Set<any> | null = null  // lazy — see 1b
-  // ...
-
-  emit(value: T) { ... }    // Producer.prototype.emit — shared
-  signal(s: Signal) { ... } // Producer.prototype.signal — shared
-  source(type: number, payload?: any) { ... }
-}
-```
-
-V8 JIT-compiles prototype methods once and reuses the compiled code for every instance (monomorphic call sites). The current closure approach produces a unique function object for each `doEmit`, `doSignal`, etc. per `producer()` call — meaning 10,000 stores allocate 60,000+ distinct function objects.
-
-#### 1b. Lazy `_sinks = null`
-
-Initialize sinks as `null` instead of `new Set()`. Allocate the Set only when the first subscriber connects via `source(START, ...)`. For pull-only stores (`.get()` without subscribers), this eliminates the Set entirely.
-
-```ts
-// Current: Set allocated at construction, even for pull-only stores
-const sinks = new Set<any>()
-
-// With lazy init: null until first sink, compatible with class approach
-class Producer<T> {
-  _sinks: Set<any> | null = null
-
-  source(type: number, sink: any) {
-    if (type === START) {
-      if (!this._sinks) this._sinks = new Set()
-      this._sinks.add(sink)
-      // ...
-    }
-  }
-
-  _broadcast(type: number, data?: any) {
-    if (!this._sinks) return  // null check replaces sinks.size === 0
-    for (const sink of this._sinks) sink(type, data)
-  }
-}
-```
-
-An empty `Set` costs ~200 bytes in V8. In a graph with 1,000 stores where 900 are intermediate derived nodes with a single downstream subscriber that is wired at app startup, the `sinks` Set is populated immediately and lazy init provides no benefit. But for stores created speculatively or used only in pull mode, this saves ~200 bytes each.
-
-#### 1c. Remove `update()`
-
-`update(fn)` is syntactic sugar over `set(fn(get()))` and exists only on `WritableStore` (state). Removing it saves one property slot per state store and one prototype method. Callers write `s.set(fn(s.get()))` instead.
-
-#### 1d. Pass `this` as actions (partial)
-
-Currently `startProducer()` creates a fresh object on every producer start to pass to the user-supplied `fn`:
-
-```ts
-// Current: new object + 4 property references allocated on every start
-const result = fn({ emit: doEmit, signal: doSignal, complete: doComplete, error: doError })
-```
-
-With a class, the producer instance itself carries those methods, so `this` can be passed directly — eliminating the wrapper object allocation:
-
-```ts
-class Producer<T> {
-  _start() {
-    // Pass this directly — no wrapper object created
-    const result = this._fn?.(this)
-    this._cleanup = typeof result === 'function' ? result : undefined
-  }
-}
-
-// User fn receives the Producer instance:
-producer(function(p) {
-  const id = setInterval(() => p.emit(Date.now()), 1000)
-  return () => clearInterval(id)
-})
-```
-
-**Limitation:** The talkback closure inside `source()` and the sink callbacks in the callbag handshake still require closures — they must capture per-connection state (which sink to respond to, the specific depIndex in `derived`). Passing `this` eliminates only the top-level actions object, not the per-connection closures.
-
-### 2. `endDeferredStart()` uses O(n²) `shift()`
-
-**Status:** Not implemented. **Impact:** Medium (connection batching with many deps).
-
-```ts
-// Current: O(n²) — shift() copies remaining array on each call
-while (pendingStarts.length > 0) {
-  const start = pendingStarts.shift();
-  if (start) start();
-}
-
-// Fix: O(n) — index-based drain (same pattern as batch())
-for (let i = 0; i < pendingStarts.length; i++) {
-  pendingStarts[i]();
-}
-pendingStarts.length = 0;
-```
-
-The `batch()` drain loop already uses the index-based pattern. `endDeferredStart()` should match. The impact scales with the number of deps in a single `effect()` or `derived()` — an effect with 20 deps queues 20 pending starts.
-
-### 3. Effect performance (~1.4x slower than Preact)
+### 1. Effect performance (~1.3x slower than Preact)
 
 **Status:** Not implemented. **Impact:** Medium.
 
-Effects are the one benchmark where Preact wins (~14M vs ~10M ops/sec). The overhead comes from:
+Effects are the one benchmark where Preact wins (~12.5M vs ~9.6M ops/sec). The overhead comes from:
 
 - **Type 3 DIRTY/RESOLVED round-trip:** Each dep change sends DIRTY (type 3) → effect tracks dirty count → DATA (type 1) → dirty count decrements → when zero, `fn()` runs. Preact's effects use a simpler version/flag check.
 - **`dirtyDeps` Set operations:** `add()`, `has()`, `delete()`, `size` checks per signal per dep.
@@ -291,7 +188,7 @@ Effects are the one benchmark where Preact wins (~14M vs ~10M ops/sec). The over
 - **Integer bitmask for dirty deps:** For effects with ≤32 deps (covers nearly all real-world cases), replace the `Set<number>` with a single `number` bitmask. `dirtyDeps |= (1 << depIndex)` to mark dirty, `dirtyDeps &= ~(1 << depIndex)` to resolve, `dirtyDeps === 0` to check settled. Bitwise ops are ~10x faster than Set operations.
 - **Fast-path for single-dep effects:** Skip dirty counting entirely when `deps.length === 1` — any DATA means "run now". No Set allocation needed.
 
-### 4. Derived `get()` always recomputes when unconnected
+### 2. Derived `get()` always recomputes when unconnected
 
 **Status:** Not implemented. **Impact:** Medium (pull-only derived stores).
 
@@ -312,7 +209,7 @@ Derived stores that are only used in pull mode (`.get()` without subscribers) re
 
 **Possible approach:** Always cache the result and track a "generation" counter. Each state `.set()` increments a global generation. Derived checks if its deps' generation changed since last cache; if not, return cache. This adds a cheap integer comparison to `get()` but eliminates redundant `fn()` calls.
 
-### 5. Compile-time Inspector removal
+### 3. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low (bundle size + micro-optimization).
 
@@ -320,7 +217,7 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 
 The current `Inspector.enabled` getter accesses `process.env.NODE_ENV` through a try/catch on every call. While this is only hit during store creation (not hot paths), a build-time solution eliminates the runtime cost entirely.
 
-### 6. `Inspector.enabled` getter caching
+### 4. `Inspector.enabled` getter caching
 
 **Status:** Not implemented. **Impact:** Low.
 
@@ -353,12 +250,9 @@ Once resolved, the result won't change. Cache it after first access to avoid rep
 | `pipeRaw()` + `SKIP` | Built-in | Single derived store for pipe chain | Hot pipe chains, SKIP filter semantics |
 | Raw callbag interop | Built-in | ~2.5x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
-| Class + prototype methods | Potential | Biggest memory win — shared methods, V8 hidden class layout | All stores |
-| Lazy `_sinks = null` | Potential | ~200 bytes/store for pull-only stores | Pull-only / speculative stores |
-| Remove `update()` | Potential | One fewer slot per state store | State stores |
-| Pass `this` as actions | Potential | Eliminates actions wrapper object per producer start | Producer-based stores |
-| `endDeferredStart()` O(n) drain | Potential | Faster connection batching | Effects/derived with many deps |
-| Integer bitmask dirty tracking | Potential | Faster effect re-runs, close 1.4x gap vs Preact | Effects and derived with ≤32 deps |
+| Class + lazy sinks | Built-in | 4.9x memory reduction, 17.5x faster store creation | All stores |
+| `endDeferredStart()` O(n) drain | Built-in | Faster connection batching | Effects/derived with many deps |
+| Integer bitmask dirty tracking | Potential | Faster effect re-runs, close 1.3x gap vs Preact | Effects and derived with ≤32 deps |
 | Single-dep fast path | Potential | Skip dirty counting overhead | Single-dep effects/derived |
 | Unconnected derived caching | Potential | Skip redundant `fn()` on pull | Pull-only derived stores |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |

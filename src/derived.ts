@@ -9,6 +9,8 @@
  * enables push-phase memoization via RESOLVED (skips entire subtree).
  * Type 1 DATA carries only real values.
  *
+ * Class-based for V8 hidden class optimization and prototype method sharing.
+ *
  * Note: implemented as a standalone primitive rather than on top of operator()
  * because it needs a custom get() (pull-fallback recompute when unconnected)
  * that operator does not support.
@@ -18,77 +20,99 @@ import { Inspector } from "./inspector";
 import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
-export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
-	const sinks = new Set<any>();
-	let upstreamTalkbacks: Array<(type: number) => void> = [];
-	let cachedValue: T | undefined;
-	let hasCached = false;
-	let connected = false;
-	const dirtyDeps = new Set<number>();
-	const eqFn = opts?.equals;
-	let anyDataReceived = false;
+export class DerivedImpl<T> {
+	_sinks: Set<any> | null = null;
+	_upstreamTalkbacks: Array<(type: number) => void> = [];
+	_cachedValue: T | undefined;
+	_hasCached = false;
+	_connected = false;
+	_dirtyDeps = new Set<number>();
+	_eqFn: ((a: T, b: T) => boolean) | undefined;
+	_anyDataReceived = false;
+	_deps: Store<unknown>[];
+	_fn: () => T;
 
-	function recompute(): void {
-		const result = fn();
-		if (eqFn && hasCached && eqFn(cachedValue as T, result)) {
-			// Value unchanged — send RESOLVED (subtree skipping)
-			for (const sink of sinks) sink(STATE, RESOLVED);
-			return;
-		}
-		cachedValue = result;
-		hasCached = true;
-		for (const sink of sinks) sink(DATA, cachedValue);
+	constructor(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>) {
+		this._deps = deps;
+		this._fn = fn;
+		this._eqFn = opts?.equals;
+
+		this.source = this.source.bind(this);
+
+		Inspector.register(this as any, { kind: "derived", ...opts });
 	}
 
-	function connectUpstream(): void {
-		upstreamTalkbacks = [];
-		for (let i = 0; i < deps.length; i++) {
+	_recompute(): void {
+		const result = this._fn();
+		if (this._eqFn && this._hasCached && this._eqFn(this._cachedValue as T, result)) {
+			// Value unchanged — send RESOLVED (subtree skipping)
+			if (this._sinks) {
+				for (const sink of this._sinks) sink(STATE, RESOLVED);
+			}
+			return;
+		}
+		this._cachedValue = result;
+		this._hasCached = true;
+		if (this._sinks) {
+			for (const sink of this._sinks) sink(DATA, this._cachedValue);
+		}
+	}
+
+	_connectUpstream(): void {
+		this._upstreamTalkbacks = [];
+		for (let i = 0; i < this._deps.length; i++) {
 			const depIndex = i;
-			deps[depIndex].source(START, (type: number, data: any) => {
+			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
-					upstreamTalkbacks.push(data);
+					this._upstreamTalkbacks.push(data);
 					return;
 				}
 				if (type === STATE) {
 					if (data === DIRTY) {
-						const wasEmpty = dirtyDeps.size === 0;
-						dirtyDeps.add(depIndex);
+						const wasEmpty = this._dirtyDeps.size === 0;
+						this._dirtyDeps.add(depIndex);
 						if (wasEmpty) {
-							anyDataReceived = false;
-							for (const sink of sinks) sink(STATE, DIRTY);
+							this._anyDataReceived = false;
+							if (this._sinks) {
+								for (const sink of this._sinks) sink(STATE, DIRTY);
+							}
 						}
 					} else if (data === RESOLVED) {
-						if (dirtyDeps.has(depIndex)) {
-							dirtyDeps.delete(depIndex);
-							if (dirtyDeps.size === 0) {
-								if (anyDataReceived) {
-									recompute();
+						if (this._dirtyDeps.has(depIndex)) {
+							this._dirtyDeps.delete(depIndex);
+							if (this._dirtyDeps.size === 0) {
+								if (this._anyDataReceived) {
+									this._recompute();
 								} else {
 									// All deps resolved without value change — skip fn()
-									for (const sink of sinks) sink(STATE, RESOLVED);
+									if (this._sinks) {
+										for (const sink of this._sinks) sink(STATE, RESOLVED);
+									}
 								}
 							}
 						}
 					}
 				}
 				if (type === DATA) {
-					if (dirtyDeps.has(depIndex)) {
-						dirtyDeps.delete(depIndex);
-						anyDataReceived = true;
-						if (dirtyDeps.size === 0) {
-							recompute();
+					if (this._dirtyDeps.has(depIndex)) {
+						this._dirtyDeps.delete(depIndex);
+						this._anyDataReceived = true;
+						if (this._dirtyDeps.size === 0) {
+							this._recompute();
 						}
 					} else {
 						// DATA without prior DIRTY: dep bypasses the control channel
 						// (e.g. a raw callbag source). Treat as immediate trigger.
-						if (dirtyDeps.size === 0) {
+						if (this._dirtyDeps.size === 0) {
 							// No other dirty deps — signal and recompute immediately.
-							for (const sink of sinks) sink(STATE, DIRTY);
-							recompute();
+							if (this._sinks) {
+								for (const sink of this._sinks) sink(STATE, DIRTY);
+							}
+							this._recompute();
 						} else {
 							// Other deps already dirty — mark that real data arrived
 							// so we don't skip recompute when they resolve.
-							anyDataReceived = true;
+							this._anyDataReceived = true;
 						}
 					}
 				}
@@ -96,54 +120,58 @@ export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOpti
 		}
 	}
 
-	function disconnectUpstream(): void {
-		for (const tb of upstreamTalkbacks) tb(END);
-		upstreamTalkbacks = [];
-		connected = false;
-		dirtyDeps.clear();
+	_disconnectUpstream(): void {
+		for (const tb of this._upstreamTalkbacks) tb(END);
+		this._upstreamTalkbacks = [];
+		this._connected = false;
+		this._dirtyDeps.clear();
 	}
 
-	const store: Store<T> = {
-		get() {
-			if (connected && dirtyDeps.size === 0) {
-				// Connected + settled — return cache
-				return cachedValue as T;
-			}
-			// Not connected or pending — recompute on demand
-			const result = fn();
-			if (eqFn && hasCached && eqFn(cachedValue as T, result)) {
-				return cachedValue as T;
-			}
-			if (eqFn) {
-				cachedValue = result;
-				hasCached = true;
-			}
-			return result;
-		},
+	get(): T {
+		if (this._connected && this._dirtyDeps.size === 0) {
+			// Connected + settled — return cache
+			return this._cachedValue as T;
+		}
+		// Not connected or pending — recompute on demand
+		const result = this._fn();
+		if (this._eqFn && this._hasCached && this._eqFn(this._cachedValue as T, result)) {
+			return this._cachedValue as T;
+		}
+		if (this._eqFn) {
+			this._cachedValue = result;
+			this._hasCached = true;
+		}
+		return result;
+	}
 
-		source(type: number, payload?: any) {
-			if (type === START) {
-				const sink = payload;
-				const wasEmpty = sinks.size === 0;
-				sinks.add(sink);
-				if (wasEmpty) {
-					// Compute initial value before connecting upstream
-					cachedValue = fn();
-					hasCached = true;
-					connectUpstream();
-					connected = true;
-				}
-				sink(START, (t: number) => {
-					if (t === DATA) sink(DATA, cachedValue);
-					if (t === END) {
-						sinks.delete(sink);
-						if (sinks.size === 0) disconnectUpstream();
+	source(type: number, payload?: any): void {
+		if (type === START) {
+			const sink = payload;
+			const wasEmpty = !this._sinks;
+			if (!this._sinks) this._sinks = new Set();
+			this._sinks.add(sink);
+			if (wasEmpty) {
+				// Compute initial value before connecting upstream
+				this._cachedValue = this._fn();
+				this._hasCached = true;
+				this._connectUpstream();
+				this._connected = true;
+			}
+			sink(START, (t: number) => {
+				if (t === DATA) sink(DATA, this._cachedValue);
+				if (t === END) {
+					if (!this._sinks) return;
+					this._sinks.delete(sink);
+					if (this._sinks.size === 0) {
+						this._sinks = null;
+						this._disconnectUpstream();
 					}
-				});
-			}
-		},
-	};
+				}
+			});
+		}
+	}
+}
 
-	Inspector.register(store, { kind: "derived", ...opts });
-	return store;
+export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
+	return new DerivedImpl<T>(deps, fn, opts) as any;
 }
