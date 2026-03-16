@@ -57,6 +57,15 @@
 		"observable",
 		"state-management"
 	],
+	"author": "Callbag-Recharge",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/Callbag-Recharge/callbag-recharge.git"
+	},
+	"bugs": {
+		"url": "https://github.com/Callbag-Recharge/callbag-recharge/issues"
+	},
+	"homepage": "https://github.com/Callbag-Recharge/callbag-recharge#readme",
 	"license": "MIT",
 	"devDependencies": {
 		"@biomejs/biome": "^2.4.6",
