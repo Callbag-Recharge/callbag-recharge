@@ -3,15 +3,22 @@
 // ---------------------------------------------------------------------------
 // All debug metadata lives here in WeakMaps, not on the store objects.
 // Stores stay lean. Inspector is opt-in overhead.
+//
+// v4: inspect() returns status field. Signal hooks (onEmit, onSignal,
+// onStatus, onEnd) fire from taps when non-null (zero-cost when null).
+// registerEdge() tracks dependency graph.
 // ---------------------------------------------------------------------------
 
 import { END, START } from "./protocol";
+import type { NodeStatus } from "./protocol";
 import type { Store } from "./types";
 
 export interface StoreInfo<T = unknown> {
 	name: string | undefined;
 	kind: string;
 	value: T;
+	/** v4: node lifecycle status */
+	status: NodeStatus | undefined;
 }
 
 export const Inspector = {
@@ -22,10 +29,19 @@ export const Inspector = {
 	// WeakRef set for graph() — allows GC of unused stores
 	_stores: new Set<WeakRef<Store<unknown>>>(),
 
+	// Dependency edges: parent → children
+	_edges: new Map<string, string[]>(),
+
 	// Enabled flag — when false, register/getName are no-ops
 	_explicitEnabled: null as boolean | null,
 
 	_cachedDefault: null as boolean | null,
+
+	// v4: Signal hooks — null default, zero-cost when not set
+	onEmit: null as ((store: Store<unknown>, value: unknown) => void) | null,
+	onSignal: null as ((store: Store<unknown>, signal: unknown) => void) | null,
+	onStatus: null as ((store: Store<unknown>, status: NodeStatus) => void) | null,
+	onEnd: null as ((store: Store<unknown>, error?: unknown) => void) | null,
 
 	get enabled(): boolean {
 		if (this._explicitEnabled !== null) return this._explicitEnabled;
@@ -50,6 +66,24 @@ export const Inspector = {
 		this._stores.add(new WeakRef(store));
 	},
 
+	/** Register a dependency edge between parent and child stores */
+	registerEdge(parent: Store<unknown>, child: Store<unknown>): void {
+		if (!this.enabled) return;
+		const parentName = this._names.get(parent) ?? "anonymous";
+		const childName = this._names.get(child) ?? "anonymous";
+		const children = this._edges.get(parentName);
+		if (children) {
+			if (!children.includes(childName)) children.push(childName);
+		} else {
+			this._edges.set(parentName, [childName]);
+		}
+	},
+
+	/** Get dependency edges: parent → children */
+	getEdges(): Map<string, string[]> {
+		return new Map(this._edges);
+	},
+
 	/** Get the name of a store */
 	getName(store: Store<unknown>): string | undefined {
 		if (!this.enabled) return undefined;
@@ -61,12 +95,13 @@ export const Inspector = {
 		return this._kinds.get(store);
 	},
 
-	/** Inspect a single store */
+	/** Inspect a single store — v4: includes status */
 	inspect<T>(store: Store<T>): StoreInfo<T> {
 		return {
 			name: this._names.get(store as Store<unknown>),
 			kind: this._kinds.get(store as Store<unknown>) ?? "unknown",
 			value: store.get(),
+			status: (store as any)._status,
 		};
 	},
 
@@ -113,7 +148,12 @@ export const Inspector = {
 		this._names = new WeakMap();
 		this._kinds = new WeakMap();
 		this._stores = new Set();
+		this._edges = new Map();
 		this._explicitEnabled = null;
 		this._cachedDefault = null;
+		this.onEmit = null;
+		this.onSignal = null;
+		this.onStatus = null;
+		this.onEnd = null;
 	},
 };

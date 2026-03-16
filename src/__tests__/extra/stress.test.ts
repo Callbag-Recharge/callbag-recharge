@@ -116,10 +116,9 @@ describe("reentrancy", () => {
 		s.set(2); // both should receive
 
 		expect(values1).toEqual([1, 2]);
-		// Second subscriber is added to the Set during iteration of set(1).
-		// Set iteration includes elements added during iteration, so
-		// the new sink receives the DATA(1) emission too.
-		expect(values2).toEqual([1, 2]);
+		// v4: Output slot dispatches to the snapshot at call time.
+		// Sub2 is added after the DATA(1) dispatch, so it only sees DATA(2).
+		expect(values2).toEqual([2]);
 	});
 
 	it("complete() inside emit handler → ordering", () => {
@@ -552,9 +551,8 @@ describe("memory safety", () => {
 
 		p.complete();
 
-		// After completion, sinks should be cleared
-		// Verify by checking that the producer's internal _sinks is null
-		expect((p as any)._sinks).toBeNull();
+		// After completion, output slot should be cleared
+		expect((p as any)._output).toBeNull();
 	});
 
 	it("unsubscribed chain releases intermediate stores", () => {
@@ -582,8 +580,8 @@ describe("memory safety", () => {
 
 		p.error("boom");
 
-		// After error, sinks should be cleared
-		expect((p as any)._sinks).toBeNull();
+		// After error, output slot should be cleared
+		expect((p as any)._output).toBeNull();
 	});
 
 	it("large buffer (10000 items) in bufferTime → flushed correctly", () => {

@@ -276,22 +276,21 @@ describe("Pipe + operators", () => {
 });
 
 describe("Backpressure / pull", () => {
-	it("derived does not compute until pulled", () => {
+	it("v4: derived is eager (STANDALONE) — computes at construction and on changes", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() + 1);
 		const d = derived([count], computeFn);
 
-		// Should NOT have computed yet
-		expect(computeFn).toHaveBeenCalledTimes(0);
+		// v4: computed once at construction (STANDALONE mode)
+		expect(computeFn).toHaveBeenCalledTimes(1);
 
 		count.set(1);
 		count.set(2);
 		count.set(3);
-		// Still not computed — nobody pulled
-		expect(computeFn).toHaveBeenCalledTimes(0);
+		// v4: STANDALONE connection recomputes on each state change
+		expect(computeFn).toHaveBeenCalledTimes(4); // 1 initial + 3 sets
 
-		d.get();
-		expect(computeFn).toHaveBeenCalledTimes(1);
-		expect(d.get()).toBe(4); // 3 + 1
+		expect(d.get()).toBe(4); // 3 + 1, returns cached
+		expect(computeFn).toHaveBeenCalledTimes(4); // no extra recompute
 	});
 });

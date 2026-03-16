@@ -22,11 +22,14 @@ export {
 	deferStart,
 	END,
 	endDeferredStart,
+	GRANT_ADOPT,
 	isBatching,
+	REQUEST_ADOPT,
 	RESOLVED,
 	START,
 	STATE,
 } from "./core/protocol";
+export type { NodeStatus } from "./core/protocol";
 // Core primitives
 export { state } from "./core/state";
 

@@ -7,8 +7,10 @@
  * Stateful: maintains cached value via actions.emit(). get() returns the
  * last emitted value. Lazy connection on first sink, disconnects when empty.
  *
- * v3: Tier 1 — participates in diamond resolution. Handler receives type 3
- * STATE signals and decides whether to forward DIRTY/RESOLVED downstream.
+ * v4: Output slot model replaces _sinks Set. _output is null (no sinks),
+ * a function (single sink), or a Set (multi sink). _status tracks node
+ * lifecycle. Tier 1 — participates in diamond resolution. Handler receives
+ * type 3 STATE signals and decides whether to forward DIRTY/RESOLVED.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
  * Boolean fields packed into _flags bitmask to reduce hidden class size.
@@ -21,8 +23,8 @@
  */
 
 import { Inspector } from "./inspector";
-import type { Signal } from "./protocol";
-import { DATA, END, START, STATE } from "./protocol";
+import type { NodeStatus, Signal } from "./protocol";
+import { DATA, DIRTY, END, START, STATE } from "./protocol";
 import type { Actions, SourceOptions, Store } from "./types";
 
 export type OperatorOpts<B> = SourceOptions<B>;
@@ -31,10 +33,12 @@ export type OperatorOpts<B> = SourceOptions<B>;
 const O_COMPLETED = 1;
 const O_RESET = 2;
 const O_RESUB = 4;
+const O_MULTI = 8;
 
 export class OperatorImpl<B> {
 	_value: B | undefined;
-	_sinks: Set<any> | null = null;
+	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
+	_status: NodeStatus = "DISCONNECTED";
 	_upstreamTalkbacks: Array<((type: number) => void) | null> = [];
 	_handler: ((depIndex: number, type: number, data: any) => void) | null = null;
 	_flags: number;
@@ -64,6 +68,20 @@ export class OperatorImpl<B> {
 		Inspector.register(this as any, { kind: opts?.kind ?? "operator", ...opts });
 	}
 
+	/**
+	 * Dispatch a signal to all current subscribers via the output slot.
+	 * See ProducerImpl._dispatch for safety invariant documentation.
+	 */
+	_dispatch(type: number, data?: any): void {
+		const output = this._output;
+		if (!output) return;
+		if (this._flags & O_MULTI) {
+			for (const sink of output as Set<any>) sink(type, data);
+		} else {
+			(output as (type: number, data?: any) => void)(type, data);
+		}
+	}
+
 	_connectUpstream(): void {
 		const localTalkbacks: Array<((type: number) => void) | null> = new Array(
 			this._deps.length,
@@ -82,20 +100,20 @@ export class OperatorImpl<B> {
 			emit: (value: B) => {
 				if (completed) return;
 				this._value = value;
-				if (this._sinks) {
-					for (const sink of this._sinks) sink(DATA, value);
-				}
+				this._status = "SETTLED";
+				this._dispatch(DATA, value);
 			},
 			signal: (s: Signal) => {
 				if (completed) return;
-				if (this._sinks) {
-					for (const sink of this._sinks) sink(STATE, s);
-				}
+				if (s === DIRTY) this._status = "DIRTY";
+				else this._status = "RESOLVED";
+				this._dispatch(STATE, s);
 			},
 			complete: () => {
 				if (completed) return;
 				completed = true;
 				this._flags |= O_COMPLETED;
+				this._status = "COMPLETED";
 				this._handler = null;
 				// Disconnect upstream to release resources (producers stop,
 				// intervals clear, etc.). Must happen before notifying sinks
@@ -104,26 +122,39 @@ export class OperatorImpl<B> {
 				localTalkbacks.fill(null);
 				// Apply resetOnTeardown (matches producer._stop() behavior)
 				if (this._flags & O_RESET) this._value = this._initial;
-				// Move sinks reference to local, null field before notify —
+				// Move output reference to local, null field before notify —
 				// no snapshot array allocation needed.
-				const sinks = this._sinks;
-				this._sinks = null;
-				if (sinks) {
-					for (const sink of sinks) sink(END);
+				const output = this._output;
+				const wasMulti = this._flags & O_MULTI;
+				this._output = null;
+				this._flags &= ~O_MULTI;
+				if (output) {
+					if (wasMulti) {
+						for (const sink of output as Set<any>) sink(END);
+					} else {
+						(output as (type: number, data?: any) => void)(END);
+					}
 				}
 			},
 			error: (e: unknown) => {
 				if (completed) return;
 				completed = true;
 				this._flags |= O_COMPLETED;
+				this._status = "ERRORED";
 				this._handler = null;
 				for (const tb of localTalkbacks) tb?.(END);
 				localTalkbacks.fill(null);
 				if (this._flags & O_RESET) this._value = this._initial;
-				const sinks = this._sinks;
-				this._sinks = null;
-				if (sinks) {
-					for (const sink of sinks) sink(END, e);
+				const output = this._output;
+				const wasMulti = this._flags & O_MULTI;
+				this._output = null;
+				this._flags &= ~O_MULTI;
+				if (output) {
+					if (wasMulti) {
+						for (const sink of output as Set<any>) sink(END, e);
+					} else {
+						(output as (type: number, data?: any) => void)(END, e);
+					}
 				}
 			},
 			disconnect: (dep?: number) => {
@@ -156,11 +187,12 @@ export class OperatorImpl<B> {
 		for (const tb of this._upstreamTalkbacks) tb?.(END);
 		this._upstreamTalkbacks = [];
 		this._handler = null;
+		this._status = "DISCONNECTED";
 		if (this._flags & O_RESET) this._value = this._initial;
 	}
 
 	get(): B {
-		if (this._getterFn && !this._sinks) {
+		if (this._getterFn && !this._output) {
 			// Disconnected: pull-based recompute (mirrors derived's get() behavior).
 			// Result is cached so subsequent get() with same dep values is stable.
 			const v = this._getterFn(this._value);
@@ -174,26 +206,50 @@ export class OperatorImpl<B> {
 		if (type === START) {
 			const sink = payload;
 			if (this._flags & O_COMPLETED) {
-				if ((this._flags & O_RESUB) && this._sinks === null) {
+				if ((this._flags & O_RESUB) && this._output === null) {
 					this._flags &= ~O_COMPLETED;
+					this._status = "DISCONNECTED";
 				} else {
 					sink(START, (_t: number) => {});
 					sink(END);
 					return;
 				}
 			}
-			const wasEmpty = !this._sinks;
-			if (!this._sinks) this._sinks = new Set();
-			this._sinks.add(sink);
+			const wasEmpty = this._output === null;
+			// Output slot transitions: null → SINGLE, SINGLE → MULTI
+			if (this._output === null) {
+				this._output = sink;
+			} else if (!(this._flags & O_MULTI)) {
+				const set = new Set<any>();
+				set.add(this._output);
+				set.add(sink);
+				this._output = set;
+				this._flags |= O_MULTI;
+			} else {
+				(this._output as Set<any>).add(sink);
+			}
 			// Send START before connecting upstream — ensures correct protocol
 			// order (START then END) if a dep sends END during connection.
 			sink(START, (t: number) => {
 				if (t === DATA) sink(DATA, this._value);
 				if (t === END) {
-					if (!this._sinks) return;
-					this._sinks.delete(sink);
-					if (this._sinks.size === 0) {
-						this._sinks = null;
+					if (this._output === null) return;
+					if (this._flags & O_MULTI) {
+						const set = this._output as Set<any>;
+						set.delete(sink);
+						if (set.size === 1) {
+							// MULTI → SINGLE
+							this._output = set.values().next().value;
+							this._flags &= ~O_MULTI;
+						} else if (set.size === 0) {
+							// MULTI → null
+							this._output = null;
+							this._flags &= ~O_MULTI;
+							this._disconnectUpstream();
+						}
+					} else if (this._output === sink) {
+						// SINGLE → null
+						this._output = null;
 						this._disconnectUpstream();
 					}
 				}

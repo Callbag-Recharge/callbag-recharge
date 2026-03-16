@@ -323,10 +323,9 @@ describe("reentrancy", () => {
 		s.set(3);
 
 		expect(values).toEqual([2, 3]);
-		// New subscriber added during emission for value 2.
-		// JS Set iteration includes elements added during iteration,
-		// so the new subscriber DOES see the current DATA emission.
-		expect(lateValues).toEqual([2, 3]);
+		// v4: Output slot dispatches to the snapshot at call time.
+		// New subscriber added during DATA(2) dispatch only sees DATA(3).
+		expect(lateValues).toEqual([3]);
 	});
 
 	it("effect triggering another state change during its callback", () => {

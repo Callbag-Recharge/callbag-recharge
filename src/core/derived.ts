@@ -2,23 +2,27 @@
  * Computed store with dirty tracking and caching. Recomputes fn() when
  * all dirty deps have resolved, emitting the new value on type 1 DATA.
  *
- * Stateful: maintains cached value. get() returns cache when settled,
- * recomputes when pending or unconnected.
- *
- * v3: Tier 1 — type 3 DIRTY/RESOLVED for diamond resolution. equals option
- * enables push-phase memoization via RESOLVED (skips entire subtree).
- * Type 1 DATA carries only real values.
+ * v4: Eagerly connects to deps (STANDALONE mode). Output slot model replaces
+ * _sinks Set. _status tracks node lifecycle. Single-dep nodes skip bitmask
+ * (P0 optimization). get() always returns cached value (populated at
+ * construction and kept current by STANDALONE connection).
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
  * Boolean fields packed into _flags bitmask to reduce hidden class size.
- *
- * Note: implemented as a standalone primitive rather than on top of operator()
- * because it needs a custom get() (pull-fallback recompute when unconnected)
- * that operator does not support.
  */
 
 import { Inspector } from "./inspector";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";
+import type { NodeStatus } from "./protocol";
+import {
+	DATA,
+	DIRTY,
+	END,
+	RESOLVED,
+	START,
+	STATE,
+	beginDeferredStart,
+	endDeferredStart,
+} from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
 // Flag bits for _flags bitmask
@@ -26,9 +30,12 @@ const D_HAS_CACHED = 1;
 const D_CONNECTED = 2;
 const D_ANY_DATA = 4;
 const D_COMPLETED = 8;
+const D_STANDALONE = 16;
+const D_MULTI = 32;
 
 export class DerivedImpl<T> {
-	_sinks: Set<any> | null = null;
+	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
+	_status: NodeStatus;
 	_upstreamTalkbacks: Array<(type: number) => void> = [];
 	_cachedValue: T | undefined;
 	_flags: number;
@@ -46,26 +53,107 @@ export class DerivedImpl<T> {
 		this.source = this.source.bind(this);
 
 		Inspector.register(this as any, { kind: "derived", ...opts });
+
+		// Compute initial value before connecting to deps
+		this._cachedValue = this._fn();
+		this._flags |= D_HAS_CACHED;
+		this._status = "SETTLED";
+
+		// Eagerly connect to deps (STANDALONE mode — deps stay connected).
+		// This creates permanent subscriptions: derived holds deps via _deps,
+		// deps hold derived back via talkback closures. Neither can be GC'd
+		// until the derived itself is collected. This is intentional — derived
+		// stores are assumed to be app-lifetime objects that must always have
+		// a current value. Upstream END (completion/error) breaks the cycle
+		// via _handleEnd().
+		beginDeferredStart();
+		this._connectUpstream();
+		if (!(this._flags & D_COMPLETED)) {
+			this._flags |= D_CONNECTED | D_STANDALONE;
+		}
+		endDeferredStart();
+	}
+
+	/**
+	 * Dispatch a signal to all current subscribers via the output slot.
+	 * See ProducerImpl._dispatch for safety invariant documentation.
+	 */
+	_dispatch(type: number, data?: any): void {
+		const output = this._output;
+		if (!output) return;
+		if (this._flags & D_MULTI) {
+			for (const sink of output as Set<any>) sink(type, data);
+		} else {
+			(output as (type: number, data?: any) => void)(type, data);
+		}
 	}
 
 	_recompute(): void {
 		const result = this._fn();
 		if (this._eqFn && (this._flags & D_HAS_CACHED) && this._eqFn(this._cachedValue as T, result)) {
 			// Value unchanged — send RESOLVED (subtree skipping)
-			if (this._sinks) {
-				for (const sink of this._sinks) sink(STATE, RESOLVED);
-			}
+			this._status = "RESOLVED";
+			this._dispatch(STATE, RESOLVED);
 			return;
 		}
 		this._cachedValue = result;
 		this._flags |= D_HAS_CACHED;
-		if (this._sinks) {
-			for (const sink of this._sinks) sink(DATA, this._cachedValue);
-		}
+		this._status = "SETTLED";
+		this._dispatch(DATA, this._cachedValue);
 	}
 
 	_connectUpstream(): void {
 		this._upstreamTalkbacks = [];
+		if (this._deps.length === 1) {
+			this._connectSingleDep();
+		} else {
+			this._connectMultiDep();
+		}
+	}
+
+	/** Single-dep: no bitmask, direct forward (P0 optimization) */
+	_connectSingleDep(): void {
+		let dirty = false;
+		this._deps[0].source(START, (type: number, data: any) => {
+			if (type === START) {
+				this._upstreamTalkbacks.push(data);
+				return;
+			}
+			if (this._flags & D_COMPLETED) return;
+
+			if (type === STATE) {
+				if (data === DIRTY) {
+					dirty = true;
+					this._status = "DIRTY";
+					this._dispatch(STATE, DIRTY);
+				} else if (data === RESOLVED) {
+					if (dirty) {
+						dirty = false;
+						this._status = "RESOLVED";
+						this._dispatch(STATE, RESOLVED);
+					}
+				} else {
+					// Unknown STATE signal — forward unchanged (§6)
+					this._dispatch(STATE, data);
+				}
+			} else if (type === DATA) {
+				if (dirty) {
+					dirty = false;
+					this._recompute();
+				} else {
+					// DATA without prior DIRTY (raw callbag compat)
+					this._status = "DIRTY";
+					this._dispatch(STATE, DIRTY);
+					this._recompute();
+				}
+			} else if (type === END) {
+				this._handleEnd(data);
+			}
+		});
+	}
+
+	/** Multi-dep: bitmask-based diamond resolution */
+	_connectMultiDep(): void {
 		for (let i = 0; i < this._deps.length; i++) {
 			if (this._flags & D_COMPLETED) break;
 			const depIndex = i;
@@ -76,15 +164,15 @@ export class DerivedImpl<T> {
 					return;
 				}
 				if (this._flags & D_COMPLETED) return;
+
 				if (type === STATE) {
 					if (data === DIRTY) {
 						const wasEmpty = this._dirtyDeps === 0;
 						this._dirtyDeps |= depBit;
 						if (wasEmpty) {
 							this._flags &= ~D_ANY_DATA;
-							if (this._sinks) {
-								for (const sink of this._sinks) sink(STATE, DIRTY);
-							}
+							this._status = "DIRTY";
+							this._dispatch(STATE, DIRTY);
 						}
 					} else if (data === RESOLVED) {
 						if (this._dirtyDeps & depBit) {
@@ -94,15 +182,16 @@ export class DerivedImpl<T> {
 									this._recompute();
 								} else {
 									// All deps resolved without value change — skip fn()
-									if (this._sinks) {
-										for (const sink of this._sinks) sink(STATE, RESOLVED);
-									}
+									this._status = "RESOLVED";
+									this._dispatch(STATE, RESOLVED);
 								}
 							}
 						}
+					} else {
+						// Unknown STATE signal — forward unchanged (§6)
+						this._dispatch(STATE, data);
 					}
-				}
-				if (type === DATA) {
+				} else if (type === DATA) {
 					if (this._dirtyDeps & depBit) {
 						this._dirtyDeps &= ~depBit;
 						this._flags |= D_ANY_DATA;
@@ -110,40 +199,44 @@ export class DerivedImpl<T> {
 							this._recompute();
 						}
 					} else {
-						// DATA without prior DIRTY: dep bypasses the control channel
-						// (e.g. a raw callbag source). Treat as immediate trigger.
+						// DATA without prior DIRTY: raw callbag compat
 						if (this._dirtyDeps === 0) {
-							// No other dirty deps — signal and recompute immediately.
-							if (this._sinks) {
-								for (const sink of this._sinks) sink(STATE, DIRTY);
-							}
+							this._status = "DIRTY";
+							this._dispatch(STATE, DIRTY);
 							this._recompute();
 						} else {
-							// Other deps already dirty — mark that real data arrived
-							// so we don't skip recompute when they resolve.
 							this._flags |= D_ANY_DATA;
 						}
 					}
-				}
-				if (type === END) {
-					// Dep completed or errored — derived can no longer recompute.
-					// Disconnect all upstream, propagate END to sinks.
-					this._flags |= D_COMPLETED;
-					for (const tb of this._upstreamTalkbacks) tb(END);
-					this._upstreamTalkbacks = [];
-					this._flags &= ~D_CONNECTED;
-					this._dirtyDeps = 0;
-					const sinks = this._sinks;
-					this._sinks = null;
-					if (sinks) {
-						if (data !== undefined) {
-							for (const sink of sinks) sink(END, data);
-						} else {
-							for (const sink of sinks) sink(END);
-						}
-					}
+				} else if (type === END) {
+					this._handleEnd(data);
 				}
 			});
+		}
+	}
+
+	/** Handle upstream END (completion or error) */
+	_handleEnd(errorData: any): void {
+		this._flags |= D_COMPLETED;
+		this._status = errorData !== undefined ? "ERRORED" : "COMPLETED";
+		for (const tb of this._upstreamTalkbacks) tb(END);
+		this._upstreamTalkbacks = [];
+		this._flags &= ~(D_CONNECTED | D_STANDALONE);
+		this._dirtyDeps = 0;
+		const output = this._output;
+		const wasMulti = this._flags & D_MULTI;
+		this._output = null;
+		this._flags &= ~D_MULTI;
+		if (output) {
+			if (wasMulti) {
+				for (const sink of output as Set<any>) {
+					errorData !== undefined ? sink(END, errorData) : sink(END);
+				}
+			} else {
+				errorData !== undefined
+					? (output as (type: number, data?: any) => void)(END, errorData)
+					: (output as (type: number, data?: any) => void)(END);
+			}
 		}
 	}
 
@@ -155,19 +248,13 @@ export class DerivedImpl<T> {
 	}
 
 	get(): T {
-		if ((this._flags & D_CONNECTED) && this._dirtyDeps === 0) {
-			// Connected + settled — return cache
+		// v4: _cachedValue is always populated by STANDALONE connection.
+		// Return cached for connected or completed states.
+		if (this._flags & (D_CONNECTED | D_HAS_CACHED)) {
 			return this._cachedValue as T;
 		}
-		// Not connected or pending — recompute on demand
+		// Fallback: recompute on demand (should not happen in v4 normal flow)
 		const result = this._fn();
-		if (this._eqFn && (this._flags & D_HAS_CACHED) && this._eqFn(this._cachedValue as T, result)) {
-			return this._cachedValue as T;
-		}
-		if (this._eqFn) {
-			this._cachedValue = result;
-			this._flags |= D_HAS_CACHED;
-		}
 		return result;
 	}
 
@@ -180,35 +267,53 @@ export class DerivedImpl<T> {
 				sink(END);
 				return;
 			}
-			const wasEmpty = !this._sinks;
-			if (!this._sinks) this._sinks = new Set();
-			this._sinks.add(sink);
-			if (wasEmpty) {
-				// Compute initial value before connecting upstream
-				this._cachedValue = this._fn();
-				this._flags |= D_HAS_CACHED;
+
+			// Output slot transitions: STANDALONE/null → SINGLE, SINGLE → MULTI
+			if (this._flags & D_STANDALONE) {
+				// STANDALONE → SINGLE: external subscriber takes over
+				this._output = sink;
+				this._flags &= ~D_STANDALONE;
+			} else if (this._output === null) {
+				// null → SINGLE (shouldn't happen for derived, but handle gracefully)
+				this._output = sink;
+			} else if (!(this._flags & D_MULTI)) {
+				// SINGLE → MULTI
+				const set = new Set<any>();
+				set.add(this._output);
+				set.add(sink);
+				this._output = set;
+				this._flags |= D_MULTI;
+			} else {
+				(this._output as Set<any>).add(sink);
 			}
-			// Send START before connecting upstream — ensures correct protocol
-			// order (START then END) if a dep sends END during connection.
+
+			// Send START with talkback — talkback(DATA) returns current cached value
 			sink(START, (t: number) => {
 				if (t === DATA) sink(DATA, this._cachedValue);
 				if (t === END) {
-					if (!this._sinks) return;
-					this._sinks.delete(sink);
-					if (this._sinks.size === 0) {
-						this._sinks = null;
-						if (!(this._flags & D_COMPLETED)) {
-							this._disconnectUpstream();
+					if (this._output === null) return;
+					if (this._flags & D_MULTI) {
+						const set = this._output as Set<any>;
+						set.delete(sink);
+						if (set.size === 1) {
+							// MULTI → SINGLE
+							this._output = set.values().next().value;
+							this._flags &= ~D_MULTI;
+						} else if (set.size === 0) {
+							// MULTI → STANDALONE
+							this._output = null;
+							this._flags |= D_STANDALONE;
 						}
+					} else if (this._output === sink) {
+						// SINGLE → STANDALONE
+						this._output = null;
+						this._flags |= D_STANDALONE;
 					}
+					// Deps stay connected (STANDALONE mode)
 				}
 			});
-			if (wasEmpty) {
-				this._connectUpstream();
-				if (!(this._flags & D_COMPLETED)) {
-					this._flags |= D_CONNECTED;
-				}
-			}
+
+			// No upstream connection needed — already connected (STANDALONE)
 		}
 	}
 }

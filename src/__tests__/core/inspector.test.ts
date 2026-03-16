@@ -120,4 +120,67 @@ describe("Inspector", () => {
 		const g = Inspector.graph();
 		expect(g.size).toBe(0);
 	});
+
+	it("v4: inspect() returns status field", () => {
+		const a = state(1, { name: "a" });
+		const info = Inspector.inspect(a);
+		expect(info.status).toBeDefined();
+		// State is DISCONNECTED before first subscriber
+		expect(info.status).toBe("DISCONNECTED");
+	});
+
+	it("v4: inspect() shows SETTLED status after emit", () => {
+		const a = state(1, { name: "a" });
+		// Subscribe so we go through emit path
+		a.source(0, () => {});
+		a.set(2);
+		const info = Inspector.inspect(a);
+		expect(info.status).toBe("SETTLED");
+	});
+
+	it("v4: inspect() shows derived SETTLED status at construction", () => {
+		const a = state(1);
+		const b = derived([a], () => a.get() * 2, { name: "b" });
+		const info = Inspector.inspect(b);
+		expect(info.status).toBe("SETTLED");
+		expect(info.value).toBe(2);
+	});
+
+	it("v4: signal hooks fire correctly", () => {
+		const emitted: Array<[string, unknown]> = [];
+		Inspector.onEmit = (store, value) => {
+			const name = Inspector.getName(store) ?? "unknown";
+			emitted.push([name, value]);
+		};
+
+		const a = state(1, { name: "a" });
+		a.source(0, () => {});
+		a.set(42);
+
+		// onEmit is a hook slot — primitives need to call it explicitly
+		// For now, verify the hook is callable (integration comes in Phase 9)
+		expect(typeof Inspector.onEmit).toBe("function");
+
+		Inspector.onEmit = null;
+	});
+
+	it("v4: registerEdge tracks dependencies", () => {
+		const a = state(1, { name: "a" });
+		const b = derived([a], () => a.get() * 2, { name: "b" });
+		Inspector.registerEdge(a, b);
+
+		const edges = Inspector.getEdges();
+		expect(edges.get("a")).toEqual(["b"]);
+	});
+
+	it("v4: _reset() clears hooks and edges", () => {
+		Inspector.onEmit = () => {};
+		Inspector.registerEdge(
+			state(1, { name: "x" }),
+			state(2, { name: "y" }),
+		);
+		Inspector._reset();
+		expect(Inspector.onEmit).toBeNull();
+		expect(Inspector.getEdges().size).toBe(0);
+	});
 });

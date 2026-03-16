@@ -20,20 +20,25 @@ callbag-recharge is a reactive state management library where **every store is a
 
 - **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()), `resubscribable` (allow re-subscription after error/complete — enables retry/rescue/repeat). Actions: `emit`, `signal`, `complete`, `error`.
 - **`state(initial)`** — thin wrapper over `producer()`. `set()` = `emit()` with `equals` defaulting to `Object.is`. `update(fn)` is sugar over `set`.
-- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. Connects lazily, disconnects when last sink leaves.
+- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. v4: **Eagerly connects** at construction (STANDALONE mode) — `get()` always returns current cached value. Single-dep nodes skip bitmask (P0 optimization).
 - **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array (`EffectImpl` class). Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
-### Key design patterns (v3 — type 3 control channel)
+### Key design patterns (v4 — output slot + chain model)
 
-See [docs/architecture.md](docs/architecture.md) for full design.
+See [docs/architecture-v4.md](docs/architecture-v4.md) for full design.
 
-- **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. This makes operators callbag-compatible without DIRTY awareness.
+- **Output slot model (v4):** Replaces `_sinks: Set | null` with lazy output slot: `null → fn → Set`. Single subscriber avoids Set allocation (~200 bytes saved per node). P0 optimization.
+- **Node status (v4):** Every node tracks `_status: NodeStatus` (DISCONNECTED, DIRTY, SETTLED, RESOLVED, COMPLETED, ERRORED). Surfaced via `Inspector.inspect()`.
+- **STANDALONE mode (v4):** Derived nodes eagerly connect to deps at construction. `get()` always returns cached value (no lazy recompute). Deps stay connected even without external subscribers.
+- **ADOPT protocol (v4):** `REQUEST_ADOPT`/`GRANT_ADOPT` symbols for clean topology handoff at output slot boundaries.
+- **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. Unknown type 3 signals forwarded unchanged (forward-compatibility).
 - **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
 - **Tier model:** Tier 1 (state graph + passthrough operators) participates in diamond resolution via type 3. Tier 2 (async/timer/dynamic-subscription operators) are cycle boundaries — each `emit` starts a new DIRTY+value cycle.
+- **Single-dep optimization (v4 P0):** Single-dep derived/operator nodes skip bitmask — direct DIRTY/DATA forwarding. Multi-dep nodes use bitmask only at convergence points.
 - **Producer as universal base:** All sources are built on `producer()`. State is a thin wrapper. Tier 2 extras use producer options (`initial`, `equals`, `resetOnTeardown`, `getter`, `error()`) to avoid manual implementations.
 - **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
 - **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking.
-- **Inspector:** Opt-in observability via WeakMaps. Stores stay lean; debug metadata (names, kinds) lives in `Inspector` singleton. `Inspector.enabled` flag (default: true in dev) makes `register()`/`getName()` no-ops when false.
+- **Inspector (v4):** Opt-in observability via WeakMaps. `inspect()` returns `{ name, kind, value, status }`. Signal hooks (`onEmit`, `onSignal`, `onStatus`, `onEnd`) fire when non-null. `registerEdge()` tracks dependency graph.
 
 ### Extra modules (src/extra/)
 

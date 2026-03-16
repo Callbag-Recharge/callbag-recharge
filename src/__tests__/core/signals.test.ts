@@ -88,19 +88,20 @@ describe("Derived (like Signal.Computed)", () => {
 		expect(quadrupled.get()).toBe(12);
 	});
 
-	it("is lazy — does not compute until .get() is called", () => {
+	it("v4: computes eagerly at construction (STANDALONE mode)", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
 		const doubled = derived([count], computeFn);
 
-		// Should NOT have computed yet — nobody called .get()
-		expect(computeFn).toHaveBeenCalledTimes(0);
+		// v4: computed once at construction (STANDALONE mode)
+		expect(computeFn).toHaveBeenCalledTimes(1);
 
 		doubled.get();
+		// get() returns cached value — no recomputation
 		expect(computeFn).toHaveBeenCalledTimes(1);
 	});
 
-	it("always recomputes on .get() (no cache)", () => {
+	it("v4: get() returns cached value (STANDALONE keeps it current)", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
 		const doubled = derived([count], computeFn);
@@ -108,8 +109,15 @@ describe("Derived (like Signal.Computed)", () => {
 		doubled.get();
 		doubled.get();
 		doubled.get();
-		// No cache — runs fn every time
-		expect(computeFn).toHaveBeenCalledTimes(3);
+		// v4: computed once at construction, cached for subsequent get() calls
+		expect(computeFn).toHaveBeenCalledTimes(1);
+
+		// After state change, STANDALONE connection recomputes once
+		count.set(5);
+		expect(computeFn).toHaveBeenCalledTimes(2);
+		expect(doubled.get()).toBe(10);
+		// get() still returns cached — no extra recomputation
+		expect(computeFn).toHaveBeenCalledTimes(2);
 	});
 
 	it("handles conditional dependencies (all deps listed upfront)", () => {

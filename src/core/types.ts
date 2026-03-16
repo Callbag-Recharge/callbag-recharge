@@ -2,12 +2,14 @@
 // Minimal store types — stores are plain objects
 // ---------------------------------------------------------------------------
 
-import type { Signal } from "./protocol";
+import type { NodeStatus, Signal } from "./protocol";
 
 /** Read-only store */
 export interface Store<T> {
 	get(): T;
 	source: (type: number, payload?: any) => void;
+	/** Node lifecycle status (v4). Undefined for stores that don't track status. */
+	_status?: NodeStatus;
 }
 
 /** Writable store */
