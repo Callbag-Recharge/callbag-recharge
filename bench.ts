@@ -1,7 +1,7 @@
 import { filter } from "./src/extra/filter";
 import { map } from "./src/extra/map";
 import { subscribe } from "./src/extra/subscribe";
-import { derived, effect, operator, pipe, producer, state } from "./src/index";
+import { DATA, derived, effect, operator, pipe, producer, STATE, state } from "./src/index";
 
 function bench(name: string, fn: () => void, iterations = 100_000) {
 	for (let i = 0; i < 1000; i++) fn(); // warmup
@@ -108,8 +108,8 @@ const opStore = operator<number>(
 	[opSrc],
 	(actions) => {
 		return (_depIndex, type, data) => {
-			if (type === 1) actions.emit(data * 2);
-			else if (type === 3) actions.signal(data);
+			if (type === DATA) actions.emit(data * 2);
+			else if (type === STATE) actions.signal(data);
 		};
 	},
 	{ initial: 0 },
