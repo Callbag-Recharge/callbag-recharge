@@ -13,9 +13,6 @@ export const RESOLVED = Symbol("RESOLVED");
 
 export type Signal = typeof DIRTY | typeof RESOLVED;
 
-/** ADOPT protocol — topology handoff signals (v4) */
-export const REQUEST_ADOPT = Symbol("REQUEST_ADOPT");
-export const GRANT_ADOPT = Symbol("GRANT_ADOPT");
 
 /** Node status — tracks current lifecycle state (v4) */
 export type NodeStatus =

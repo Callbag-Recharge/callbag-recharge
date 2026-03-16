@@ -1,8 +1,7 @@
 # Architecture v4 — Draft
 
-> **Status:** Design draft — core decisions resolved. The output slot model, ADOPT protocol,
-> plugin composition, and status model are all settled. One open question remains (§17.1).
-> This supersedes v3 once implementation begins. Do not implement without reviewing §17.1.
+> **Status:** Design draft — core decisions resolved. The output slot model and status model
+> are settled. This supersedes v3.
 
 ---
 
@@ -12,9 +11,9 @@
 
 2. **Three roles, not three primitives.** The fundamental callbag roles are source, transform, sink. Every node is one of these. `state` and `derived` are user-facing sugar; `producer`, `operator`, and `effect` are the implementation primitives.
 
-3. **The chain is the unit of composition.** Each transform node internally assembles a composed callbag source function (`_chain`) that wires its deps through its transform and a tap that keeps its own store current. Downstream nodes subscribe to this chain, not to the node directly.
+3. **The chain is a mental model, not a literal composition.** Each transform node conceptually wires its deps through its transform and a tap that keeps its own store current. In practice, the stages (state tracking → transform → value caching → output dispatch) are inlined into dep subscription handler closures for zero-allocation performance. Downstream nodes subscribe via `source()`, not to a composed callbag function.
 
-4. **A tap keeps every node's store current.** Even when a downstream node is driving the pipeline, the originating node's tap fires on every DATA and STATE signal passing through. The node's `_value` and `_status` are always up to date — no separate upstream subscription needed just for self-observation.
+4. **A tap keeps every node's store current.** Even when a downstream node is driving the pipeline, the handler closure fires on every DATA and STATE signal passing through. The node's `_value` and `_status` are always up to date — no separate upstream subscription needed just for self-observation.
 
 5. **Type 1 DATA carries only real values.** Never sentinels. DIRTY, RESOLVED, and other control signals live exclusively on type 3 STATE.
 
@@ -94,14 +93,14 @@ Every node tracks its own `_status`:
 
 | Status | Meaning | Trigger |
 |--------|---------|---------|
-| `DISCONNECTED` | No downstream driving the chain | No subscribers to `_chain` |
+| `DISCONNECTED` | No downstream, deps not connected | No subscribers, operator not yet activated |
 | `DIRTY` | DIRTY received, waiting for DATA | Incoming STATE DIRTY |
 | `SETTLED` | DATA received, value computed and cached | Incoming DATA (after computation) |
 | `RESOLVED` | Was dirty, value confirmed unchanged | Incoming STATE RESOLVED |
 | `COMPLETED` | Terminal — complete() was called | END without payload |
 | `ERRORED` | Terminal — error() was called | END with error payload |
 
-These statuses are written by the **tap** inside `_chain` (see §5).
+These statuses are written by the handler closures (see §5 conceptual model).
 
 > **Note:** `resubscribable` is a producer **option flag**, not a status. It allows a COMPLETED or ERRORED node to accept new subscribers and re-run from its `_start()` function. The status becomes DISCONNECTED again when a new subscriber arrives.
 
@@ -122,9 +121,9 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 
 - Has one or more deps
 - Maintains `_value` (last computed output) and `_status`
-- Internally assembles `_chain`: a composed callbag source that wires deps through the transform + tap
+- Dep subscription handlers inline state tracking, transform, value caching, and dispatch (see §5 conceptual model)
 - Exposes `get()` and `source()` — is a full store, subscribable by anything downstream
-- `derived([deps], fn)` = operator with automatic terminator management (see §6)
+- `derived([deps], fn)` = operator with automatic STANDALONE mode (see §6)
 
 ### Sink (`effect`) — terminal, no downstream
 
@@ -136,26 +135,21 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 
 ---
 
-## 5. The Chain Model
+## 5. The Chain Model (Conceptual)
 
-This is the central new concept in v4.
+This is the central mental model in v4. The stages described here are **not** composed as separate callbag functions — they are inlined into dep subscription handler closures for zero-allocation performance. The conceptual model accurately describes the signal flow.
 
-### What `_chain` is
+### Signal flow through a transform node
 
-Every transform node B (derived, operator) internally constructs a composed callbag source function:
+Every transform node B (derived, operator) processes signals through these conceptual stages:
 
 ```
-B._chain = A.source
-             → stateIntercept   // updates B._status (DIRTY / RESOLVED)
-             → map(B.fn)        // applies B's transformation
-             → valueIntercept   // writes computed value to B._value
+dep.source → state tracking → transform(fn) → value caching → output dispatch
 ```
 
-`B._chain` is a single `(type, payload) => void` function — a standard callbag source. Subscribing to it drives the whole pipeline from A through B's transform and tap, producing B's computed values.
+In implementation, `_connectSingleDep()` and `_connectMultiDep()` contain all of these stages as inline logic within one closure. There is no `_chain` property on the class, and no `B.sources` array.
 
-The two intercepts together form B's **tap**. They are transparent to the flow — they observe and record but do not alter what passes through.
-
-### `stateIntercept`
+### State tracking stage
 
 Fires on STATE signals, updates `B._status`, then forwards the signal downstream unchanged:
 
@@ -166,58 +160,47 @@ STATE unknown  → forward unchanged (required for forward-compat)
 END            → B._status = DISCONNECTED; forward END downstream
 ```
 
-### `valueIntercept`
+### Value caching stage
 
-Fires on DATA, writes to `B._value`, then forwards downstream:
+Fires on DATA after the transform, writes to `B._cachedValue`, then dispatches downstream:
 
 ```
-DATA value → B._value = value; B._status = SETTLED; forward DATA downstream
+DATA value → B._cachedValue = value; B._status = SETTLED; dispatch to output slot
 ```
 
-### `B.sources`
+### Why the tap is always active
 
-`B.sources` is the array of chain entries B exposes for downstream adoption:
-
-```ts
-B.sources = [B._chain]  // single-dep B
-```
-
-For a multi-dep node C depending on [A, B]:
-```ts
-C.sources = [A.sources[0], B.sources[0]]
-          = [A.source,     B._chain]
-```
-
-C assembles its own `_chain` by taking each entry from deps' `.sources`, potentially wrapping them with C's own stateIntercept, fan-in logic, map(C.fn), and valueIntercept.
-
-### Why `_chain` contains the tap
-
-The tap being *inside* `_chain` is the key insight. Whoever drives the pipeline (B's own terminator, or a downstream C, or a downstream effect) — B's tap fires regardless. B's `_value` and `_status` stay current as a side-effect of any subscription to `B._chain`.
+The handler closure captures `this` and always writes to `_cachedValue`/`_status`, regardless of whether `_output` has a downstream consumer. `_dispatch()` no-ops when `_output === null` (STANDALONE mode), but the state/value updates still happen. Whoever is connected — B's own STANDALONE subscription, or a downstream C, or a downstream effect — B's cached state stays current.
 
 ---
 
-## 6. Downstream Adoption & The Output Slot
+## 6. The Output Slot
 
-Every transform node B has an **output slot** at the tail of `B._chain`. The output slot is the multicast dispatch point — it routes every DATA/STATE/END signal to whoever is currently subscribed to B. This replaces subscriber-count bookkeeping and avoids any involvement of upstream nodes in topology changes.
+Every transform node B has an **output slot** (`_output`). The output slot is the multicast dispatch point — it routes every DATA/STATE/END signal to whoever is currently subscribed to B. This replaces subscriber-count bookkeeping and avoids any involvement of upstream nodes in topology changes.
+
+The output slot is purely a dispatch point. Dep connections and downstream dispatch are independent concerns — no handoff protocol is needed.
+
+A itself is always completely unaware of what happens at the output slot.
+
+### Output slot mode transitions
 
 ```
-B._chain = A.sources[0]
-             → stateIntercept
-             → map(B.fn)
-             → valueIntercept
-             → [OUTPUT SLOT]   ← dispatch point; owned by SourcePlugin
+STANDALONE ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
+    ↑                                   |                           |
+    └──[last subscriber leaves]─────────┘                           |
+    ↑                                                               |
+    └──[last subscriber leaves]─────────────────────────────────────┘
 ```
-
-A itself is always completely unaware of what happens at the output slot. It has exactly one subscriber: the tail of B._chain.
 
 ### Mode 0: STANDALONE
 
 `derived` only (`operator` is lazy). When B has no external subscribers:
 
-- B's own **internal terminator** is registered in the output slot
-- B drives the pipeline: A → B._chain → output slot → terminator
-- B._value and B._status are current via the tap
-- `B.get()` returns `B._value` — always populated, never DISCONNECTED
+- `_output = null`
+- Dep connections are always active via closures from `_connectUpstream()`
+- The handler closure still writes to `_cachedValue`/`_status` — the tap is always active
+- `_dispatch()` no-ops (no output target)
+- `B.get()` returns `_cachedValue` — always populated, never DISCONNECTED
 
 > **Why derived auto-connects but operator doesn't:**
 > `derived([A], fn)` is user-facing sugar meant to be "always reactive." The user expects
@@ -228,10 +211,10 @@ A itself is always completely unaware of what happens at the output slot. It has
 
 When the first external subscriber C subscribes to B:
 
-1. B releases the internal terminator from the output slot
-2. C is registered in the output slot
-3. A → B._chain continues uninterrupted; only the final dispatch target changes
-4. B's tap fires as before — B._value and B._status remain current
+1. `_output = sink` (C's sink function)
+2. Clear `D_STANDALONE` flag
+3. Dep connections unchanged — they're independent of the output slot
+4. B's handler closure fires as before — `_cachedValue` and `_status` remain current
 
 C receives a talkback. Calling `talkback(END)` removes C from the output slot.
 
@@ -239,54 +222,31 @@ C receives a talkback. Calling `talkback(END)` removes C from the output slot.
 
 When a second subscriber D subscribes while C is already in the slot:
 
-1. The output slot switches from single-dispatch to Set-based dispatch
-2. Both C and D are in the Set
-3. Emissions dispatch to all sinks in one pass
-4. Additional subscribers just join the Set — no upstream restructuring
-5. Each `talkback(END)` removes only that specific sink from the Set
+1. `_output` switches from a single sink function to `Set{C, D}`
+2. Emissions dispatch to all sinks in one pass
+3. Additional subscribers just join the Set — no upstream restructuring
+4. Each `talkback(END)` removes only that specific sink from the Set
 
 **Key:** A never gets an additional subscriber. The only topology change is in the output slot. This is the decisive advantage: topology changes are O(1) and source-agnostic.
-
-### REQUEST_ADOPT / GRANT_ADOPT protocol
-
-When C depends on [A, B] (B also depends on A, diamond topology), C subscribing to B's output slot means B's internal terminator should be released. The ADOPT protocol handles this handoff cleanly.
-
-**Type 3 signal extension** — control signals can carry structured data as `[Symbol, data?]` tuples:
-
-```ts
-const REQUEST_ADOPT = Symbol("REQUEST_ADOPT");
-const GRANT_ADOPT   = Symbol("GRANT_ADOPT");
-
-// Sent as: sink(STATE, [REQUEST_ADOPT, routeStack])
-//           talkback(STATE, [GRANT_ADOPT, routeStack])
-```
-
-Unknown type 3 signals are always forwarded unchanged (principle §6), so this extension is backward-compatible.
-
-**REQUEST_ADOPT flow (downstream):**
-
-1. C subscribes to B and sends `(STATE, [REQUEST_ADOPT, []])` into B._chain
-2. Each layer in B._chain that is a dep junction pushes its dep index onto `routeStack`
-3. When REQUEST_ADOPT reaches B's output slot, the slot sends `(STATE, [GRANT_ADOPT, routeStack])` back upstream via the chain's talkback path
-4. GRANT_ADOPT routes step-by-step through `routeStack` back to the originator
-5. B releases its internal terminator; C is installed in the output slot
-
-**Three topology scenarios:**
-
-| Scenario | ADOPT behavior |
-|----------|---------------|
-| A→B, add C | C sends REQUEST_ADOPT; output slot installs C, releases terminator |
-| A→B→C and A→C, C unsubscribes | C's `talkback(END)` removes C from both A's and B's output slots |
-| A→B→C and A→C, add D | D sends REQUEST_ADOPT to B; output slot switches to Set{C, D} |
 
 ### DISCONNECTED
 
 When the last external subscriber leaves:
 
-- For `derived`: internal terminator re-registers in the output slot (back to STANDALONE)
-- For `operator`: output slot is empty, `_status = DISCONNECTED`, pipeline pauses
+- For `derived`: `_output = null`, set `D_STANDALONE`. Deps stay connected (back to STANDALONE)
+- For `operator`: `_output = null`, `_status = DISCONNECTED`, pipeline pauses
 
-B._value is retained — `get()` still returns the last SETTLED value.
+`_cachedValue` is retained — `get()` still returns the last SETTLED value.
+
+### Why ADOPT isn't needed
+
+The ADOPT protocol (REQUEST_ADOPT/GRANT_ADOPT handshake) was designed for a model where derived nodes hold an "internal terminator" in the output slot, requiring a handoff when external subscribers arrive. The actual implementation sidesteps this:
+
+- Dep connections are always active via closures, independent of the output slot
+- The output slot is purely a dispatch point: `null → fn → Set`
+- Subscriber arrival/departure is mechanical — no upstream awareness or signaling needed
+
+The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 
 ---
 
@@ -319,19 +279,19 @@ Diamond resolution works correctly in v4 via the same bitmask algorithm as v3, a
 
 ### Example: C depends on [A, B] where B depends on A
 
-C's `_chain` is assembled from:
-- `A.sources[0]` = A.source  (dep 0)
-- `B.sources[0]` = B._chain = A.source → B.stateIntercept → B.map → B.valueIntercept  (dep 1)
+C connects to both deps:
+- dep 0: A.source directly
+- dep 1: B.source (which internally flows through A → B's handler → B's output slot)
 
-C subscribes to both. A gets two sinks (C's direct + B's chain on behalf of C).
+A gets two sinks (C's direct connection + B's upstream connection).
 
 **Signal flow:**
 1. A sends DIRTY → flows to C's dep-0 connection → C sets bit 0 → `dirtyDeps = 0b01` → C forwards DIRTY downstream (first dirty dep)
-2. A sends DIRTY → flows through B._chain → B.stateIntercept fires (B._status = DIRTY) → arrives at C's dep-1 connection → C sets bit 1 → `dirtyDeps = 0b11` → idempotent (DIRTY already forwarded)
-3. A sends DATA → flows through B._chain → B.map computes → B.valueIntercept fires (B._value updated, B._status = SETTLED) → DATA arrives at C's dep-1 → C clears bit 1 → `dirtyDeps = 0b01` → not 0, wait
-4. A sends DATA → also arrives at C's dep-0 directly → C clears bit 0 → `dirtyDeps = 0` → recompute: `fn(A._value, B._value)` — both values are current
+2. A sends DIRTY → flows through B's handler → B._status = DIRTY → B dispatches DIRTY → arrives at C's dep-1 connection → C sets bit 1 → `dirtyDeps = 0b11` → idempotent (DIRTY already forwarded)
+3. A sends DATA → flows through B's handler → B computes fn, B._cachedValue updated, B._status = SETTLED → B dispatches DATA → arrives at C's dep-1 → C clears bit 1 → `dirtyDeps = 0b01` → not 0, wait
+4. A sends DATA → also arrives at C's dep-0 directly → C clears bit 0 → `dirtyDeps = 0` → recompute: `fn(A.get(), B.get())` — both values are current
 
-C computes exactly once. B._value is updated via its tap. Diamond resolution holds.
+C computes exactly once. B._cachedValue is updated via its handler closure. Diamond resolution holds.
 
 **Key:** The bitmask waits for both paths. The ordering (which DATA arrives first) doesn't matter. Correctness is guaranteed by waiting for all bits to clear.
 
@@ -410,31 +370,31 @@ Values from raw callbag deps are captured by calling `dep.get()` inside `recompu
 
 ## 10. Lifecycle: Startup, Teardown, Cleanup, Reconnect
 
-### Chain assembly (startup)
+### Construction (startup)
 
-When a transform node B is created with deps `[A]`:
+**Construction time** — runs once when the node is created:
 
 ```
 derived([A], fn) or operator([A], init):
-  1. Assemble B._chain:
-       A.sources[0]                    // get A's chain entry
-       → stateIntercept(→ B._status)   // wrap with B's status tap
-       → map(fn)                        // wrap with B's transform
-       → valueIntercept(→ B._value)    // wrap with B's value tap
-
-  2. If derived: subscribe B._chain with B's internal terminator (STANDALONE mode)
+  1. Initialize all instance properties (_cachedValue, _status, _flags, _output, etc.)
+  2. Connect to deps:
+       Single-dep: _connectSingleDep() — inline handler closure
+       Multi-dep:  _connectMultiDep()  — inline handler with bitmask logic
+  3. If derived: eagerly connect to deps (STANDALONE mode)
      If operator: wait for first external subscriber
-
-  3. Register with Inspector: kind, name, initial value
+  4. Register with Inspector: kind, name, initial value
 ```
 
-Multi-dep chain assembly `[A, B]`:
-```
-  1. Take A.sources[0] and B.sources[0] as separate chain entries
-  2. Create fan-in node: subscribes to both chains, applies bitmask logic
-  3. Wrap fan-in with C's map(fn) and valueIntercept
-  4. B._chain is the composed fan-in + transform + tap
-```
+**Connection time** — runs each time a subscriber arrives (or STANDALONE activates):
+- Allocate handler-local state: counters, accumulators, skip counts, flags
+- This is the equivalent of `init()` running fresh in the operator handler
+
+**Disconnection time** — runs when all subscribers leave:
+- Release handler-local state
+- For `operator`: no reconnect until next subscriber; state is gone
+- For `derived`: deps stay connected (STANDALONE), handler state preserved
+
+This split means the dep connection structure is always stable (no re-wiring on reconnect), while behavioral state (counters, queues) resets cleanly on each new subscription session.
 
 ### Connection batching
 
@@ -444,14 +404,14 @@ Multi-dep chain assembly `[A, B]`:
 
 ```
 talkback(END) ← upstream from subscriber
-  → B._subscriberCount--
-  → if count === 0:
-      if derived: re-activate internal terminator (back to STANDALONE)
-      if operator: B._status = DISCONNECTED
-      // B._value retained — get() can still return last SETTLED value
+  → remove subscriber from output slot
+  → if output slot empty:
+      if derived: _output = null, set D_STANDALONE (deps stay connected)
+      if operator: _output = null, _status = DISCONNECTED
+      // _cachedValue retained — get() can still return last SETTLED value
 ```
 
-Note: B does NOT disconnect from A when going back to STANDALONE. The internal terminator re-subscribes to `B._chain`, which reconnects to A.
+Note: For derived, B does NOT disconnect from A when going back to STANDALONE. Dep connections are independent of the output slot.
 
 ### Completion/error teardown
 
@@ -462,7 +422,7 @@ complete() or error(e):
   → B._status = DISCONNECTED
   → for each talkback: talkback(END)              // disconnect upstream
   → talkbacks = []
-  → localSinks = _sinks; _sinks = null            // null before notifying
+  → localOutput = _output; _output = null          // null before notifying
   → _stop()                                       // cleanup BEFORE notifying
   → for each sink: sink(END) or sink(END, e)      // notify downstream
 ```
@@ -471,7 +431,7 @@ complete() or error(e):
 
 ### Reconnect
 
-- **derived**: automatically re-activates internal terminator when all subscribers leave. Reconnect is transparent.
+- **derived**: stays connected to deps in STANDALONE mode when all subscribers leave. Reconnect is transparent.
 - **operator**: reconnects when a new subscriber calls `source(START, ...)`. `init()` re-runs, handler-local state resets.
 - **producer**: `_start()` re-runs on new subscriber after last left. If `resetOnTeardown`, `_value` resets.
 - **effect**: no reconnect. Dispose and create new.
@@ -506,7 +466,7 @@ Operators that reject DATA (filter, distinctUntilChanged) MUST send `signal(RESO
 
 ### Dynamic upstream = tier 2
 
-Dynamic upstream (dep changes at runtime) is a tier 2 pattern — use producer + subscribe. Operator deps (and thus `_chain` structure) are static. Sync inner completion race guard (`innerEnded` flag) is required. See v3 §8.
+Dynamic upstream (dep changes at runtime) is a tier 2 pattern — use producer + subscribe. Operator deps are static. Sync inner completion race guard (`innerEnded` flag) is required. See v3 §8.
 
 ---
 
@@ -560,14 +520,13 @@ Type 1 is pure values only. Raw callbag sources feed into the graph via the "DAT
 
 ### V8 hidden class: classes for hot paths
 
-`ProducerImpl`, `OperatorImpl` remain as classes. All instance properties initialized in constructor, consistent shape. `_chain` is a new property added at construction — must be declared in the class definition to maintain hidden class stability.
+`ProducerImpl`, `DerivedImpl`, `OperatorImpl` remain as classes. All instance properties initialized in constructor, consistent shape. Output slot (`_output`) declared in the class definition to maintain hidden class stability.
 
 ```ts
-class OperatorImpl<T> {
-  _value: T | undefined;
+class DerivedImpl<T> {
+  _cachedValue: T | undefined;
   _status: NodeStatus = "DISCONNECTED";
-  _chain: Callbag;        // ← new in v4 — declared in constructor
-  _sinks: Set<any> | null = null;
+  _output: ((type: number, data?: any) => void) | Set<any> | null = null;
   _flags: number;
   // ...
 }
@@ -575,23 +534,23 @@ class OperatorImpl<T> {
 
 ### Bitmask flags (unchanged)
 
-Pack booleans into `_flags: number`. Add `O_STANDALONE` and `O_SHARED` bits for the adoption mode tracking.
+Pack booleans into `_flags: number`. `D_STANDALONE` tracks whether derived is in STANDALONE mode.
 
 ### Method binding in constructor (unchanged)
 
 Bind public API methods in constructor, not as arrow functions.
 
-### Tap intercepts: zero-allocation
+### Handler closures: zero-allocation
 
-The stateIntercept and valueIntercept wrappers should not allocate on every signal. Implement as closures capturing references to `_value` and `_status` on the node instance — write-in-place, no objects created.
+The dep subscription handler closures should not allocate on every signal. They capture `this` and write to `_cachedValue` and `_status` in-place — no objects created per signal.
 
 ### Snapshot-free completion (unchanged)
 
-Null `_sinks` before iterating, no `[...this._sinks]` snapshot.
+Null `_output` before iterating, no `[...sinks]` snapshot.
 
-### Shared `_chain` construction
+### Dep connections built once
 
-`_chain` is built once in the constructor. The composition (`A.sources[0]` → wraps → wraps) is eager — a closure chain, assembled once, reused for all subscribers. No re-construction on reconnect.
+Dep subscription handlers are created once in the constructor. The closure is assembled once and reused — no re-construction on reconnect.
 
 ### Effect as closure (unchanged)
 
@@ -657,82 +616,49 @@ Inspector.dump(): {
 }
 ```
 
-### Where taps register with Inspector
+### Where handler closures register with Inspector
 
-The `valueIntercept` in each `_chain` is the natural hook for `Inspector.onEmit` and `Inspector.onStatus`. It already fires on every value and every status change. Adding inspector calls here is zero-cost when hooks are null:
+The dep subscription handler closures are the natural hook for `Inspector.onEmit` and `Inspector.onStatus`. They already fire on every value and every status change. Adding inspector calls is zero-cost when hooks are null:
 
 ```ts
-// Inside valueIntercept closure:
-node._value = computedValue;
+// Inside handler closure:
+node._cachedValue = computedValue;
 node._status = "SETTLED";
 if (Inspector.onEmit) Inspector.onEmit(node, computedValue);
 if (Inspector.onStatus) Inspector.onStatus(node, "SETTLED");
 ```
 
-Similarly, `stateIntercept` hooks into `onSignal` and `onStatus`.
+Similarly, the STATE handling path hooks into `onSignal` and `onStatus`.
 
 ---
 
-## 16. Plugin Composition Model
+## 16. Raw Callbag Interop
 
-Nodes are assembled from **plugins** — discrete capability bundles. A node uses only the plugins it needs. This keeps hot-path nodes lean and avoids unused overhead.
+### The interop gap
 
-| Plugin | Capabilities | Used by |
-|--------|-------------|---------|
-| `StorePlugin` | `_value`, `_status`, `get()` | All nodes |
-| `FanInPlugin` | bitmask, `depValues[]`, multi-dep subscription management | Multi-dep nodes only (single-dep nodes skip this entirely) |
-| `ControlPlugin` | STATE channel (DIRTY/RESOLVED forwarding), `onConnect()`/`onDisconnect()` lifecycle callbacks | All tier 1 nodes (derived, operator, effect) |
-| `SourcePlugin` | `source(START, sink)`, output slot (single → Set transition), talkback management | All subscribable nodes (not effect) |
-| `AdoptPlugin` | REQUEST_ADOPT/GRANT_ADOPT handling, output slot handoff | All subscribable nodes + effect |
+A raw callbag operator is a plain `(type, data) => void` function — it has no `source()`, no `_output`, no output slot. It's 1-to-1: one upstream, one downstream.
 
-### Why effect needs AdoptPlugin
+**The problem:** Given `A → B → C` and `A → rawOp → C`, if E wants to subscribe to `rawOp`'s output, it can't. `rawOp` has no `source()` method, no multicast capability. E would need to create a duplicate subscription to A through a second rawOp instance — duplicating the upstream path with no shared state.
 
-`effect` is the terminal node and never has downstream subscribers, but it still needs `AdoptPlugin` to participate in the ADOPT protocol gracefully. When C (an effect) drives a graph through B, C needs to be installable into B's output slot and removable via `dispose()`. Without AdoptPlugin, C cannot send REQUEST_ADOPT and B cannot properly hand off. Every node that connects to the graph as a subscriber must be an ADOPT-aware participant.
+### Interop wrapper
 
-> **Rule:** Any node that subscribes to another node's output slot needs `AdoptPlugin`. Only nodes that are provably permanent terminals with no topology changes may skip it — and there are none in the current design.
+The wrapper promotes a raw callbag operator to a proper node with `source()` + output slot for multicast capability. It becomes a subscribable store that participates in the graph like any other node.
 
-### Raw callbag sink wrapper
+### Diamond behavior with raw operators
 
-When a raw callbag sink (a plain `(type, data) => void` function, not a node) is connected to the graph, it must be wrapped so it can participate in the ADOPT protocol. The wrapper gives the raw sink full `ControlPlugin + AdoptPlugin` capabilities:
+Raw callbag operators in diamond topologies swallow STATE signals (DIRTY/RESOLVED), causing downstream nodes to fall back to the "DATA without prior DIRTY" compat path (§9). This is correct but may cause double-computation at convergence points — the downstream node receives DATA from the raw path without a prior DIRTY, so it can't defer computation until all paths resolve.
 
-```ts
-// Wrapping a raw sink:
-function wrapRawSink(rawSink: Callbag): AdoptAwareNode {
-  // ControlPlugin: forwards STATE signals to rawSink as DATA (tier 2 boundary)
-  // AdoptPlugin:   handles REQUEST_ADOPT by responding with GRANT_ADOPT
-  // rawSink itself receives only type 0, 1, 2 — protocol is preserved
-}
-```
+### Raw callbag sinks (terminal)
 
-Without this wrapper, a raw sink receiving a REQUEST_ADOPT signal would either silently drop it or mishandle it, breaking the ADOPT chain for the entire upstream graph.
-
-### init() timing split
-
-Node initialization is split into two phases to support clean reconnect semantics:
-
-**Construction time** — runs once when the node is created:
-- Assemble `_chain` (dep subscriptions, stateIntercept, map, valueIntercept, output slot)
-- Wire plugins (FanIn, ControlPlugin, SourcePlugin, AdoptPlugin)
-- Register with Inspector
-- For `derived`: install internal terminator in output slot (STANDALONE)
-
-**Connection time** — runs via `onConnect()` each time a subscriber arrives (or the terminator is installed):
-- Allocate handler-local state: counters, accumulators, skip counts, flags
-- This is the equivalent of `init()` running fresh in v3 operator
-
-**Disconnection time** — runs via `onDisconnect()` when all subscribers leave:
-- Release handler-local state
-- For `operator`: no reconnect until next subscriber; state is gone
-
-This split means `_chain` is always structurally stable (no re-wiring on reconnect), while behavioral state (counters, queues) resets cleanly on each new subscription session.
+Raw callbag sinks (terminal consumers, not operators) need no wrapping — they simply ignore STATE signals harmlessly. They receive only type 0/1/2 from the standard callbag protocol.
 
 ---
 
-## 17. Open Questions (Remaining)
+## 17. Open Questions
 
-### 17.1 Initial value on first connection
+### 17.1 Initial value on first connection — RESOLVED
 
-When B transitions from STANDALONE to SINGLE (C subscribes), B's `_value` is already populated from its STANDALONE operation. C should receive B's current value as the starting point without re-triggering the A → B computation. This is likely handled by the `initial` option on the underlying producer, but needs explicit verification with the output slot + onConnect lifecycle design.
+STANDALONE mode ensures `_cachedValue` is populated at construction. When C subscribes, C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. No re-trigger needed.
 
 ---
 
@@ -743,10 +669,9 @@ Need to implement a new extra?
 
 1. Synchronous transform with static deps?
    YES → operator() (or derived() as sugar)
-       → Assemble _chain from dep sources
-       → stateIntercept and valueIntercept handle tap automatically
+       → Handler closure inlines state tracking + transform + value caching
        → single-dep: forward every DIRTY
-       → multi-dep: use FanInPlugin (bitmask + depValues)
+       → multi-dep: bitmask tracks dirty deps
        → Suppress with RESOLVED (not silence) when rejecting DATA
        → Forward unknown STATE signals always
 
@@ -764,7 +689,7 @@ Need to implement a new extra?
 4. Fused pipe chain?
    → pipeDerived() for always-reactive (auto-connects like derived)
    → pipeRaw() for lazy (DISCONNECTED like operator)
-   → Both fuse N transforms into one _chain with one output slot
+   → Both fuse N transforms into one derived/operator with one output slot
    → SKIP sentinel for filter semantics in both
 
 5. None of the above?

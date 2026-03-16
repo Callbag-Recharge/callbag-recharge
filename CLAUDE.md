@@ -30,7 +30,6 @@ See [docs/architecture-v4.md](docs/architecture-v4.md) for full design.
 - **Output slot model (v4):** Replaces `_sinks: Set | null` with lazy output slot: `null → fn → Set`. Single subscriber avoids Set allocation (~200 bytes saved per node). P0 optimization.
 - **Node status (v4):** Every node tracks `_status: NodeStatus` (DISCONNECTED, DIRTY, SETTLED, RESOLVED, COMPLETED, ERRORED). Surfaced via `Inspector.inspect()`.
 - **STANDALONE mode (v4):** Derived nodes eagerly connect to deps at construction. `get()` always returns cached value (no lazy recompute). Deps stay connected even without external subscribers.
-- **ADOPT protocol (v4):** `REQUEST_ADOPT`/`GRANT_ADOPT` symbols for clean topology handoff at output slot boundaries.
 - **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. Unknown type 3 signals forwarded unchanged (forward-compatibility).
 - **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
 - **Tier model:** Tier 1 (state graph + passthrough operators) participates in diamond resolution via type 3. Tier 2 (async/timer/dynamic-subscription operators) are cycle boundaries — each `emit` starts a new DIRTY+value cycle.

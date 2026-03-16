@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // These tests target subtle correctness bugs in the v4 architecture:
 // - Output slot transitions under complex topologies
-// - ADOPT protocol in deep/wide diamonds
+// - Output slot mode transitions in deep/wide diamonds
 // - Bitmask correctness at multi-level convergence points
 // - Interleaved subscribe/unsubscribe during propagation
 // - Batch + diamond + output slot interactions
@@ -1136,10 +1136,10 @@ describe("correctness traps", () => {
 });
 
 // ===========================================================================
-// Section 12: Output Slot + ADOPT in Diamond Topologies
+// Section 12: Output Slot Transitions in Diamond Topologies
 // ===========================================================================
 
-describe("output slot + adopt in diamond topologies", () => {
+describe("output slot transitions in diamond topologies", () => {
 	it("subscriber to intermediate node in diamond doesn't cause double computation at bottom", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);

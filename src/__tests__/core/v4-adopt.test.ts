@@ -1,6 +1,7 @@
 /**
- * v4 ADOPT protocol tests.
- * Verifies REQUEST_ADOPT/GRANT_ADOPT and topology handoff scenarios.
+ * v4 output slot tests.
+ * Verifies output slot mode transitions (STANDALONE → SINGLE → MULTI)
+ * and topology scenarios.
  */
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
@@ -9,12 +10,12 @@ import { DATA, END, START, STATE } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 
-describe("ADOPT protocol", () => {
-	it("Scenario 1: A→B, add C — B's terminator releases", () => {
+describe("Output slot transitions", () => {
+	it("Scenario 1: A→B, add C — B transitions from STANDALONE to SINGLE", () => {
 		const a = state(0);
 		const b = derived([a], () => a.get() + 1);
 
-		// B is STANDALONE — has its own terminator (output slot is null)
+		// B is STANDALONE — output slot is null, deps connected via closures
 		expect(b.get()).toBe(1);
 		expect((b as any)._output).toBeNull();
 		expect((b as any)._flags & 16).toBeTruthy(); // D_STANDALONE
@@ -62,7 +63,7 @@ describe("ADOPT protocol", () => {
 		expect(c.get()).toBe(60); // 20 + 40
 	});
 
-	it("Scenario 3: A→B→C exists, add D to B — Set{C chain, D chain}", () => {
+	it("Scenario 3: A→B→C exists, add D to B — B output slot becomes MULTI", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);
 		const c = derived([b], () => b.get() + 100);
@@ -77,9 +78,8 @@ describe("ADOPT protocol", () => {
 		expect(c.get()).toBe(110); // 10 + 100
 		expect(d.get()).toBe(100); // 10 * 10
 
-		// B's output slot should be multi (Set) when c and d subscribe to it
-		// Actually b's subscribers are c's chain and d's chain, not c and d directly
-		// In v4, c and d have STANDALONE connections to b that are established at construction
+		// B's output slot is MULTI (Set) — c and d both have dep connections to b
+		// established at construction (STANDALONE mode)
 
 		unsub1();
 		unsub2();
@@ -129,7 +129,7 @@ describe("ADOPT protocol", () => {
 	});
 });
 
-describe("Effect with ADOPT-aware deps", () => {
+describe("Effect with output slot deps", () => {
 	it("Effect drives derived's output slot correctly", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);

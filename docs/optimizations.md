@@ -159,7 +159,7 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 - Store creation (Inspector ON): 1.1M ops/sec
 - Throughput: wins in most benchmarks except diamond patterns (see [benchmarks](./benchmarks.md))
 
-**v4 STANDALONE overhead:** Derived nodes eagerly connect to deps at construction, maintaining active output slots, talkback references, and `_chain` closures even without external subscribers. This ensures `get()` always returns a current cached value but adds per-store cost vs v3's lazy model (~719 vs ~354 bytes). The tradeoff is correctness and API simplicity over memory.
+**v4 STANDALONE overhead:** Derived nodes eagerly connect to deps at construction, maintaining active output slots and talkback references even without external subscribers. This ensures `get()` always returns a current cached value but adds per-store cost vs v3's lazy model (~719 vs ~354 bytes). The tradeoff is correctness and API simplicity over memory.
 
 **Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
 
@@ -167,7 +167,7 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 
 **Output slot (null → fn → Set):** All classes use a lazy output slot instead of a `_sinks` Set. The slot starts as `null` (no subscribers), becomes a single function reference on first subscriber (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). Nodes with ≤1 subscriber never allocate a Set (~200 bytes saved per node).
 
-**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags, and no STANDALONE connections. Recharge v4's `_chain` closure assembly, STANDALONE talkback references, and Inspector registration (WeakRef/WeakMap) are the primary costs. Paths to close the gap include fusing chain closures for single-dep nodes and compile-time Inspector removal.
+**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags, and no STANDALONE connections. Recharge v4's handler closure assembly, STANDALONE talkback references, and Inspector registration (WeakRef/WeakMap) are the primary costs. Paths to close the gap include fusing handler closures for single-dep nodes and compile-time Inspector removal.
 
 ### 8. `endDeferredStart()` O(n) drain
 
@@ -239,19 +239,14 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 
 ## v4 optimization considerations
 
-The output slot model, plugin composition, and ADOPT protocol introduce new performance surfaces. This section maps foreseeable optimization targets and trade-offs.
+The output slot model and STANDALONE derived introduce new performance surfaces. This section maps foreseeable optimization targets and trade-offs.
 
 ### Construction time
 
-**Chain assembly cost.** Each transform node assembles `_chain` at construction: composing closures for stateIntercept, map(fn), valueIntercept, and the output slot. This is a fixed one-time cost per node. Closures are cheap (V8 allocates a closure context ~50-100 bytes), but the chain can be 4-5 closures deep per node.
+**Handler closure cost.** Each transform node creates handler closures at construction (via `_connectSingleDep()` or `_connectMultiDep()`). These inline state tracking, transform, value caching, and dispatch. Closures are cheap (V8 allocates a closure context ~50-100 bytes), but multi-dep nodes have more closure state.
 
-- **Optimization:** Fuse stateIntercept + map + valueIntercept into a single closure where possible. Single-dep nodes with no `equals` option can collapse the entire chain into one function that reads upstream, applies fn, writes `_value`, updates `_status`, and dispatches to the output slot. This eliminates 2-3 intermediate closure allocations per node.
-- **Tradeoff:** Fused closures are harder to debug (Inspector hooks need explicit call sites rather than intercept points). Consider a debug/production split: full chain in dev, fused chain in prod.
-
-**Plugin wiring cost.** Each plugin (StorePlugin, ControlPlugin, SourcePlugin, AdoptPlugin, optionally FanInPlugin) adds properties and methods to the node. If plugins are mix-in style (copy properties onto `this`), construction pays for each plugin's setup.
-
-- **Optimization:** Use class hierarchies or conditional prototype chains rather than runtime mix-ins. E.g., `SingleDepOperator extends BaseNode` vs `MultiDepOperator extends BaseNode` — V8 creates stable hidden classes for each, avoiding the megamorphic deopt that mix-ins cause.
-- **Optimization:** For the common single-dep case (most operators), skip FanInPlugin entirely — no bitmask allocation, no `depValues[]` array. The savings is one `number` and one `Array` per single-dep node.
+- **Optimization:** Single-dep nodes already skip the bitmask and use direct forwarding. For further reduction, fuse the state tracking + transform + value caching into a minimal closure for single-dep nodes with no `equals` option.
+- **Optimization:** For the common single-dep case (most operators), no bitmask allocation is needed. The savings is one `number` per single-dep node.
 
 **Output slot allocation.** The output slot starts as `null` (no subscribers), becomes a single function reference (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). This is already optimal — lazy allocation matches the common case where most nodes have 0-1 subscribers.
 
@@ -262,17 +257,12 @@ The output slot model, plugin composition, and ADOPT protocol introduce new perf
 - **Optimization:** Use a flags bit (`O_MULTI`) to distinguish modes. A single `if (flags & O_MULTI)` branch is cheaper than checking `typeof _sinks === 'function'` or `_sinks instanceof Set`.
 - **Expected impact:** Negligible for most graphs. Only matters for nodes with high fan-out (10+ subscribers) where Set iteration dominates.
 
-**Tap cost per signal.** Every DATA signal through B._chain writes `B._value` and `B._status` — two property writes per node per signal. In a deep chain (A → B → C → D → E), a single state change causes 2 × depth property writes.
+**Value caching cost per signal.** Every DATA signal through B's handler closure writes `B._cachedValue` and `B._status` — two property writes per node per signal. In a deep graph (A → B → C → D → E), a single state change causes 2 × depth property writes.
 
-- **Optimization:** If a node has no external `.get()` callers and no Inspector hooks, the tap writes are wasted. A `O_TAP_NEEDED` flag could skip the writes when the node is purely a pipeline passthrough.
+- **Optimization:** If a node has no external `.get()` callers and no Inspector hooks, the cache writes are wasted. A flag could skip the writes when the node is purely a pipeline passthrough.
 - **Tradeoff:** Determining "no external .get() callers" statically is hard. This is a speculative optimization — measure first.
 
-**REQUEST_ADOPT / GRANT_ADOPT cost.** The ADOPT protocol runs once per topology change (subscribe/unsubscribe), not per signal. It sends two type 3 signals through the chain. This is negligible unless topology changes happen at high frequency (e.g., dynamic subscription operators).
-
-- **Optimization:** For static topologies (most apps), the ADOPT protocol fires only during initialization. No optimization needed.
-- **Optimization:** For dynamic topologies (switchMap, flat), the inner subscription should skip the ADOPT protocol entirely — inner nodes are ephemeral and don't need terminator handoff. A `O_SKIP_ADOPT` flag on ephemeral inner chains avoids the round-trip.
-
-**FanIn bitmask at convergence points.** The bitmask algorithm is O(1) per signal (bitwise ops). For multi-dep nodes with > 32 deps, a fallback to `Uint32Array` or multiple bitmask words is needed.
+**Bitmask at convergence points.** The bitmask algorithm is O(1) per signal (bitwise ops). For multi-dep nodes with > 32 deps, a fallback to `Uint32Array` or multiple bitmask words is needed.
 
 - **Optimization:** Keep the fast path as a single `number` for ≤ 32 deps (covers ~100% of real-world cases). Only allocate the typed array fallback if `deps.length > 32`.
 
@@ -285,20 +275,19 @@ The output slot model, plugin composition, and ADOPT protocol introduce new perf
 | `_value` | 8 | pointer/inline |
 | `_status` | 8 | enum/string ref |
 | `_flags` | 8 | packed bitmask |
-| `_chain` closure | 50-100 | V8 closure context |
+| Handler closure | 50-100 | V8 closure context |
 | Output slot ref | 8 | null / fn / Set ref |
 | Talkback ref | 8 | upstream talkback |
 | Inspector WeakRef | 16 | when Inspector.enabled |
-| FanInPlugin (if multi-dep) | +40 | bitmask + depValues array |
-| AdoptPlugin state | +8 | route stack ref (null when idle) |
-| **Total (single-dep, Inspector OFF)** | **~100-160** | |
-| **Total (multi-dep, Inspector ON)** | **~200-260** | |
+| Bitmask (if multi-dep) | +8 | dirty dep tracking |
+| **Total (single-dep, Inspector OFF)** | **~100-150** | |
+| **Total (multi-dep, Inspector ON)** | **~180-240** | |
 
-**Measured v4:** ~719 bytes/store (Inspector ON). The estimate above is for the raw node structure; actual cost includes STANDALONE connection overhead (talkback closures, active `_chain` pipeline), Inspector WeakRef/WeakMap registration, and bound method closures. The STANDALONE model trades memory for always-current `get()` semantics. Preact's ~121 bytes/store reflects its simpler model with no eager connections.
+**Measured v4:** ~719 bytes/store (Inspector ON). The estimate above is for the raw node structure; actual cost includes STANDALONE connection overhead (talkback closures, active handler closures), Inspector WeakRef/WeakMap registration, and bound method closures. The STANDALONE model trades memory for always-current `get()` semantics. Preact's ~121 bytes/store reflects its simpler model with no eager connections.
 
 **Output slot Set allocation.** Sets are ~200 bytes each. Nodes with ≤1 subscriber never allocate one. For graphs where most nodes feed into exactly one downstream (typical), this saves ~200 bytes × (total nodes - fan-out points).
 
-**Chain closure sharing.** When multiple nodes use the same transform function (e.g., `map(x => x * 2)` reused), V8 shares the function object. But the closure *context* (capturing `_value`, `_status` refs) is per-node. No sharing opportunity there.
+**Handler closure sharing.** When multiple nodes use the same transform function (e.g., `map(x => x * 2)` reused), V8 shares the function object. But the closure *context* (capturing `this`, local state) is per-node. No sharing opportunity there.
 
 ### Batch + output slot interaction
 
@@ -311,39 +300,23 @@ Batch defers DATA, not DIRTY. In v4, DIRTY propagates through output slots immed
 
 v4 splits the fused pipe into two variants:
 
-- **`pipeRaw(source, ...fns)`** — fuses into a single `operator()` store (lazy, DISCONNECTED when no subscribers). Bare minimum — no auto-connect, no internal terminator. This is the "raw" flavor for hot paths where the caller controls the subscription lifecycle.
+- **`pipeRaw(source, ...fns)`** — fuses into a single `operator()` store (lazy, DISCONNECTED when no subscribers). Bare minimum — no auto-connect, no STANDALONE mode. This is the "raw" flavor for hot paths where the caller controls the subscription lifecycle.
 - **`pipeDerived(source, ...fns)`** — fuses into a single `derived()` store (auto-connects, STANDALONE when no subscribers, `.get()` always current). This is the renamed version of what v3 called `pipeRaw`.
 
-Both fuse N transform functions into one `_chain` with one output slot instead of N chains with N output slots. The savings are multiplicative: N-1 fewer chains, output slots, taps, and Inspector registrations.
+Both fuse N transform functions into one store with one output slot instead of N stores with N output slots. The savings are multiplicative: N-1 fewer stores, output slots, handler closures, and Inspector registrations.
 
-- **v4 enhancement:** Both variants should skip creating intermediate nodes entirely. Each transform function is folded into a single composed `fn` inside one `_chain`. The stateIntercept and valueIntercept wrap only the final composed function.
+- **v4 enhancement:** Both variants skip creating intermediate nodes entirely. Each transform function is folded into a single composed `fn` inside one handler closure.
 - `SKIP` sentinel provides filter semantics in both variants.
-
-### Lazy plugin instantiation
-
-Not all plugins are needed at construction time:
-
-| Plugin | When actually needed |
-|--------|---------------------|
-| StorePlugin | Always (defines `_value`, `_status`, `get()`) |
-| ControlPlugin | Always for tier 1 (STATE forwarding is part of chain assembly) |
-| FanInPlugin | Only for multi-dep nodes |
-| SourcePlugin | On first `source(START, sink)` call |
-| AdoptPlugin | On first topology change |
-
-- **Optimization:** SourcePlugin and AdoptPlugin could be lazily mixed in on first use. But this changes the hidden class shape after construction, which is a V8 deopt. **Not recommended.** Better to pre-declare all fields in the constructor (even as `null`) to keep the hidden class stable.
 
 ### Summary of v4 optimization priorities
 
 | Priority | Optimization | Expected impact | Effort |
 |----------|-------------|-----------------|--------|
-| **P0** | Skip FanInPlugin for single-dep nodes | ~40 bytes/node, fewer allocations | Low |
-| **P0** | Lazy output slot (null → fn → Set) | ~200 bytes saved for ≤1 subscriber | Low (already designed) |
-| **P1** | Fused chain closure for single-dep | 2-3 fewer closures per node (~150 bytes) | Medium |
-| **P1** | `O_SKIP_ADOPT` for ephemeral inner chains | Avoids ADOPT round-trip in switchMap/flat | Low |
-| **P2** | `O_TAP_NEEDED` flag to skip tap writes | 2 fewer writes per signal per passthrough node | Medium (needs static analysis) |
-| **P2** | Class hierarchy instead of runtime mix-ins | Stable hidden classes, avoids megamorphic | Medium |
-| **P3** | pipeRaw/pipeDerived fusion with single chain | N-1 fewer chains for N-step pipes | Low (extends existing design) |
+| **P0** | Skip bitmask for single-dep nodes | ~8 bytes/node, fewer allocations | Low (already implemented) |
+| **P0** | Lazy output slot (null → fn → Set) | ~200 bytes saved for ≤1 subscriber | Low (already implemented) |
+| **P1** | Fused handler closure for single-dep | 2-3 fewer closures per node (~150 bytes) | Medium |
+| **P2** | Flag to skip cache writes for passthrough nodes | 2 fewer writes per signal per passthrough node | Medium (needs static analysis) |
+| **P3** | pipeRaw/pipeDerived fusion with single store | N-1 fewer stores for N-step pipes | Low (extends existing design) |
 | **P3** | Compile-time Inspector removal | Zero overhead + smaller bundle | Medium (tooling) |
 
 ---

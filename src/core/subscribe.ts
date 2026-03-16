@@ -3,9 +3,8 @@
  *
  * Used as the base for:
  * - External subscribe (extra/subscribe re-exports this)
- * - Derived's internal terminator (STANDALONE mode)
+ * - Derived's dep connections (STANDALONE mode)
  * - Effect's dep connections
- * - Any ADOPT-aware sink
  *
  * v4: Handles callbag START handshake, filters STATE for user callbacks,
  * provides prev-value tracking. Returns unsub function.

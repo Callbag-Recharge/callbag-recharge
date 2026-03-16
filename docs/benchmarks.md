@@ -105,7 +105,7 @@ Comparable. Both iterate through subscriber collections and invoke callbacks. Re
 | Preact Signals | **121 bytes** | 1,181 KB |
 | callbag-recharge | 719 bytes | 7,021 KB |
 
-Preact signals are highly optimized class instances with no per-instance bound functions and bitfield flags. Recharge v4 uses STANDALONE derived nodes that eagerly connect at construction, maintaining active output slots and talkback references even without external subscribers. The output slot model, `_chain` closure assembly, and Inspector registration (WeakRef/WeakMap) contribute to the per-store overhead. Disabling the Inspector (`Inspector.enabled = false`) reduces allocation on creation but does not eliminate the structural cost of STANDALONE connections.
+Preact signals are highly optimized class instances with no per-instance bound functions and bitfield flags. Recharge v4 uses STANDALONE derived nodes that eagerly connect at construction, maintaining active output slots and talkback references even without external subscribers. The output slot model, handler closure assembly, and Inspector registration (WeakRef/WeakMap) contribute to the per-store overhead. Disabling the Inspector (`Inspector.enabled = false`) reduces allocation on creation but does not eliminate the structural cost of STANDALONE connections.
 
 ---
 
@@ -177,7 +177,7 @@ The `map`, `filter`, and `scan` operators moved to `callbag-recharge/extra`, red
 ## Where Preact Signals wins
 
 - **Diamond patterns** — 1.3x faster (9.7M vs 7.5M ops/sec). v4 STANDALONE mode maintains active connections in intermediate derived nodes, adding overhead that Preact's simpler push-invalidate model avoids.
-- **Memory** — ~6x smaller per store (121 vs 719 bytes). Preact stores no per-instance bound functions and uses bitfield flags. Recharge v4's STANDALONE connections, output slot model, and `_chain` closures add per-node cost.
+- **Memory** — ~6x smaller per store (121 vs 719 bytes). Preact stores no per-instance bound functions and uses bitfield flags. Recharge v4's STANDALONE connections, output slot model, and handler closures add per-node cost.
 
 ## Where raw Callbag wins
 

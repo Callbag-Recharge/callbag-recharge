@@ -194,9 +194,9 @@ expect(values2).toEqual([6]);
 
 ---
 
-## v4: Output Slot & Adoption Testing Patterns
+## v4: Output Slot Testing Patterns
 
-The output slot model and ADOPT protocol introduce new topology invariants that must be verified.
+The output slot model introduces new topology invariants that must be verified.
 
 ### Output slot mode transitions
 
@@ -261,42 +261,6 @@ a.set(10)
 expect(cCount).toBe(2)      // still once per change
 expect(c.get()).toBe(30)     // 10 + 20
 unsub()
-```
-
-### REQUEST_ADOPT / GRANT_ADOPT protocol
-
-Test that the ADOPT handoff works correctly in the three topology scenarios:
-
-```ts
-// Scenario 1: A→B, add C — B's terminator releases
-const a = state(0)
-const b = derived([a], () => a.get() + 1)
-// B is STANDALONE — has its own terminator
-const unsub = subscribe(b, () => {}) // C subscribes → REQUEST_ADOPT
-// B should release terminator, C now drives via output slot
-a.set(5)
-expect(b.get()).toBe(6) // B still current via tap
-unsub()
-// B back to STANDALONE
-
-// Scenario 2: C unsubscribes from diamond
-const c = derived([a, b], () => a.get() + b.get())
-const unsub2 = subscribe(c, () => {})
-a.set(10)
-expect(c.get()).toBe(21) // 10 + 11
-unsub2()
-// C releases both A and B output slots cleanly
-
-// Scenario 3: A→B→C exists, add D to B
-const unsub3 = subscribe(c, () => {})
-const d = derived([b], () => b.get() * 10)
-const unsub4 = subscribe(d, () => {})
-// B's output slot should be Set{C's chain, D's chain}
-a.set(20)
-expect(c.get()).toBe(41) // 20 + 21
-expect(d.get()).toBe(210) // 21 * 10
-unsub3()
-unsub4()
 ```
 
 ### Status model correctness
@@ -369,7 +333,7 @@ a.set(2)
 
 ### init() timing: construction vs connection
 
-Test that handler-local state resets on reconnect but chain structure survives:
+Test that handler-local state resets on reconnect but dep connection structure survives:
 
 ```ts
 // Operator with a counter (handler-local state)
