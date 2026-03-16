@@ -231,7 +231,7 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 The ~719 bytes/store cost breaks down across STANDALONE connections, handler closures, bound methods, and Inspector registration. Concrete opportunities:
 
 - **Lazy method binding:** Only bind `source`, `get`, `set` etc. on first access via getter traps instead of eagerly in the constructor. Most stores only use 1-2 of their bound methods. Saves ~48 bytes per unused bound method (6 bytes per pointer * 8 methods).
-- **Shared handler closure for identity transforms:** When derived has `fn = (x) => x` (passthrough), reuse a singleton handler instead of creating per-node closures.
+- **`derived.from(dep, opts?)` — singleton handler for identity transforms:** A dedicated factory for single-dep identity derived nodes. Because there is no user-supplied transform function, the handler closure is a shared singleton rather than a per-node allocation. Covers three use cases: bare passthrough (`derived.from(dep)`), custom equality (`derived.from(dep, { equals: shallowEqual })`), and named observation points (`derived.from(dep, { name: 'alias' })`). Also naturally fits the single-dep P0 optimization path.
 - **WeakRef-free Inspector:** Replace `WeakRef<Store>` with a `FinalizationRegistry` that removes entries when stores are GC'd. This eliminates the per-store WeakRef allocation (~16 bytes).
 
 ### 4. Diamond pattern optimization
@@ -244,17 +244,9 @@ The diamond benchmark (6.9M vs 9.8M ops/sec) is the main throughput gap. STANDAL
 - **Output slot bypass for single-subscriber chains:** When A -> B -> C and B has exactly one subscriber (C), B's output slot dispatch could be replaced with a direct function call to C's handler, eliminating the mode check and Set lookup.
 - **Topological sort for batch drain:** When multiple nodes settle in a batch, drain in topological order (sources first) to avoid redundant intermediate recomputes.
 
-### 5. Handler closure fusion for single-dep chains
+### ~~5. Handler closure fusion for single-dep chains~~
 
-**Status:** Not implemented. **Impact:** Low-medium.
-
-For chains like `A -> map -> filter -> scan`, each step creates separate handler closures for state tracking, transform, value caching, and dispatch. For single-dep nodes, these stages could be fused into a single minimal closure:
-
-- State tracking + transform + value caching in one closure body
-- Skip bitmask entirely (already implemented for single-dep)
-- Skip `equals` check when no `equals` option is provided
-
-The benefit is 2-3 fewer closure contexts per node (~100-150 bytes saved) and fewer function calls per signal.
+**Removed.** `pipeRaw()` already fuses transforms into a single store, and benchmarks show `pipe` vs `pipeRaw` throughput is nearly identical (17M vs 16.7M ops/sec). The ~100-150 bytes/node memory saving doesn't justify the engine complexity when users can opt into `pipeRaw` for memory-sensitive paths.
 
 ---
 
@@ -283,4 +275,4 @@ The benefit is 2-3 fewer closure contexts per node (~100-150 bytes saved) and fe
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |
 | Memory footprint reduction | Potential | Close 6x gap via lazy binding, shared closures | Memory-sensitive apps |
 | Diamond pattern optimization | Potential | Close 1.4x gap via lazy STANDALONE, output bypass | Diamond-heavy graphs |
-| Handler closure fusion | Potential | ~100-150 bytes/node saved in single-dep chains | Deep linear chains |
+| ~~Handler closure fusion~~ | Removed | Superseded by `pipeRaw()` | — |

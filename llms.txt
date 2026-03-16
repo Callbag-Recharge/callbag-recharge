@@ -1,0 +1,59 @@
+# callbag-recharge
+> State that flows. Reactive state management for TypeScript.
+
+## What it does
+Reactive state management with 5 primitives: state, derived, effect, producer, operator.
+Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators (map, filter, debounce, switchMap, etc.).
+Framework-agnostic. Works frontend, backend, edge. ~1.1 KB core ESM, zero dependencies.
+
+## When to use
+- Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
+- Streaming data (LLM chunks, WebSocket, SSE) flowing into state
+- Cancellable async operations (switchMap auto-cancels previous)
+- Derived/computed values that are always consistent (diamond-safe, cached)
+- Agentic workflows (session state, tool call lifecycle, multi-agent coordination)
+- Event pipelines with 60+ operators for transform, buffer, window, error handling
+- Full-stack TypeScript — same API for frontend state and backend streams
+
+## Core API (5 primitives)
+- `state(initial)` — readable/writable store. `.get()`, `.set(value)`, `.update(fn)`, `.source` (callbag)
+- `derived([deps], fn)` — cached computed store, recomputes when deps change. `.get()`, `.source`
+- `effect([deps], fn)` — side-effect, runs when deps change. Returns dispose function
+- `producer(fn?, opts?)` — push-based source with cleanup. Actions: `.emit(value)`, `.complete()`, `.error(err)`. Options: `initial`, `equals`, `resetOnTeardown`, `resubscribable`
+- `operator([deps], init, handler)` — custom transform node. Handler receives `(depIndex, type, data)`
+
+## Composition
+- `pipe(source, op1, op2, ...)` — compose operators into inspectable store chain
+- `batch(fn)` — defer emissions until outermost batch ends (DIRTY signals still propagate immediately)
+- `pipeRaw(source, fn1, fn2, ...)` — fuse transforms into single derived for ~2x throughput. `SKIP` sentinel for filter semantics
+
+## Operators (import from callbag-recharge/extra)
+
+Sources: interval, fromIter, fromAsyncIter, fromEvent, fromPromise, fromObs, of, empty, throwError, never
+Filtering: filter, take, skip, first, last, find, elementAt, distinctUntilChanged, takeUntil
+Transformation: map, scan, pairwise, startWith, flat, switchMap, concatMap, exhaustMap, groupBy
+Combination: merge, combine, concat, race, withLatestFrom, partition
+Time: debounce, throttle, delay, timeout, sample, audit
+Buffering: buffer, bufferCount, bufferTime
+Windowing: window, windowCount, windowTime
+Aggregation: reduce, toArray
+Error handling: rescue, retry, repeat
+Utilities: tap, share, remember, subject, wrap
+Sinks: forEach, subscribe
+
+## Inspectability
+- `Inspector.inspect(store)` — returns `{ name, kind, value, status }` for any store
+- `Inspector.graph()` — returns Map of all named stores and their current state
+- Signal hooks: `Inspector.onEmit`, `Inspector.onSignal`, `Inspector.onStatus`, `Inspector.onEnd`
+- `Inspector.registerEdge(source, sink)` — track dependency graph
+- Zero per-store cost: uses WeakMaps, opt-in only
+
+## Install
+```
+npm install callbag-recharge
+```
+
+## Links
+- GitHub: https://github.com/anthropics/callbag-recharge
+- Architecture: docs/architecture-v4.md
+- Benchmarks: docs/benchmarks.md
