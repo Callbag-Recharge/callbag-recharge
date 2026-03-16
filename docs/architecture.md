@@ -1,6 +1,6 @@
 # Architecture & Implementation Guide
 
-This document is the definitive reference for implementing and maintaining callbag-recharge. Read it before writing any new primitive, operator, or extra. It supersedes the v3 design doc — the design is done; this is the implementation law.
+This document is the definitive reference for implementing and maintaining callbag-recharge. Read it before writing any new primitive, operator, or extra. This is the implementation law.
 
 ---
 
@@ -86,7 +86,7 @@ talkback(DATA)           // pull request (rarely needed in push model) — goes 
 talkback(END)            // unsubscribe — goes upstream
 ```
 
-**Two-phase push (v3):**
+**Two-phase push:**
 ```
 sink(STATE, DIRTY)       // phase 1: "prepare — I'm about to change" — downstream
 sink(DATA, value)        // phase 2: "here is the new value" — downstream

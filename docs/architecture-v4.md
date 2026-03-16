@@ -1,7 +1,7 @@
-# Architecture v4 — Draft
+# Architecture
 
-> **Status:** Design draft — core decisions resolved. The output slot model and status model
-> are settled. This supersedes v3.
+> **Status:** Canonical design document. The output slot model, status model, and STANDALONE
+> derived are implemented and shipped. This is the definitive architecture reference.
 
 ---
 
@@ -31,13 +31,13 @@
 
 12. **Effects run inline.** When all dirty deps resolve, the effect fn runs synchronously. No scheduler.
 
-13. **Compatibility targets: TC39 Signals, raw callbag, RxJS.** Same as v3.
+13. **Compatibility targets: TC39 Signals, raw callbag, RxJS.**
 
 ---
 
 ## 2. Folder & Dependency Hierarchy
 
-Structure is unchanged from v3. The implementation of `derived` and `operator` will converge but remain in separate files during transition.
+`derived` and `operator` are separate files with converged internals.
 
 ```
 src/
@@ -87,7 +87,7 @@ sink(DATA, value)     // phase 2: "new value"
 sink(STATE, RESOLVED) // alternative phase 2: "no change"
 ```
 
-**Node status — new in v4:**
+**Node status:**
 
 Every node tracks its own `_status`:
 
@@ -137,7 +137,7 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 
 ## 5. The Chain Model (Conceptual)
 
-This is the central mental model in v4. The stages described here are **not** composed as separate callbag functions — they are inlined into dep subscription handler closures for zero-allocation performance. The conceptual model accurately describes the signal flow.
+This is the central mental model. The stages described here are **not** composed as separate callbag functions — they are inlined into dep subscription handler closures for zero-allocation performance. The conceptual model accurately describes the signal flow.
 
 ### Signal flow through a transform node
 
@@ -267,7 +267,7 @@ The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 - `get()` returns `_value` as-is (compatible with existing usages); staleness queryable via `node._status`
 - Future: `getLive()` forces a synchronous upstream pull to return the real-time value
 
-The chosen approach is: `.get()` returns `_value` for compatibility; `_status` is always publicly readable; `Inspector.inspect()` surfaces both together. The full pull-propagation design for a `getLive()` is deferred post-v4.0.
+The chosen approach is: `.get()` returns `_value` for compatibility; `_status` is always publicly readable; `Inspector.inspect()` surfaces both together. The full pull-propagation design for a `getLive()` is deferred.
 
 **DISCONNECTED pull recompute** does NOT write to `_value`. It is a read-only on-demand computation. `_value` only reflects values that actually flowed through the connected pipeline.
 
@@ -275,7 +275,7 @@ The chosen approach is: `.get()` returns `_value` for compatibility; `_status` i
 
 ## 8. Diamond Resolution
 
-Diamond resolution works correctly in v4 via the same bitmask algorithm as v3, applied at convergence points (multi-dep nodes).
+Diamond resolution works correctly via the bitmask algorithm applied at convergence points (multi-dep nodes).
 
 ### Example: C depends on [A, B] where B depends on A
 
@@ -299,7 +299,7 @@ C computes exactly once. B._cachedValue is updated via its handler closure. Diam
 
 The `Bitmask` class (`core/bitmask.ts`) provides per-dep dirty tracking safe for any number of deps:
 
-- **≤32 deps:** stores the bitmask as a plain number (`_v`). Bitwise ops on a single 32-bit integer — zero overhead vs. the v3 inline approach.
+- **≤32 deps:** stores the bitmask as a plain number (`_v`). Bitwise ops on a single 32-bit integer — zero overhead.
 - **>32 deps:** stores bits in a `Uint32Array` (`_w`), with `_v` tracking the count of set bits. `empty()` is O(1) via the count rather than scanning words.
 
 In both cases `empty()` is a single `_v === 0` comparison. Method dispatch is monomorphic (one class, one hidden class for all instances).
@@ -398,7 +398,7 @@ This split means the dep connection structure is always stable (no re-wiring on 
 
 ### Connection batching
 
-`beginDeferredStart()` / `endDeferredStart()` queues all chain activations. They fire together at `endDeferredStart()`, ensuring a subscriber's baseline is captured before any producer starts emitting. Unchanged from v3.
+`beginDeferredStart()` / `endDeferredStart()` queues all chain activations. They fire together at `endDeferredStart()`, ensuring a subscriber's baseline is captured before any producer starts emitting.
 
 ### Teardown (last subscriber leaves)
 
@@ -427,7 +427,7 @@ complete() or error(e):
   → for each sink: sink(END) or sink(END, e)      // notify downstream
 ```
 
-**Cleanup before notification** (unchanged from v3): ensures `resubscribable` re-subscription finds a clean state.
+**Cleanup before notification:** ensures `resubscribable` re-subscription finds a clean state.
 
 ### Reconnect
 
@@ -466,7 +466,7 @@ Operators that reject DATA (filter, distinctUntilChanged) MUST send `signal(RESO
 
 ### Dynamic upstream = tier 2
 
-Dynamic upstream (dep changes at runtime) is a tier 2 pattern — use producer + subscribe. Operator deps are static. Sync inner completion race guard (`innerEnded` flag) is required. See v3 §8.
+Dynamic upstream (dep changes at runtime) is a tier 2 pattern — use producer + subscribe. Operator deps are static. Sync inner completion race guard (`innerEnded` flag) is required. See §8 of the implementation guide.
 
 ---
 
@@ -495,7 +495,7 @@ For any operator with an RxJS equivalent, match RxJS semantics. See [rxjs.dev/ap
 
 ### Documented divergences from RxJS
 
-| Behavior | RxJS | callbag-recharge v4 | Reason |
+| Behavior | RxJS | callbag-recharge | Reason |
 |----------|------|---------------------|--------|
 | Value suppression | No emission | Must send `signal(RESOLVED)` | Downstream bitmasks need clearing |
 | `filter` non-match | No emission | `signal(RESOLVED)` | Same |
@@ -560,7 +560,7 @@ Dep subscription handlers are created once in the constructor. The closure is as
 
 ## 15. Inspector & Debugging
 
-### Current capabilities (v3)
+### Current capabilities
 
 ```ts
 Inspector.register(store, { name, kind });
@@ -571,7 +571,7 @@ Inspector.graph();         // Map<name, StoreInfo>
 Inspector.trace(store, cb); // subscribe to value changes
 ```
 
-### New in v4: status tracking
+### Status tracking
 
 Every registered store exposes `_status`. Inspector should surface this:
 
@@ -584,7 +584,7 @@ Inspector.inspect(store): {
 }
 ```
 
-### Proposed additions (from v3 architecture doc, still planned)
+### Proposed additions (planned)
 
 **1. Event log** — circular buffer of recent signal events:
 ```ts

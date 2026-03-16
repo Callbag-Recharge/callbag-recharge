@@ -88,6 +88,15 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `subscribe(store, cb)` | Listens to value changes with previous-value tracking; pure callbag sink |
 | `forEach(cb)` | Subscribes to a source, calling `cb` for each value |
 
+### Interop
+
+| Module | Description |
+|--------|-------------|
+| `wrap(rawSource)` | Promotes a raw callbag source to a tier 2 Store (producer-based, autoDirty) |
+| `wrap(input, rawOp)` | Promotes a raw callbag map-like operator to a tier 1 Store (STATE bypass for diamond resolution) |
+
+**Constraint:** `wrap(input, rawOp)` is synchronous map-only. Filtering or tier 2 raw operators must use `operator()` directly with explicit signal handling. See `docs/architecture-v4-review.md` §2.7 for full rationale.
+
 ---
 
 ## Testing strategy

@@ -22,7 +22,7 @@ Inspector.enabled = false
 - `register()` becomes a no-op — no WeakRef, no WeakMap writes
 - `getName()` returns `undefined` — pipe operator names are skipped
 - `graph()` returns an empty Map
-- **~5.8x faster** store creation (see [benchmarks](./benchmarks.md#inspector-disabled-vs-enabled-store-creation))
+- **~5.6x faster** store creation (see [benchmarks](./benchmarks.md#inspector-disabled-vs-enabled-store-creation))
 
 The flag defaults to `true` when `NODE_ENV !== 'production'` and `true` in browsers. Set it explicitly for deterministic behavior.
 
@@ -108,9 +108,7 @@ result.get() // runs all 3 transforms in one operator() call
 - Type overloads for up to 4 transforms
 - No `scan` support (use regular `pipe()` with the `scan` operator for accumulator state)
 
-With v4's optimized operator internals, `pipeRaw` and `pipe` have roughly the same throughput (~19M ops/sec). The benefit of `pipeRaw` is reduced store count and memory (one store instead of N), not throughput.
-
-**When to use:** Pipe chains where you want to minimize store allocations, don't need per-step inspectability or `scan`, or need `SKIP` filter semantics.
+With optimized operator internals, `pipeRaw` and `pipe` have roughly the same throughput (~17M ops/sec). The benefit of `pipeRaw` is reduced store count and memory (one store instead of N), not throughput. Use `pipeRaw` when you need the `SKIP` sentinel for filter semantics or want to minimize store allocations.
 
 ### 5. Raw callbag interop for hot paths
 
@@ -130,7 +128,7 @@ cbPipe(
 )
 ```
 
-Raw callbag operators are nested function calls with zero allocation — **~2.5x faster** than recharge pipes. The tradeoff is no `.get()`, no Inspector visibility, and no store interop (pure push, no pull).
+Raw callbag operators are nested function calls with zero allocation — **~4.6x faster** than recharge pipes. The tradeoff is no `.get()`, no Inspector visibility, and no store interop (pure push, no pull).
 
 ### 6. Memoized derived stores (userland)
 
@@ -149,29 +147,29 @@ const memoized = derived([inputA, inputB], () => {
 
 This is more general than `equals` — it compares *inputs* rather than *outputs*. Use this when the computation itself is expensive (>1ms) and inputs change less often than DIRTY propagates.
 
-### 7. Class-based primitives with output slot model — v4 architecture
+### 7. Class-based primitives with output slot model
 
 `ProducerImpl`, `StateImpl`, `DerivedImpl`, and `OperatorImpl` use classes with prototype method sharing and V8 hidden class optimization. `effect()` uses a pure closure (see rationale below). The factory functions (`producer()`, `state()`, `derived()`, `operator()`, `effect()`) are preserved as the public API.
 
-**v4 results:**
+**Measured results:**
 - Memory per store: ~719 bytes (Inspector ON, ~6x gap vs Preact's ~121 bytes)
-- Store creation (Inspector OFF): 6.4M ops/sec
-- Store creation (Inspector ON): 1.1M ops/sec
-- Throughput: wins in most benchmarks except diamond patterns (see [benchmarks](./benchmarks.md))
+- Store creation (Inspector OFF): 7.3M ops/sec
+- Store creation (Inspector ON): 1.3M ops/sec
+- Throughput: wins in most benchmarks except diamond patterns and state write (see [benchmarks](./benchmarks.md))
 
-**v4 STANDALONE overhead:** Derived nodes eagerly connect to deps at construction, maintaining active output slots and talkback references even without external subscribers. This ensures `get()` always returns a current cached value but adds per-store cost vs v3's lazy model (~719 vs ~354 bytes). The tradeoff is correctness and API simplicity over memory.
+**STANDALONE overhead:** Derived nodes eagerly connect to deps at construction, maintaining active output slots and talkback references even without external subscribers. This ensures `get()` always returns a current cached value but adds per-store cost vs a lazy model. The tradeoff is correctness and API simplicity over memory.
 
 **Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
 
 **Why effect is a closure, not a class:** A/B benchmarking showed class wins ~30% on creation (V8 hidden class allocation) but closure wins ~20-30% on re-run (closure-local variable access vs `this._property` lookups). Since effects are created once but triggered many times, the re-run hot path dominates. Additionally, `EffectImpl` had only 1 own property (`_dispose`) and 1 prototype method, with zero `instanceof` usage in the library — the class provided no structural benefit. ProducerImpl/OperatorImpl/DerivedImpl justify their class overhead through multiple prototype methods and the need for `.source`, `.get()`, `.set()` etc.
 
-**Output slot (null → fn → Set):** All classes use a lazy output slot instead of a `_sinks` Set. The slot starts as `null` (no subscribers), becomes a single function reference on first subscriber (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). Nodes with ≤1 subscriber never allocate a Set (~200 bytes saved per node).
+**Output slot (null -> fn -> Set):** All classes use a lazy output slot instead of a `_sinks` Set. The slot starts as `null` (no subscribers), becomes a single function reference on first subscriber (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). Nodes with <=1 subscriber never allocate a Set (~200 bytes saved per node).
 
-**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags, and no STANDALONE connections. Recharge v4's handler closure assembly, STANDALONE talkback references, and Inspector registration (WeakRef/WeakMap) are the primary costs. Paths to close the gap include fusing handler closures for single-dep nodes and compile-time Inspector removal.
+**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags, and no STANDALONE connections. Handler closure assembly, STANDALONE talkback references, and Inspector registration (WeakRef/WeakMap) are the primary costs.
 
 ### 8. `endDeferredStart()` O(n) drain
 
-`endDeferredStart()` uses an index-based `for` loop + `length = 0` (O(n)) instead of `while/shift()` (O(n²)), matching the `batch()` drain pattern. Impact scales with the number of deps in a single `effect()` or `derived()`.
+`endDeferredStart()` uses an index-based `for` loop + `length = 0` (O(n)) instead of `while/shift()` (O(n^2)), matching the `batch()` drain pattern. Impact scales with the number of deps in a single `effect()` or `derived()`.
 
 ### 9. Integer bitmask for dirty dep tracking
 
@@ -182,40 +180,27 @@ Both `effect()` and `DerivedImpl` use a single `number` bitmask instead of `Set<
 - `dirtyDeps &= ~(1 << depIndex)` — resolve (was `set.delete()`)
 - `dirtyDeps === 0` — check settled (was `set.size === 0`)
 
-Bitwise ops are ~10x faster than Set operations. Supports up to 32 deps per effect/derived, which covers virtually all real-world cases. Also eliminates the Set allocation (~200 bytes per effect).
+Bitwise ops are ~10x faster than Set operations. The `Bitmask` class handles >32 deps via `Uint32Array` fallback with O(1) `empty()` check. Also eliminates the Set allocation (~200 bytes per effect).
 
 ### 10. `Inspector.enabled` getter caching
 
 The default `enabled` getter resolves `process.env.NODE_ENV` through a try/catch only once. The result is cached in `_cachedDefault` and returned directly on subsequent calls. `_reset()` clears the cache for test isolation.
 
----
+### 11. `_flags` bitmask (boolean packing)
 
-## Known regressions (v3 correctness pass) — partially mitigated
+Packed 6 boolean fields (ProducerImpl), 3 (OperatorImpl), 3 (DerivedImpl) into single integers. Reduces V8 hidden class size by 5 properties per ProducerImpl, saves ~40 bytes/store.
 
-The correctness pass (resubscribable, completion reentrancy safety, operator getter/reset) added necessary overhead. Four optimizations were applied to mitigate:
+### 12. Local `completed` variable in operator actions
 
-1. **`_flags` bitmask** — Packed 6 boolean fields (ProducerImpl), 3 (OperatorImpl), 3 (DerivedImpl) into single integers. Reduces V8 hidden class size by 5 properties per ProducerImpl, saves ~40 bytes/store.
-2. **Local `completed` variable in operator actions** — Operator action closures (`emit`, `signal`, `seed`) check a closure-local `completed` boolean instead of `this._flags & bit`. Local variable access is faster than property lookup in V8 hot paths.
-3. **Snapshot-free completion** — `complete()`/`error()` move the `_sinks` reference to a local and null the field before iterating, instead of allocating `[...this._sinks]`. The old Set serves as the iteration target; re-subscriptions during END create a new Set (since `this._sinks` is null). Zero allocation.
-4. **Effect pure closure** — `effect()` uses closure-captured locals (`dirtyDeps`, `anyDataReceived`, `disposed`, `cleanup`) instead of class instance properties. A/B benchmarks showed closure wins ~20-30% on re-run (the hot path) vs class, despite class winning ~30% on creation. Since effects are created once but triggered many times, closure is the right choice.
+Operator action closures (`emit`, `signal`, `seed`) check a closure-local `completed` boolean instead of `this._flags & bit`. Local variable access is faster than property lookup in V8 hot paths.
 
-### Measured impact (isolated, GC-controlled)
+### 13. Snapshot-free completion
 
-| Metric | Before optimization | After optimization | Change |
-|---|---|---|---|
-| Memory per store (Inspector OFF) | 473 B | 433 B | **-8.5%** |
-| Memory per store (Inspector ON) | 599 B | 559 B | **-6.7%** |
+`complete()`/`error()` move the `_sinks` reference to a local and null the field before iterating, instead of allocating `[...this._sinks]`. The old Set serves as the iteration target; re-subscriptions during END create a new Set (since `this._sinks` is null). Zero allocation.
 
-Throughput changes are within run-to-run variance for most benchmarks. The optimizations primarily reduce memory per store and allocation pressure during completions.
+### 14. Effect pure closure
 
-### Remaining overhead from correctness pass
-
-These are intentional costs that cannot be eliminated without removing features:
-
-- **`_resubscribable` flag bit + `source()` branch** — checked on subscription, needed for retry/rescue/repeat
-- **`_completed` checks on `emit()`/`signal()` in ProducerImpl** — needed because producer methods are bound and can be called after completion by user code
-- **`_getterFn` and `_initial` fields on OperatorImpl** — needed for tier 2 operator parity (getter pull-fallback, resetOnTeardown)
-- **`seed` action in operator actions object** — needed for operators that set initial values during init
+`effect()` uses closure-captured locals (`dirtyDeps`, `anyDataReceived`, `disposed`, `cleanup`) instead of class instance properties. A/B benchmarks showed closure wins ~20-30% on re-run (the hot path) vs class, despite class winning ~30% on creation. Since effects are created once but triggered many times, closure is the right choice.
 
 ---
 
@@ -223,101 +208,53 @@ These are intentional costs that cannot be eliminated without removing features:
 
 These are not yet implemented but represent concrete opportunities for improvement.
 
-### 1. Derived `get()` caching — resolved by STANDALONE
+### 1. State write (no subscribers) — narrow the gap with Preact
 
-**Status:** Resolved in v4. **Impact:** N/A.
+**Status:** Not implemented. **Impact:** High (3.5x gap).
 
-In v3, unconnected derived stores recomputed `fn()` on every `.get()` call. v4's STANDALONE mode solves this — derived nodes eagerly connect at construction, so `_value` is always populated by the active pipeline. `get()` returns the cached `_value` directly (~160M ops/sec for unchanged deps).
+The current benchmark shows Preact at 34M ops/sec vs recharge at 9.8M ops/sec for state writes with no subscribers. The gap comes from recharge's two-phase push protocol — even with `_output === null`, `set()` still runs through the `equals` guard and output slot dispatch code path. Opportunities:
+
+- **Fast path for null output:** When `_output === null` and no inspector hooks are active, `set()` could update `_value` directly and skip DIRTY/DATA dispatch entirely. This is safe because no one is listening.
+- **Inline `Object.is` check:** The `equals` function is currently called via a property lookup. For the default `Object.is` case, inlining the check avoids the function call overhead.
+- **Expected impact:** Could close the gap to ~1.5-2x, bringing state write to ~20-25M ops/sec.
 
 ### 2. Compile-time Inspector removal
 
-**Status:** Not implemented. **Impact:** Low (bundle size + micro-optimization).
+**Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization).
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
----
+### 3. Memory footprint reduction
 
-## v4 optimization considerations
+**Status:** Not implemented. **Impact:** Medium (currently ~6x gap vs Preact).
 
-The output slot model and STANDALONE derived introduce new performance surfaces. This section maps foreseeable optimization targets and trade-offs.
+The ~719 bytes/store cost breaks down across STANDALONE connections, handler closures, bound methods, and Inspector registration. Concrete opportunities:
 
-### Construction time
+- **Lazy method binding:** Only bind `source`, `get`, `set` etc. on first access via getter traps instead of eagerly in the constructor. Most stores only use 1-2 of their bound methods. Saves ~48 bytes per unused bound method (6 bytes per pointer * 8 methods).
+- **Shared handler closure for identity transforms:** When derived has `fn = (x) => x` (passthrough), reuse a singleton handler instead of creating per-node closures.
+- **WeakRef-free Inspector:** Replace `WeakRef<Store>` with a `FinalizationRegistry` that removes entries when stores are GC'd. This eliminates the per-store WeakRef allocation (~16 bytes).
 
-**Handler closure cost.** Each transform node creates handler closures at construction (via `_connectSingleDep()` or `_connectMultiDep()`). These inline state tracking, transform, value caching, and dispatch. Closures are cheap (V8 allocates a closure context ~50-100 bytes), but multi-dep nodes have more closure state.
+### 4. Diamond pattern optimization
 
-- **Optimization:** Single-dep nodes already skip the bitmask and use direct forwarding. For further reduction, fuse the state tracking + transform + value caching into a minimal closure for single-dep nodes with no `equals` option.
-- **Optimization:** For the common single-dep case (most operators), no bitmask allocation is needed. The savings is one `number` per single-dep node.
+**Status:** Not implemented. **Impact:** Medium (1.4x gap vs Preact).
 
-**Output slot allocation.** The output slot starts as `null` (no subscribers), becomes a single function reference (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). This is already optimal — lazy allocation matches the common case where most nodes have 0-1 subscribers.
+The diamond benchmark (6.9M vs 9.8M ops/sec) is the main throughput gap. STANDALONE mode means intermediate derived nodes maintain active output slots even when only the final node is read. Opportunities:
 
-### Runtime (signal propagation)
+- **Lazy STANDALONE activation:** Defer STANDALONE connection until the first `.get()` call rather than at construction. Stores that are only consumed via subscription (not polled) skip STANDALONE overhead entirely.
+- **Output slot bypass for single-subscriber chains:** When A -> B -> C and B has exactly one subscriber (C), B's output slot dispatch could be replaced with a direct function call to C's handler, eliminating the mode check and Set lookup.
+- **Topological sort for batch drain:** When multiple nodes settle in a batch, drain in topological order (sources first) to avoid redundant intermediate recomputes.
 
-**Output slot dispatch overhead.** In SINGLE mode, the output slot is a direct function call — zero overhead vs v3. In MULTI mode, it iterates a Set. The question is whether the SINGLE → MULTI transition introduces a branch cost.
+### 5. Handler closure fusion for single-dep chains
 
-- **Optimization:** Use a flags bit (`O_MULTI`) to distinguish modes. A single `if (flags & O_MULTI)` branch is cheaper than checking `typeof _sinks === 'function'` or `_sinks instanceof Set`.
-- **Expected impact:** Negligible for most graphs. Only matters for nodes with high fan-out (10+ subscribers) where Set iteration dominates.
+**Status:** Not implemented. **Impact:** Low-medium.
 
-**Value caching cost per signal.** Every DATA signal through B's handler closure writes `B._cachedValue` and `B._status` — two property writes per node per signal. In a deep graph (A → B → C → D → E), a single state change causes 2 × depth property writes.
+For chains like `A -> map -> filter -> scan`, each step creates separate handler closures for state tracking, transform, value caching, and dispatch. For single-dep nodes, these stages could be fused into a single minimal closure:
 
-- **Optimization:** If a node has no external `.get()` callers and no Inspector hooks, the cache writes are wasted. A flag could skip the writes when the node is purely a pipeline passthrough.
-- **Tradeoff:** Determining "no external .get() callers" statically is hard. This is a speculative optimization — measure first.
+- State tracking + transform + value caching in one closure body
+- Skip bitmask entirely (already implemented for single-dep)
+- Skip `equals` check when no `equals` option is provided
 
-**Bitmask at convergence points.** The bitmask algorithm is O(1) per signal (bitwise ops). For multi-dep nodes with > 32 deps, a fallback to `Uint32Array` or multiple bitmask words is needed.
-
-- **Optimization:** Keep the fast path as a single `number` for ≤ 32 deps (covers ~100% of real-world cases). Only allocate the typed array fallback if `deps.length > 32`.
-
-### Memory footprint
-
-**Per-node cost breakdown (estimated for v4):**
-
-| Component | Bytes (approx.) | Notes |
-|-----------|-----------------|-------|
-| `_value` | 8 | pointer/inline |
-| `_status` | 8 | enum/string ref |
-| `_flags` | 8 | packed bitmask |
-| Handler closure | 50-100 | V8 closure context |
-| Output slot ref | 8 | null / fn / Set ref |
-| Talkback ref | 8 | upstream talkback |
-| Inspector WeakRef | 16 | when Inspector.enabled |
-| Bitmask (if multi-dep) | +8 | dirty dep tracking |
-| **Total (single-dep, Inspector OFF)** | **~100-150** | |
-| **Total (multi-dep, Inspector ON)** | **~180-240** | |
-
-**Measured v4:** ~719 bytes/store (Inspector ON). The estimate above is for the raw node structure; actual cost includes STANDALONE connection overhead (talkback closures, active handler closures), Inspector WeakRef/WeakMap registration, and bound method closures. The STANDALONE model trades memory for always-current `get()` semantics. Preact's ~121 bytes/store reflects its simpler model with no eager connections.
-
-**Output slot Set allocation.** Sets are ~200 bytes each. Nodes with ≤1 subscriber never allocate one. For graphs where most nodes feed into exactly one downstream (typical), this saves ~200 bytes × (total nodes - fan-out points).
-
-**Handler closure sharing.** When multiple nodes use the same transform function (e.g., `map(x => x * 2)` reused), V8 shares the function object. But the closure *context* (capturing `this`, local state) is per-node. No sharing opportunity there.
-
-### Batch + output slot interaction
-
-Batch defers DATA, not DIRTY. In v4, DIRTY propagates through output slots immediately (phase 1), then DATA propagates at batch drain (phase 2). Output slots in MULTI mode dispatch DIRTY to all sinks synchronously — this is correct but means DIRTY fan-out is unbatched.
-
-- **Observation:** This is identical to v3 behavior (DIRTY was never deferred). No regression.
-- **Potential optimization:** If DIRTY fan-out becomes a bottleneck (unlikely — DIRTY is a single Symbol, no computation), batch could defer DIRTY too. But this breaks the invariant that all dirty state is established before DATA flows, which is critical for diamond resolution. **Do not defer DIRTY.**
-
-### Fused pipe + output slot fusion
-
-v4 splits the fused pipe into two variants:
-
-- **`pipeRaw(source, ...fns)`** — fuses into a single `operator()` store (lazy, DISCONNECTED when no subscribers). Bare minimum — no auto-connect, no STANDALONE mode. This is the "raw" flavor for hot paths where the caller controls the subscription lifecycle.
-- **`pipeDerived(source, ...fns)`** — fuses into a single `derived()` store (auto-connects, STANDALONE when no subscribers, `.get()` always current). This is the renamed version of what v3 called `pipeRaw`.
-
-Both fuse N transform functions into one store with one output slot instead of N stores with N output slots. The savings are multiplicative: N-1 fewer stores, output slots, handler closures, and Inspector registrations.
-
-- **v4 enhancement:** Both variants skip creating intermediate nodes entirely. Each transform function is folded into a single composed `fn` inside one handler closure.
-- `SKIP` sentinel provides filter semantics in both variants.
-
-### Summary of v4 optimization priorities
-
-| Priority | Optimization | Expected impact | Effort |
-|----------|-------------|-----------------|--------|
-| **P0** | Skip bitmask for single-dep nodes | ~8 bytes/node, fewer allocations | Low (already implemented) |
-| **P0** | Lazy output slot (null → fn → Set) | ~200 bytes saved for ≤1 subscriber | Low (already implemented) |
-| **P1** | Fused handler closure for single-dep | 2-3 fewer closures per node (~150 bytes) | Medium |
-| **P2** | Flag to skip cache writes for passthrough nodes | 2 fewer writes per signal per passthrough node | Medium (needs static analysis) |
-| **P3** | pipeRaw/pipeDerived fusion with single store | N-1 fewer stores for N-step pipes | Low (extends existing design) |
-| **P3** | Compile-time Inspector removal | Zero overhead + smaller bundle | Medium (tooling) |
+The benefit is 2-3 fewer closure contexts per node (~100-150 bytes saved) and fewer function calls per signal.
 
 ---
 
@@ -325,21 +262,25 @@ Both fuse N transform functions into one store with one output slot instead of N
 
 | Optimization | Status | Impact | When to use |
 |---|---|---|---|
-| `Inspector.enabled = false` | Built-in | ~5.8x faster store creation | Production builds |
+| `Inspector.enabled = false` | Built-in | ~5.6x faster store creation | Production builds |
 | `equals` on state | Built-in | Skip DIRTY propagation entirely | Object/array state |
 | `equals` on derived | Built-in | Push-phase memoization via RESOLVED — skips entire downstream subtrees | Stabilizing derived outputs |
 | `equals` on producer | Built-in | Skip emit for equal values | High-frequency producers |
 | `batch()` | Built-in | Coalesces multi-set patterns | Concurrent state updates |
 | `pipeRaw()` + `SKIP` | Built-in | Single fused store for pipe chain, reduced store count | SKIP filter semantics, memory-sensitive paths |
-| Raw callbag interop | Built-in | ~4.7x for pure streaming | Hot paths, no store needed |
+| Raw callbag interop | Built-in | ~4.6x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
-| Class + output slot model | Built-in | V8 hidden class optimization, lazy output slot (null → fn → Set) | All stores and effects |
-| STANDALONE derived | Built-in | `get()` always returns current cached value (~160M ops/sec unchanged) | All derived stores |
+| Class + output slot model | Built-in | V8 hidden class optimization, lazy output slot (null -> fn -> Set) | All stores and effects |
+| STANDALONE derived | Built-in | `get()` always returns current cached value (~232M ops/sec unchanged) | All derived stores |
 | `endDeferredStart()` O(n) drain | Built-in | Faster connection batching | Effects/derived with many deps |
-| Integer bitmask dirty tracking | Built-in | ~10x faster dirty ops vs Set, eliminates Set allocation | Effects and derived with ≤32 deps |
+| Integer bitmask dirty tracking | Built-in | ~10x faster dirty ops vs Set, eliminates Set allocation | Effects and derived with <=32 deps |
 | `Inspector.enabled` getter caching | Built-in | Avoid repeated try/catch | Bulk store creation |
 | `_flags` bitmask (boolean packing) | Built-in | ~40 bytes/store saved, smaller hidden class | All stores |
 | Local `completed` in operator actions | Built-in | Faster hot-path action closures | Operator emit/signal |
 | Snapshot-free completion | Built-in | Zero allocation on complete/error | Completion-heavy workloads |
 | Effect pure closure (not class) | Built-in | ~20-30% faster re-run vs class | Effects |
+| State write fast path | Potential | Close 3.5x gap with Preact on no-subscriber writes | State-heavy apps |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |
+| Memory footprint reduction | Potential | Close 6x gap via lazy binding, shared closures | Memory-sensitive apps |
+| Diamond pattern optimization | Potential | Close 1.4x gap via lazy STANDALONE, output bypass | Diamond-heavy graphs |
+| Handler closure fusion | Potential | ~100-150 bytes/node saved in single-dep chains | Deep linear chains |

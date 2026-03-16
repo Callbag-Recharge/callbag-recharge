@@ -501,7 +501,7 @@ Diamond resolved correctly. The wrapped operator is a full tier 1 participant.
 
 **Rule:** Only synchronous, 1:1 map-like raw callbag operators can use `wrap(input, rawOp)`. For filtering or tier 2 raw operators, use `operator()` directly with explicit signal handling (RESOLVED for filters, `signal(DIRTY); emit()` cycles for tier 2).
 
-**Action:** Implement `wrap` in `extra/wrap`. ~50 lines total (overloads + two internal implementations). Operator wrapping is tier 1 with STATE bypass. Source wrapping is tier 2. Document the filter constraint.
+**Implemented** in `extra/wrap.ts` (~150 lines). Source wrapping uses `producer()` (tier 2, autoDirty). Operator wrapping uses `operator([input], handler)` with a pushable bridge callbag — STATE bypasses the raw op via `signal()`, DATA flows through the bridge. `computeInitial()` runs `input.get()` through the raw op synchronously for initial value + disconnected `getter()`.
 
 ### 2.8 §17 Open Questions — Update
 
@@ -521,7 +521,7 @@ Diamond resolved correctly. The wrapped operator is a full tier 1 participant.
 | §6 ADOPT protocol | Remove. Output slot transitions are mechanical. Eager dep connection makes handoff unnecessary. |
 | §5 Chain model | Reframe as conceptual model. Stages are real, implementation is inlined. |
 | §16 Plugin composition | Remove. Monolithic classes are simpler and faster. Relocate init timing to §10. |
-| §16 Raw callbag wrapper | Redesign as `extra/wrap` — one function, two overloads. Source=tier 2, operator=tier 1 (STATE bypass). |
+| §16 Raw callbag wrapper | **Implemented** as `extra/wrap` — one function, two overloads. Source=tier 2 (producer), operator=tier 1 (STATE bypass via pushable bridge). |
 | Error & completion | Two-tier lifetime: state+derived immortal, producer+operator stream-aware. `rescue` = try/catch. |
 | Push-phase memoization | 4-layer cascade fully implemented. Document as first-class differentiator. |
 | Completion semantics | One dep ends → node ends. Atomic computation. Solved at stream-to-state boundary. |
