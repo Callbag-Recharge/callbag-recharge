@@ -76,25 +76,54 @@ The output slot is purely a dispatch point. Dep connections and downstream dispa
 
 ## Part 2: What Should Be Added or Redesigned
 
-### 2.1 Push-Phase Memoization for Multi-Dep Nodes — Incomplete
+### 2.1 Push-Phase Memoization Cascade — Resolved (document as differentiator)
 
-**Current state:** Derived with `equals` sends RESOLVED instead of DATA when output unchanged (`derived.ts:95-99`). Effect correctly skips `fn()` when all deps RESOLVED and `anyDataReceived === false` (`effect.ts:62-64`).
+The full memoization cascade is implemented. It's one of our strongest competitive differentiators — no other state management library has this. Document it prominently.
 
-**Gap:** Multi-dep derived nodes that receive ALL RESOLVED from deps still call `_recompute()` → `_fn()`. The `D_ANY_DATA` flag tracks whether any dep sent DATA, and the multi-dep path at `derived.ts:181-188` does skip `_fn()` when `!D_ANY_DATA`:
+#### The cascade
 
-```ts
-if (this._flags & D_ANY_DATA) {
-    this._recompute();
-} else {
-    // All deps resolved without value change — skip fn()
-    this._status = "RESOLVED";
-    this._dispatch(STATE, RESOLVED);
-}
+Each layer can short-circuit the entire downstream subtree:
+
+```
+Layer 1: Producer equals guard
+  state({ id: 1 }, { equals: (a, b) => a.id === b.id })
+  → set({ id: 1, label: "changed" })
+  → equals returns true → NO emit, NO DIRTY sent → entire subtree untouched
+
+Layer 2: Derived equals guard (push-phase memoization)
+  derived([a], () => clamp(a.get()), { equals: (x, y) => x === y })
+  → a changes from 3 to 4, clamp still returns 1
+  → derived recomputes fn(), but equals matches → sends RESOLVED instead of DATA
+  → downstream sees RESOLVED, not DATA → subtree skipped
+
+Layer 3: Multi-dep all-RESOLVED skip (derived)
+  derived([b, c], fn) where b and c both send RESOLVED
+  → D_ANY_DATA flag stays false
+  → dirtyDeps reaches 0 → all-RESOLVED path → skip fn() entirely, forward RESOLVED
+  → fn() never called — zero computation cost
+
+Layer 4: Effect all-RESOLVED skip
+  effect([d], fn) where d sends RESOLVED
+  → anyDataReceived stays false
+  → dirtyDeps reaches 0 → skip run() → effect fn() not called
 ```
 
-**Correction:** This IS implemented for multi-dep derived. The all-RESOLVED skip path exists. Verify with tests that cover: `A(state) → B(derived, equals) → C(derived, equals) → D(derived [B, C])` where A changes but B and C both resolve unchanged — D should skip `fn()` and forward RESOLVED.
+#### Why this matters
 
-**Action:** Add a section documenting the full memoization cascade: producer `equals` → derived `equals` → RESOLVED propagation → downstream skip. This is a key differentiator vs competitors.
+In a large graph, a state change at the root can be stopped at any layer. If a derived node's `equals` guard fires, every node below it — derived, operator, effect — skips entirely. No recomputation, no side-effects. The savings compound at each layer.
+
+**No competitor has this.** Jotai recomputes on every dep change. Zustand has no derived graph. MobX has computed memoization but no multi-dep RESOLVED cascade. Nanostores recomputes computed on every change.
+
+#### Test coverage needed
+
+Verify the full 4-layer cascade with a dedicated test:
+```
+A(state) → B(derived, equals: clamp to 0/1) → D(derived [B, C])
+A(state) → C(derived, equals: clamp to 0/1) → D         → E(effect)
+```
+Set A from 1 to 2 (both B and C stay clamped to 0). D should skip `fn()`, E should skip `run()`. Count calls to D's fn and E's fn to verify zero extra computation.
+
+**Action:** Add a "Push-Phase Memoization" section to the architecture doc describing the 4-layer cascade. This is a first-class feature, not an optimization footnote.
 
 ### 2.2 Error Propagation & Completion — Resolved Design
 
@@ -207,76 +236,301 @@ const d = derived([safe, config], fn)  // safe never terminates → d never term
 
 The key insight: `state` and `derived` form the immortal state graph — they don't have public completion APIs. If a user feeds a stream (producer) that may complete into a derived, they should wrap it with `rescue`/`retry`/`repeat` or a custom stay-alive producer. The completion problem is solved at the boundary between stream-aware and always-alive nodes, not by making derived partial-completion-aware.
 
-### 2.5 Streaming Topology Examples — Missing
+### 2.5 Streaming Topology Examples — Resolved
 
-**The `state-management.md` vision** sells streaming hard (AI chat, agentic workflows, real-time data). The architecture doc has no streaming topology examples.
+Add a section to the architecture doc showing how the two-tier model maps to real applications. These examples demonstrate the boundary between the immortal state graph and stream-aware producers.
 
-**Action:** Add a section showing 2-3 streaming topologies mapped to the architecture:
+#### 1. AI chat with cancellation
 
-1. **AI chat with cancellation:**
-   ```
-   userInput(state) → debounce → switchMap(fetchLLM) → scan(accumulate) → chatMessages(derived)
-                                                                            ↓
-                                                                        effect(renderUI)
-   ```
-   - `userInput`: state node
-   - `debounce`: tier 2 producer (cycle boundary)
-   - `switchMap`: tier 2 producer (auto-cancels previous fetch)
-   - `scan`: tier 1 operator (accumulates chunks)
-   - `chatMessages`: derived (always-current view)
-   - `effect`: runs UI update
+```
+userInput(state) ─→ debounce ─→ switchMap(fetchLLM) ─→ scan(accumulate)
+                    tier 2        tier 2                  tier 1
+                    (cycle        (cycle boundary,        (stateful
+                    boundary)     auto-cancels prev)      accumulator)
+                                                             │
+                              chatMessages(derived) ←────────┘
+                                     │
+                              effect(renderUI)
+```
 
-2. **Diamond with shared config:**
-   ```
-        config(state)
-         /         \
-   transform₁    transform₂
-         \         /
-        combined(derived) → effect
-   ```
-   - Diamond resolution ensures `combined` computes once per config change
+**Tier boundary:** `debounce` and `switchMap` are tier 2 producers — each `emit()` starts a fresh DIRTY+DATA cycle. `scan` is tier 1 (operator) — participates in diamond resolution. `chatMessages` is derived — always-current, immortal.
 
-3. **Real-time dashboard:**
-   ```
-   wsSource(producer) → throttle → state(latestPrice)
-                                        ↓
-                                   derived([latestPrice, portfolio], computePnL)
-                                        ↓
-                                   effect(updateChart)
-   ```
+**Cancellation:** When `userInput.set("new query")`, `switchMap` auto-cancels the in-flight fetch and starts a new one. No AbortController juggling — it's automatic.
 
-### 2.6 "What We Decided NOT to Build" — Missing
+**Error handling:** Wrap `switchMap` with `rescue` to handle network errors:
+```ts
+const stream = pipe(userInput, debounce(300),
+  switchMap(q => fromAsyncIter(fetchLLM(q))),
+  rescue(err => of("Error: " + err.message))  // fallback value
+)
+const messages = pipe(stream, scan((acc, chunk) => acc + chunk, ""))
+```
 
-**Action:** Add a section explicitly noting explored-and-dropped designs:
-- ADOPT protocol: explored for topology handoff, unnecessary with eager dep connection
-- Chain composition as literal callbag function composition: explored, inlined for performance
-- Plugin system: explored for node assembly, monolithic classes are simpler and faster
-- Lazy derived: explored, rejected in favor of eager connection (STANDALONE always-current)
+#### 2. Diamond with memoization cascade
 
-This prevents future contributors from re-proposing these designs without understanding the context.
+```
+         config(state)
+          /          \
+    priceCalc          taxCalc
+  (derived, equals)  (derived, equals)
+          \          /
+       total(derived) ──→ effect(updateUI)
+```
 
-### 2.7 §17 Open Questions — Update
+**Diamond resolution:** `total` computes exactly once per `config` change. Bitmask waits for both paths.
 
-**§17.1 (Initial value on first connection):** Resolved. STANDALONE mode ensures `_cachedValue` is populated at construction. When C subscribes, C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. No re-trigger needed. **Mark resolved.**
+**Memoization cascade:** If `config` changes but `priceCalc` and `taxCalc` both produce the same output (equals guard fires), both send RESOLVED. `total` sees all-RESOLVED → skips `fn()` entirely → forwards RESOLVED → `effect` skips `run()`. Zero wasted computation.
 
-**New open questions to add:**
-- `getLive()` synchronous pull-through design (§2.3 above)
-- Should multi-dep derived survive partial dep completion? (§2.4 above)
-- Should the raw callbag interop wrapper be a core utility or an extra? (§1.4 above)
+#### 3. Real-time dashboard with stream-to-state boundary
+
+```
+wsConnection(producer) ──→ rescue(reconnect) ──→ throttle(100ms)
+    stream-aware              error boundary       tier 2
+                                                      │
+                              latestPrice(state) ←────┘
+                                     │
+              derived([latestPrice, portfolio], computePnL)
+                                     │
+                              effect(updateChart)
+```
+
+**Stream-to-state boundary:** `wsConnection` is a producer that may error/complete. `rescue` wraps it to stay alive (reconnect on error). `throttle` rate-limits. The result feeds into `latestPrice(state)` — the immortal state graph. Everything below `latestPrice` is glitch-free, always-alive.
+
+**The pattern:** stream → error handling → rate limiting → state → derived graph. The boundary is where `rescue`/`retry` live.
+
+#### 4. Agentic workflow with tool calls
+
+```
+agentMemory(state) ──────────────────────────┐
+                                              │
+userMessage(state) ─→ derived([memory, msg],  │
+                        buildContext)          │
+                           │                  │
+                    switchMap(callLLM)         │
+                      tier 2                  │
+                           │                  │
+                    scan(parseToolCalls)       │
+                      tier 1                  │
+                           │                  │
+                    effect([toolCalls], () => {│
+                      // execute tools        │
+                      // update agentMemory ──┘  (feedback loop via state)
+                    })
+```
+
+**Feedback loop:** `effect` writes tool results back into `agentMemory(state)`, which feeds back into the context `derived`. This is safe because `state.set()` starts a new DIRTY+DATA cycle — no circular dependency. The graph is a DAG at any point in time; the feedback loop is temporal, not structural.
+
+### 2.6 "What We Decided NOT to Build" — Resolved
+
+Add this as a section to the architecture doc. Prevents future re-proposals.
+
+#### ADOPT protocol (REQUEST_ADOPT / GRANT_ADOPT)
+
+**Explored:** A type 3 handshake for topology handoff when external subscribers arrive at a derived node's output slot. The spec designed a routeStack-based signaling mechanism where REQUEST_ADOPT propagates downstream and GRANT_ADOPT routes back upstream.
+
+**Why dropped:** The implementation uses eager dep connection for derived (STANDALONE mode). Dep connections are closures from `_connectUpstream()`, independent of the output slot. The output slot is purely a dispatch point — `null → fn → Set` transitions are mechanical with no upstream awareness. There is no internal terminator to hand off.
+
+**When would it be needed:** Only if derived nodes used lazy dep connection (connect on first subscriber, disconnect on last). That model was rejected because derived stores must always have a current value via `get()`.
+
+#### Literal chain composition
+
+**Explored:** Each transform node assembles `_chain` — a composed callbag source function: `dep.source → stateIntercept → map(fn) → valueIntercept → output slot`. Nodes would expose a `sources[]` array of chain entries for downstream adoption.
+
+**Why dropped:** The conceptual stages (state tracking → transform → value caching → dispatch) are real but inlined into dep subscription handler closures. Composing them as separate callbag functions would add allocation per signal and indirection per stage. The inline approach is zero-allocation — the closure captures `this` and writes in-place.
+
+**The mental model still holds:** The signal flow IS `dep.source → state tracking → transform → value caching → output dispatch`. Just expressed as inline code, not composed functions.
+
+#### Plugin system (StorePlugin, FanInPlugin, ControlPlugin, etc.)
+
+**Explored:** Nodes assembled from discrete capability bundles. Each plugin contributes a subset of behavior; nodes use only what they need.
+
+**Why dropped:** Monolithic classes (`ProducerImpl`, `DerivedImpl`, `OperatorImpl`) are simpler, faster (no dispatch overhead), and maintain stable V8 hidden classes. The node types have fixed responsibilities with no current need for runtime composition. Effect is a pure closure — even simpler.
+
+**When would it be needed:** If new node types emerged that shared some but not all capabilities with existing ones. Currently, the three roles (source, transform, sink) cover all cases.
+
+#### Lazy derived
+
+**Explored:** Derived nodes only connect to deps when they have external subscribers. Disconnect on last subscriber leave.
+
+**Why dropped:** Derived stores must always return a current value via `get()`. Lazy connection means `get()` would need to pull-recompute on demand (expensive, no caching benefit) or return stale values (misleading). Eager connection (STANDALONE) keeps `_cachedValue` always current with zero additional API complexity.
+
+**Trade-off accepted:** Derived nodes hold dep references permanently (can't be GC'd while deps live). This is intentional — derived stores are assumed to be app-lifetime objects. Upstream END (completion/error) breaks the reference cycle via `_handleEnd()`.
+
+#### Partial dep completion survival
+
+**Explored:** When one dep in a multi-dep derived completes, should the derived continue with remaining deps?
+
+**Why dropped:** The computation unit is atomic — like `try { a(); b(); }` in synchronous code. If dep A terminates, calling `fn()` with a zombie dep that will never update again produces meaningless results. Error recovery belongs at the dep boundary (`rescue`), not inside the multi-dep node. See §2.2 for full rationale.
+
+#### Dedicated `catch` operator
+
+**Explored:** A `catch` extra as an alias or alternative to `rescue` for familiarity with JS `try/catch` and `Promise.catch()`.
+
+**Why dropped:** `catch` is a JS reserved word — can't be a bare import identifier. `rescue` already IS catch (takes error, returns recovery source). Adding `catchError` (RxJS name) would be a pure alias with no new capability. `rescue` + `retry` together cover all error recovery patterns.
+
+### 2.7 Raw Callbag Interop Wrapper — Design
+
+**Location:** `extra/wrap` (not `adapter/` — adapters are for external systems like Kafka/Redis; this is callbag ecosystem interop).
+
+**The problem (recap):** A raw callbag operator is a plain `(type, data) => void` function — no `source()`, no `_output`, no multicast. It can't be subscribed to by multiple downstream nodes, and it swallows STATE signals (breaks diamond resolution).
+
+**What the wrapper must do:**
+
+1. **Output slot + multicast** — expose `source()` with the standard null → fn → Set output slot
+2. **STATE signal forwarding** — intercept STATE from upstream, route around the raw op, re-dispatch downstream
+3. **`get()` / value caching** — maintain `_value`, return last value
+
+#### One function, two overloads
+
+The three raw callbag kinds have different shapes and different wrapping needs:
+
+| Kind | Raw shape | Wrapping | Tier |
+|------|-----------|----------|------|
+| Source | `(type: 0, sink) => void` | No input Store. Each DATA starts DIRTY+DATA cycle. | Tier 2 |
+| Operator | `(source: Callbag) => Callbag` | Has input Store. STATE bypasses raw op. | Tier 1 |
+| Sink | `(source: Callbag) => void` | **Not needed** — ignores STATE harmlessly | N/A |
+
+Sinks don't need wrapping. Sources and operators are distinguished by whether an input Store is provided. **One `wrap` function with overloads:**
+
+```ts
+type Callbag = (type: number, payload?: any) => void
+
+// Overload 1: wrap a raw callbag source → tier 2 store
+function wrap<T>(rawSource: Callbag): Store<T>
+
+// Overload 2: wrap a raw callbag operator with input → tier 1 store
+function wrap<A, B>(input: Store<A>, rawOp: (source: Callbag) => Callbag): Store<B>
+
+function wrap<T>(
+  sourceOrInput: Callbag | Store<any>,
+  rawOp?: (source: Callbag) => Callbag
+): Store<T> {
+  if (rawOp) return wrapOp(sourceOrInput as Store<any>, rawOp)
+  return wrapSource(sourceOrInput as Callbag)
+}
+```
+
+Detection: if two args → operator wrapping. If one arg → source wrapping. TypeScript overloads give correct types at the call site.
+
+#### Source wrapping (tier 2)
+
+No upstream store dep. Each DATA from the raw source starts a fresh DIRTY+DATA cycle via `autoDirty`:
+
+```ts
+function wrapSource<T>(rawSource: Callbag): Store<T> {
+  return operator<T>(
+    [],
+    ({ emit, signal, complete, error }) => {
+      let talkback: any
+      rawSource(START, (type: number, data: any) => {
+        if (type === START) talkback = data
+        if (type === DATA)  { signal(DIRTY); emit(data) }
+        if (type === END)   { data ? error(data) : complete() }
+      })
+      return () => { talkback?.(END) }
+    },
+    { kind: 'wrap' }
+  )
+}
+```
+
+#### Operator wrapping (tier 1, STATE bypass)
+
+The key insight: the wrapper sits *around* the raw op, not inside it. STATE flows around the raw op (directly to the output slot), DATA flows through it (into the raw op, out as transformed values). One subscription to the input, split into two paths:
+
+```
+input.source ──→ wrapper intercept
+                   ├── STATE ──→ signal(data) ──→ output slot  (tier 1)
+                   └── DATA  ──→ rawOp ──→ emit(transformed)  (through raw op)
+```
+
+This makes the wrapped operator a **tier 1 participant** — STATE (DIRTY/RESOLVED) flows through it correctly for diamond resolution.
+
+```ts
+function wrapOp<A, B>(input: Store<A>, rawOp: (source: Callbag) => Callbag): Store<B> {
+  return operator<B>(
+    [],  // no typed deps — single manual subscription, split into STATE + DATA paths
+    ({ emit, signal, complete, error }) => {
+      // Create a synthetic callbag source that strips STATE before feeding rawOp.
+      // The raw op sees clean type 0/1/2 callbag protocol.
+      const stripped: Callbag = (type: number, payload: any) => {
+        if (type !== START) return
+        const sink = payload
+        input.source(START, (t: number, d: any) => {
+          if (t === START) sink(START, d)    // pass talkback through to raw op
+          if (t === STATE) signal(d)         // intercept STATE → forward to our output
+          if (t === DATA)  sink(DATA, d)     // let raw op see DATA
+          if (t === END)   sink(END, d)      // let raw op see END
+        })
+      }
+
+      // Apply the raw callbag operator to the stripped source
+      const transformed = rawOp(stripped)
+      let rawTalkback: any
+      transformed(START, (type: number, data: any) => {
+        if (type === START) rawTalkback = data
+        if (type === DATA)  emit(data as B)
+        if (type === END)   data ? error(data) : complete()
+      })
+
+      return () => { rawTalkback?.(END) }
+    },
+    { kind: 'wrap' }
+  )
+}
+```
+
+**Why operator wrapping works for diamonds:** Given `A → wrap(A, rawMap) → C` and `A → B → C`:
+
+1. A sends DIRTY → `wrap`'s intercept catches STATE → `signal(DIRTY)` → C gets DIRTY from dep 0
+2. A sends DIRTY → B forwards → C gets DIRTY from dep 1 → bitmask `0b11`
+3. A sends DATA → `wrap`'s intercept lets DATA through to rawOp → rawOp transforms → `emit(result)` → C gets DATA from dep 0 → clears bit 0
+4. A sends DATA → B computes → C gets DATA from dep 1 → clears bit 1 → `dirtyDeps === 0` → C recomputes once
+
+Diamond resolved correctly. The wrapped operator is a full tier 1 participant.
+
+**One subscription, two paths.** The intercept sits between `input.source` and the raw op. STATE goes to `signal()`, DATA goes to the raw op. No double-subscription. No wasted dispatch.
+
+#### Constraint: tier 1 wrap is synchronous map-only
+
+`wrap(input, rawOp)` assumes 1:1 synchronous DATA in → DATA out (map-like transforms). Two categories of raw callbag operators **must not** use `wrap`:
+
+1. **Filtering operators** (e.g., `filter`, `take`, `skip`): Drop DATA without emitting — downstream bitmasks get stuck because DIRTY was forwarded but no DATA or RESOLVED follows.
+
+2. **Tier 2 operators** (async/timer/dynamic subscription — e.g., `debounce`, `throttle`, `delay`, `flatMap`): Decouple the input-output timing. DATA out is not synchronous with DATA in, so STATE bypass (which forwarded DIRTY immediately) creates a DIRTY→value timing mismatch that breaks diamond resolution.
+
+**Rule:** Only synchronous, 1:1 map-like raw callbag operators can use `wrap(input, rawOp)`. For filtering or tier 2 raw operators, use `operator()` directly with explicit signal handling (RESOLVED for filters, `signal(DIRTY); emit()` cycles for tier 2).
+
+**Action:** Implement `wrap` in `extra/wrap`. ~50 lines total (overloads + two internal implementations). Operator wrapping is tier 1 with STATE bypass. Source wrapping is tier 2. Document the filter constraint.
+
+### 2.8 §17 Open Questions — Update
+
+**§17.1 (Initial value on first connection):** Resolved. STANDALONE mode ensures `_cachedValue` is populated at construction. **Mark resolved.**
+
+**Remaining open questions:**
+- `getLive()` synchronous pull-through design (§2.3) — P3, future
 
 ---
 
 ## Summary
 
-| Section | Action | Priority |
-|---------|--------|----------|
-| §6 ADOPT protocol | Remove protocol, expand output slot transitions | P0 — spec-reality drift |
-| §5 Chain model | Reframe as conceptual model | P1 — accurate but misleading |
-| §16 Plugin composition | Remove entirely, relocate init timing to §10 | P1 — speculative |
-| §16 Raw callbag wrapper | Redesign as interop multicast section | P2 — real but niche |
-| Error & completion | Add section — two-tier lifetime model, rescue=try/catch | P1 — resolved design |
-| Push-phase memoization | Document the cascade (already implemented) | P1 — differentiator |
-| Streaming topologies | Add examples | P2 — supports state-management.md vision |
-| "Not built" section | Add | P2 — prevents re-proposals |
-| §17 open questions | Update (resolve 17.1, add new) | P1 — stale |
-| `getLive()` | Add to open questions | P3 — future |
+### Resolved — ready to apply to architecture doc
+
+| Item | Resolution |
+|------|-----------|
+| §6 ADOPT protocol | Remove. Output slot transitions are mechanical. Eager dep connection makes handoff unnecessary. |
+| §5 Chain model | Reframe as conceptual model. Stages are real, implementation is inlined. |
+| §16 Plugin composition | Remove. Monolithic classes are simpler and faster. Relocate init timing to §10. |
+| §16 Raw callbag wrapper | Redesign as `extra/wrap` — one function, two overloads. Source=tier 2, operator=tier 1 (STATE bypass). |
+| Error & completion | Two-tier lifetime: state+derived immortal, producer+operator stream-aware. `rescue` = try/catch. |
+| Push-phase memoization | 4-layer cascade fully implemented. Document as first-class differentiator. |
+| Completion semantics | One dep ends → node ends. Atomic computation. Solved at stream-to-state boundary. |
+| Streaming topologies | 4 examples: AI chat, diamond memoization, real-time dashboard, agentic workflow. |
+| "Not built" section | 6 items documented with rationale: ADOPT, chains, plugins, lazy derived, partial completion, catch op. |
+| §17.1 initial value | Resolved by STANDALONE mode. |
+
+### Open
+
+| Item | Status | Priority |
+|------|--------|----------|
+| `getLive()` synchronous pull-through | Design sketch in §2.3 | P3 — future |
