@@ -248,6 +248,120 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 
 ---
 
+## v4 optimization considerations
+
+The output slot model, plugin composition, and ADOPT protocol introduce new performance surfaces. This section maps foreseeable optimization targets and trade-offs.
+
+### Construction time
+
+**Chain assembly cost.** Each transform node assembles `_chain` at construction: composing closures for stateIntercept, map(fn), valueIntercept, and the output slot. This is a fixed one-time cost per node. Closures are cheap (V8 allocates a closure context ~50-100 bytes), but the chain can be 4-5 closures deep per node.
+
+- **Optimization:** Fuse stateIntercept + map + valueIntercept into a single closure where possible. Single-dep nodes with no `equals` option can collapse the entire chain into one function that reads upstream, applies fn, writes `_value`, updates `_status`, and dispatches to the output slot. This eliminates 2-3 intermediate closure allocations per node.
+- **Tradeoff:** Fused closures are harder to debug (Inspector hooks need explicit call sites rather than intercept points). Consider a debug/production split: full chain in dev, fused chain in prod.
+
+**Plugin wiring cost.** Each plugin (StorePlugin, ControlPlugin, SourcePlugin, AdoptPlugin, optionally FanInPlugin) adds properties and methods to the node. If plugins are mix-in style (copy properties onto `this`), construction pays for each plugin's setup.
+
+- **Optimization:** Use class hierarchies or conditional prototype chains rather than runtime mix-ins. E.g., `SingleDepOperator extends BaseNode` vs `MultiDepOperator extends BaseNode` — V8 creates stable hidden classes for each, avoiding the megamorphic deopt that mix-ins cause.
+- **Optimization:** For the common single-dep case (most operators), skip FanInPlugin entirely — no bitmask allocation, no `depValues[]` array. The savings is one `number` and one `Array` per single-dep node.
+
+**Output slot allocation.** The output slot starts as `null` (no subscribers), becomes a single function reference (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). This is already optimal — lazy allocation matches the common case where most nodes have 0-1 subscribers.
+
+### Runtime (signal propagation)
+
+**Output slot dispatch overhead.** In SINGLE mode, the output slot is a direct function call — zero overhead vs v3. In MULTI mode, it iterates a Set. The question is whether the SINGLE → MULTI transition introduces a branch cost.
+
+- **Optimization:** Use a flags bit (`O_MULTI`) to distinguish modes. A single `if (flags & O_MULTI)` branch is cheaper than checking `typeof _sinks === 'function'` or `_sinks instanceof Set`.
+- **Expected impact:** Negligible for most graphs. Only matters for nodes with high fan-out (10+ subscribers) where Set iteration dominates.
+
+**Tap cost per signal.** Every DATA signal through B._chain writes `B._value` and `B._status` — two property writes per node per signal. In a deep chain (A → B → C → D → E), a single state change causes 2 × depth property writes.
+
+- **Optimization:** If a node has no external `.get()` callers and no Inspector hooks, the tap writes are wasted. A `O_TAP_NEEDED` flag could skip the writes when the node is purely a pipeline passthrough.
+- **Tradeoff:** Determining "no external .get() callers" statically is hard. This is a speculative optimization — measure first.
+
+**REQUEST_ADOPT / GRANT_ADOPT cost.** The ADOPT protocol runs once per topology change (subscribe/unsubscribe), not per signal. It sends two type 3 signals through the chain. This is negligible unless topology changes happen at high frequency (e.g., dynamic subscription operators).
+
+- **Optimization:** For static topologies (most apps), the ADOPT protocol fires only during initialization. No optimization needed.
+- **Optimization:** For dynamic topologies (switchMap, flat), the inner subscription should skip the ADOPT protocol entirely — inner nodes are ephemeral and don't need terminator handoff. A `O_SKIP_ADOPT` flag on ephemeral inner chains avoids the round-trip.
+
+**FanIn bitmask at convergence points.** The bitmask algorithm is O(1) per signal (bitwise ops). For multi-dep nodes with > 32 deps, a fallback to `Uint32Array` or multiple bitmask words is needed.
+
+- **Optimization:** Keep the fast path as a single `number` for ≤ 32 deps (covers ~100% of real-world cases). Only allocate the typed array fallback if `deps.length > 32`.
+
+### Memory footprint
+
+**Per-node cost breakdown (estimated for v4):**
+
+| Component | Bytes (approx.) | Notes |
+|-----------|-----------------|-------|
+| `_value` | 8 | pointer/inline |
+| `_status` | 8 | enum/string ref |
+| `_flags` | 8 | packed bitmask |
+| `_chain` closure | 50-100 | V8 closure context |
+| Output slot ref | 8 | null / fn / Set ref |
+| Talkback ref | 8 | upstream talkback |
+| Inspector WeakRef | 16 | when Inspector.enabled |
+| FanInPlugin (if multi-dep) | +40 | bitmask + depValues array |
+| AdoptPlugin state | +8 | route stack ref (null when idle) |
+| **Total (single-dep, Inspector OFF)** | **~100-160** | |
+| **Total (multi-dep, Inspector ON)** | **~200-260** | |
+
+**Comparison to v3:** v3 stores are ~354 bytes (Inspector OFF). v4 should be competitive or smaller because:
+- No separate `_sinks` Set until MULTI mode (v3 always allocated one)
+- No per-connection action wrapper object (v4 uses `onConnect`/`onDisconnect` lifecycle)
+- FanInPlugin only on multi-dep nodes (v3 allocated bitmask unconditionally in derived/effect)
+
+**Output slot Set allocation.** Sets are ~200 bytes each. Nodes with ≤1 subscriber never allocate one. For graphs where most nodes feed into exactly one downstream (typical), this saves ~200 bytes × (total nodes - fan-out points).
+
+**Chain closure sharing.** When multiple nodes use the same transform function (e.g., `map(x => x * 2)` reused), V8 shares the function object. But the closure *context* (capturing `_value`, `_status` refs) is per-node. No sharing opportunity there.
+
+### Batch + output slot interaction
+
+Batch defers DATA, not DIRTY. In v4, DIRTY propagates through output slots immediately (phase 1), then DATA propagates at batch drain (phase 2). Output slots in MULTI mode dispatch DIRTY to all sinks synchronously — this is correct but means DIRTY fan-out is unbatched.
+
+- **Observation:** This is identical to v3 behavior (DIRTY was never deferred). No regression.
+- **Potential optimization:** If DIRTY fan-out becomes a bottleneck (unlikely — DIRTY is a single Symbol, no computation), batch could defer DIRTY too. But this breaks the invariant that all dirty state is established before DATA flows, which is critical for diamond resolution. **Do not defer DIRTY.**
+
+### Fused pipe + output slot fusion
+
+v4 splits the fused pipe into two variants:
+
+- **`pipeRaw(source, ...fns)`** — fuses into a single `operator()` store (lazy, DISCONNECTED when no subscribers). Bare minimum — no auto-connect, no internal terminator. This is the "raw" flavor for hot paths where the caller controls the subscription lifecycle.
+- **`pipeDerived(source, ...fns)`** — fuses into a single `derived()` store (auto-connects, STANDALONE when no subscribers, `.get()` always current). This is the renamed version of what v3 called `pipeRaw`.
+
+Both fuse N transform functions into one `_chain` with one output slot instead of N chains with N output slots. The savings are multiplicative: N-1 fewer chains, output slots, taps, and Inspector registrations.
+
+- **v4 enhancement:** Both variants should skip creating intermediate nodes entirely. Each transform function is folded into a single composed `fn` inside one `_chain`. The stateIntercept and valueIntercept wrap only the final composed function.
+- `SKIP` sentinel provides filter semantics in both variants.
+
+### Lazy plugin instantiation
+
+Not all plugins are needed at construction time:
+
+| Plugin | When actually needed |
+|--------|---------------------|
+| StorePlugin | Always (defines `_value`, `_status`, `get()`) |
+| ControlPlugin | Always for tier 1 (STATE forwarding is part of chain assembly) |
+| FanInPlugin | Only for multi-dep nodes |
+| SourcePlugin | On first `source(START, sink)` call |
+| AdoptPlugin | On first topology change |
+
+- **Optimization:** SourcePlugin and AdoptPlugin could be lazily mixed in on first use. But this changes the hidden class shape after construction, which is a V8 deopt. **Not recommended.** Better to pre-declare all fields in the constructor (even as `null`) to keep the hidden class stable.
+
+### Summary of v4 optimization priorities
+
+| Priority | Optimization | Expected impact | Effort |
+|----------|-------------|-----------------|--------|
+| **P0** | Skip FanInPlugin for single-dep nodes | ~40 bytes/node, fewer allocations | Low |
+| **P0** | Lazy output slot (null → fn → Set) | ~200 bytes saved for ≤1 subscriber | Low (already designed) |
+| **P1** | Fused chain closure for single-dep | 2-3 fewer closures per node (~150 bytes) | Medium |
+| **P1** | `O_SKIP_ADOPT` for ephemeral inner chains | Avoids ADOPT round-trip in switchMap/flat | Low |
+| **P2** | `O_TAP_NEEDED` flag to skip tap writes | 2 fewer writes per signal per passthrough node | Medium (needs static analysis) |
+| **P2** | Class hierarchy instead of runtime mix-ins | Stable hidden classes, avoids megamorphic | Medium |
+| **P3** | pipeRaw/pipeDerived fusion with single chain | N-1 fewer chains for N-step pipes | Low (extends existing design) |
+| **P3** | Compile-time Inspector removal | Zero overhead + smaller bundle | Medium (tooling) |
+
+---
+
 ## Summary
 
 | Optimization | Status | Impact | When to use |
@@ -257,7 +371,7 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 | `equals` on derived | Built-in | Push-phase memoization via RESOLVED — skips entire downstream subtrees | Stabilizing derived outputs |
 | `equals` on producer | Built-in | Skip emit for equal values | High-frequency producers |
 | `batch()` | Built-in | Coalesces multi-set patterns | Concurrent state updates |
-| `pipeRaw()` + `SKIP` | Built-in | Single derived store for pipe chain | Hot pipe chains, SKIP filter semantics |
+| `pipeRaw()` / `pipeDerived()` + `SKIP` | Built-in | Single fused store for pipe chain | Hot pipe chains, SKIP filter semantics |
 | Raw callbag interop | Built-in | ~4x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
 | Class + lazy sinks | Built-in | 10x memory reduction, 14.6x faster store creation | All stores and effects |
