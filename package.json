@@ -69,5 +69,8 @@
 		"tsup": "^8.5.1",
 		"typescript": "^5.7.0",
 		"vitest": "^3.0.0"
+	},
+	"dependencies": {
+		"bmad-method": "^6.2.0"
 	}
 }
