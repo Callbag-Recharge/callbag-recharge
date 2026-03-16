@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
-import { DATA, END, RESOLVED, START, STATE } from "../core/protocol";
+import type { NodeStatus } from "../core/protocol";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
 /**
@@ -14,11 +15,12 @@ import type { Store } from "../core/types";
  * Stateful: each branch maintains its own last value via its cached value.
  * get() returns the last value that went to that branch, or undefined.
  *
- * v3: type 3 DIRTY is forwarded to both branches. On DATA, the matching
+ * v4: type 3 DIRTY is forwarded to both branches. On DATA, the matching
  * branch receives DATA while the non-matching branch receives RESOLVED
  * (since it was marked dirty but its value didn't change). Both branches
  * receive END when upstream completes. Late subscribers after completion
- * receive END immediately.
+ * receive END immediately. Unknown STATE signals forwarded for v4
+ * forward-compat. _status tracked per branch for Inspector.
  */
 export function partition<A>(
 	predicate: (value: A) => boolean,
@@ -26,6 +28,8 @@ export function partition<A>(
 	return (input: Store<A>) => {
 		let trueValue: A | undefined;
 		let falseValue: A | undefined;
+		let trueStatus: NodeStatus = "DISCONNECTED";
+		let falseStatus: NodeStatus = "DISCONNECTED";
 		const trueSinks = new Set<(type: number, data?: unknown) => void>();
 		const falseSinks = new Set<(type: number, data?: unknown) => void>();
 		let talkback: ((type: number) => void) | null = null;
@@ -39,17 +43,28 @@ export function partition<A>(
 					return;
 				}
 				if (type === STATE) {
+					if (data === DIRTY) {
+						trueStatus = "DIRTY";
+						falseStatus = "DIRTY";
+					} else if (data === RESOLVED) {
+						trueStatus = "RESOLVED";
+						falseStatus = "RESOLVED";
+					}
 					for (const sink of trueSinks) sink(STATE, data);
 					for (const sink of falseSinks) sink(STATE, data);
 				}
 				if (type === DATA) {
 					if (predicate(data)) {
 						trueValue = data;
+						trueStatus = "SETTLED";
+						falseStatus = "RESOLVED";
 						for (const sink of trueSinks) sink(DATA, trueValue);
 						// Non-matching branch got DIRTY but value didn't change
 						for (const sink of falseSinks) sink(STATE, RESOLVED);
 					} else {
 						falseValue = data;
+						falseStatus = "SETTLED";
+						trueStatus = "RESOLVED";
 						for (const sink of falseSinks) sink(DATA, falseValue);
 						// Non-matching branch got DIRTY but value didn't change
 						for (const sink of trueSinks) sink(STATE, RESOLVED);
@@ -59,6 +74,15 @@ export function partition<A>(
 					talkback = null;
 					connected = false;
 					completed = true;
+					if (data !== undefined) {
+						trueStatus = "ERRORED";
+						falseStatus = "ERRORED";
+					} else {
+						trueStatus = "COMPLETED";
+						falseStatus = "COMPLETED";
+					}
+					// Snapshot before clearing — prevents reentrancy issues if a
+					// sink's END handler causes another sink to unsubscribe.
 					const trueSnapshot = [...trueSinks];
 					const falseSnapshot = [...falseSinks];
 					trueSinks.clear();
@@ -75,6 +99,8 @@ export function partition<A>(
 				talkback = null;
 			}
 			connected = false;
+			trueStatus = "DISCONNECTED";
+			falseStatus = "DISCONNECTED";
 		}
 
 		function totalSinks(): number {
@@ -142,6 +168,16 @@ export function partition<A>(
 				}
 			},
 		};
+
+		// Use defineProperty so _status reads live from closure variables
+		Object.defineProperty(trueStore, "_status", {
+			get: () => trueStatus,
+			enumerable: true,
+		});
+		Object.defineProperty(falseStore, "_status", {
+			get: () => falseStatus,
+			enumerable: true,
+		});
 
 		Inspector.register(trueStore, { kind: "partition(true)" });
 		Inspector.register(falseStore, { kind: "partition(false)" });

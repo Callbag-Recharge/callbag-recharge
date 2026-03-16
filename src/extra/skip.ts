@@ -1,5 +1,5 @@
 import { operator } from "../core/operator";
-import { DATA, END, STATE } from "../core/protocol";
+import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
@@ -22,7 +22,11 @@ export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 
 				return (_dep, type, data) => {
 					if (type === STATE) {
-						if (emissionCount >= n) signal(data);
+						if (data === DIRTY || data === RESOLVED) {
+							if (emissionCount >= n) signal(data);
+						} else {
+							signal(data); // Forward unknown STATE signals always (v4 forward-compat)
+						}
 					}
 					if (type === DATA) {
 						emissionCount++;

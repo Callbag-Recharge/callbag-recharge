@@ -38,6 +38,8 @@ export function merge<T>(...sources: Store<T>[]): Store<T | undefined> {
 							dirtyDeps &= ~depBit;
 							if (dirtyDeps === 0) signal(RESOLVED);
 						}
+					} else {
+						signal(data); // Forward unknown STATE signals (v4 forward-compat)
 					}
 				}
 				if (type === DATA) {

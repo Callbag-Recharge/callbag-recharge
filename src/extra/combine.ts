@@ -51,6 +51,8 @@ export function combine<Sources extends Store<unknown>[]>(
 								}
 							}
 						}
+					} else {
+						signal(data); // Forward unknown STATE signals (v4 forward-compat)
 					}
 				}
 				if (type === DATA) {
