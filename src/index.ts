@@ -12,6 +12,7 @@ export { operator } from "./core/operator";
 export { pipe } from "./core/pipe";
 // General-purpose source primitive
 export { producer } from "./core/producer";
+export type { NodeStatus } from "./core/protocol";
 // Protocol (for advanced use / interop)
 export {
 	batch,
@@ -27,7 +28,6 @@ export {
 	START,
 	STATE,
 } from "./core/protocol";
-export type { NodeStatus } from "./core/protocol";
 // Core primitives
 export { state } from "./core/state";
 

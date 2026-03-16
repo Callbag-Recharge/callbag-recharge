@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { START } from "../../core/protocol";
 import { combine } from "../../extra/combine";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
@@ -19,7 +20,6 @@ import { switchMap } from "../../extra/switchMap";
 import { tap } from "../../extra/tap";
 import { throttle } from "../../extra/throttle";
 import { Inspector, pipe, producer, state } from "../../index";
-import { START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -276,10 +276,7 @@ describe("pull-based get() without subscriber", () => {
 
 	it("pipeRaw: get() evaluates pipeline without subscriber", () => {
 		const s = state(2);
-		const piped = pipeRaw(
-			s,
-			(v: number) => v * 10,
-		);
+		const piped = pipeRaw(s, (v: number) => v * 10);
 
 		expect(piped.get()).toBe(20);
 		s.set(3);
@@ -288,10 +285,7 @@ describe("pull-based get() without subscriber", () => {
 
 	it("pipeRaw: SKIP returns cached value on get()", () => {
 		const s = state(2);
-		const piped = pipeRaw(
-			s,
-			(v: number) => (v > 5 ? v : SKIP),
-		);
+		const piped = pipeRaw(s, (v: number) => (v > 5 ? v : SKIP));
 
 		expect(piped.get()).toBeUndefined(); // initial 2 < 5 → SKIP, no cache
 		s.set(10);

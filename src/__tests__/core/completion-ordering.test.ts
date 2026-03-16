@@ -6,9 +6,9 @@
  * _flags bitmask and snapshot-free completion optimizations.
  */
 import { describe, expect, it, vi } from "vitest";
+import { DATA, END, START, STATE } from "../../core/protocol";
 import { subscribe } from "../../extra/subscribe";
 import { derived, effect, operator, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../core/protocol";
 
 describe("operator complete/error disconnects upstream", () => {
 	it("complete() sends END to upstream deps", () => {
@@ -571,10 +571,7 @@ describe("derived handles upstream END", () => {
 			},
 		};
 
-		const d = derived(
-			[trackedS1 as any, trackedP as any],
-			() => (s1.get() ?? 0) + (p.get() ?? 0),
-		);
+		const d = derived([trackedS1 as any, trackedP as any], () => (s1.get() ?? 0) + (p.get() ?? 0));
 		subscribe(d, () => {});
 
 		// Complete p → derived should disconnect both deps

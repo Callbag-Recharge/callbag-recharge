@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { END, START } from "../../core/protocol";
 import { elementAt } from "../../extra/elementAt";
 import { find } from "../../extra/find";
 import { first } from "../../extra/first";
@@ -7,7 +8,6 @@ import { last } from "../../extra/last";
 import { partition } from "../../extra/partition";
 import { subscribe } from "../../extra/subscribe";
 import { Inspector, pipe, producer, state } from "../../index";
-import { END, START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

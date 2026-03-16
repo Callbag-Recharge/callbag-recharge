@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { END, START } from "../../core/protocol";
 import { buffer } from "../../extra/buffer";
 import { empty } from "../../extra/empty";
 import { fromEvent } from "../../extra/fromEvent";
@@ -12,7 +13,6 @@ import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { throwError } from "../../extra/throwError";
 import { Inspector, pipe, producer, state } from "../../index";
-import { END, START } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -496,9 +496,13 @@ describe("buffer", () => {
 		const b = pipe(p, buffer(notifier));
 		const values: number[][] = [];
 		let ended = false;
-		subscribe(b, (v) => {
-			if (v.length > 0) values.push([...v]);
-		}, { onEnd: () => (ended = true) });
+		subscribe(
+			b,
+			(v) => {
+				if (v.length > 0) values.push([...v]);
+			},
+			{ onEnd: () => (ended = true) },
+		);
 
 		p.emit(1);
 		p.emit(2);
@@ -530,9 +534,13 @@ describe("buffer", () => {
 		const b = pipe(s, buffer(notifierProd));
 		const values: number[][] = [];
 		let ended = false;
-		subscribe(b, (v) => {
-			if (v.length > 0) values.push([...v]);
-		}, { onEnd: () => (ended = true) });
+		subscribe(
+			b,
+			(v) => {
+				if (v.length > 0) values.push([...v]);
+			},
+			{ onEnd: () => (ended = true) },
+		);
 
 		s.set(1);
 		s.set(2);
@@ -546,7 +554,9 @@ describe("buffer", () => {
 	it("cleanup releases both subscriptions", () => {
 		let inputCleaned = false;
 		const p = producer<number>(() => {
-			return () => { inputCleaned = true; };
+			return () => {
+				inputCleaned = true;
+			};
 		});
 		const notifierProd = producer<number>();
 		const b = pipe(p, buffer(notifierProd));

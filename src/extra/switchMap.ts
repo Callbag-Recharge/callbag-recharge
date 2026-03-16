@@ -50,20 +50,16 @@ export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 					if (innerEnded) innerUnsub = null;
 				}
 
-				const outerUnsub = subscribe(
-					outer,
-					(v) => subscribeInner(fn(v)),
-					{
-						onEnd: (err) => {
-							if (err !== undefined) {
-								error(err);
-							} else {
-								outerDone = true;
-								if (!innerUnsub) complete();
-							}
-						},
+				const outerUnsub = subscribe(outer, (v) => subscribeInner(fn(v)), {
+					onEnd: (err) => {
+						if (err !== undefined) {
+							error(err);
+						} else {
+							outerDone = true;
+							if (!innerUnsub) complete();
+						}
 					},
-				);
+				});
 				subscribeInner(initialInner);
 
 				return () => {

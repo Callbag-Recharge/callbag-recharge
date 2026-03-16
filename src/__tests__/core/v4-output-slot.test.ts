@@ -6,10 +6,10 @@ import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { effect } from "../../core/effect";
 import { operator } from "../../core/operator";
-import { DATA, DIRTY, END, START, STATE, batch } from "../../core/protocol";
+import { producer } from "../../core/producer";
+import { batch, DATA, DIRTY, END, START, STATE } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
-import { producer } from "../../core/producer";
 
 describe("Producer output slot", () => {
 	it("null → SINGLE → MULTI → SINGLE → null transitions", () => {

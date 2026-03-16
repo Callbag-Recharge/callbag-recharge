@@ -12,34 +12,34 @@
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { subscribe } from "../../extra/subscribe";
+import { combine } from "../../extra/combine";
+import { concat } from "../../extra/concat";
+import { debounce } from "../../extra/debounce";
+import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
 import { filter } from "../../extra/filter";
 import { map } from "../../extra/map";
-import { scan } from "../../extra/scan";
-import { take } from "../../extra/take";
-import { skip } from "../../extra/skip";
 import { merge } from "../../extra/merge";
-import { combine } from "../../extra/combine";
-import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
-import { switchMap } from "../../extra/switchMap";
-import { debounce } from "../../extra/debounce";
-import { concat } from "../../extra/concat";
 import { pipeRaw, SKIP } from "../../extra/pipeRaw";
+import { scan } from "../../extra/scan";
+import { skip } from "../../extra/skip";
+import { subscribe } from "../../extra/subscribe";
+import { switchMap } from "../../extra/switchMap";
+import { take } from "../../extra/take";
 import {
 	batch,
+	DATA,
+	DIRTY,
 	derived,
+	END,
 	effect,
 	Inspector,
 	operator,
 	pipe,
 	producer,
-	state,
-	DIRTY,
 	RESOLVED,
-	STATE,
 	START,
-	DATA,
-	END,
+	STATE,
+	state,
 } from "../../index";
 
 beforeEach(() => {
@@ -247,7 +247,7 @@ describe("output slot transitions under stress", () => {
 		const a = state(0);
 		const b = derived([a], () => a.get() * 2);
 
-		let lateValues: number[] = [];
+		const lateValues: number[] = [];
 		let lateUnsub: (() => void) | null = null;
 
 		// First subscriber triggers a late subscription during callback
@@ -931,10 +931,7 @@ describe("tier 2 cycle boundaries in complex graphs", () => {
 
 	it("debounce feeding into diamond: deferred value resolves correctly", () => {
 		const a = state(0);
-		const debounced = pipe(
-			a,
-			debounce(100),
-		);
+		const debounced = pipe(a, debounce(100));
 		const direct = derived([a], () => a.get() * 2);
 
 		const vals: Array<{ debounced: number | undefined; direct: number }> = [];
@@ -1005,10 +1002,13 @@ describe("correctness traps", () => {
 
 	it("producer without equals guard: same value still triggers derived recompute", () => {
 		// producer with no equals: emit(0) always sends DIRTY+DATA even for same value
-		const p = producer<number>(({ emit }) => {
-			// expose emit via closure
-			(p as any)._testEmit = emit;
-		}, { initial: 0 });
+		const p = producer<number>(
+			({ emit }) => {
+				// expose emit via closure
+				(p as any)._testEmit = emit;
+			},
+			{ initial: 0 },
+		);
 		subscribe(p, () => {}); // trigger start
 
 		let computeCount = 0;

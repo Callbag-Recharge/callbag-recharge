@@ -9,8 +9,8 @@
 // registerEdge() tracks dependency graph.
 // ---------------------------------------------------------------------------
 
-import { END, START } from "./protocol";
 import type { NodeStatus } from "./protocol";
+import { END, START } from "./protocol";
 import type { Store } from "./types";
 
 export interface StoreInfo<T = unknown> {

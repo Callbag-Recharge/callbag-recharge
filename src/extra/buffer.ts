@@ -46,22 +46,26 @@ export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 					error(err);
 				}
 
-				const inputUnsub = subscribe(input, (v) => {
-					if (!done) currentBuffer.push(v);
-				}, {
-					onEnd: (err) => {
-						if (err !== undefined) {
-							forwardError(err);
-						} else {
-							flushAndComplete();
-						}
-						// Clean up notifier
-						if (notifierTalkback) {
-							notifierTalkback(END);
-							notifierTalkback = null;
-						}
+				const inputUnsub = subscribe(
+					input,
+					(v) => {
+						if (!done) currentBuffer.push(v);
 					},
-				});
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								forwardError(err);
+							} else {
+								flushAndComplete();
+							}
+							// Clean up notifier
+							if (notifierTalkback) {
+								notifierTalkback(END);
+								notifierTalkback = null;
+							}
+						},
+					},
+				);
 
 				let notifierTalkback: ((type: number) => void) | null = null;
 				notifier.source(START, (type: number, data: unknown) => {

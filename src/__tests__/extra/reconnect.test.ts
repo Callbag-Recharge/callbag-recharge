@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA, END, START, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -29,7 +30,6 @@ import { take } from "../../extra/take";
 import { throttle } from "../../extra/throttle";
 import { timeout } from "../../extra/timeout";
 import { derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

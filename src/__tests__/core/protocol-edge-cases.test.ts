@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 import { combine } from "../../extra/combine";
 import { debounce } from "../../extra/debounce";
 import { filter } from "../../extra/filter";
@@ -19,7 +20,6 @@ import {
 	producer,
 	state,
 } from "../../index";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -132,17 +132,14 @@ describe("type 3 STATE protocol", () => {
 	it("custom operator emitting DIRTY manually → downstream reacts", () => {
 		const s = state(0);
 
-		const custom = operator<number>(
-			[s],
-			({ emit, signal }) => {
-				return (_dep, type, data) => {
-					if (type === STATE) signal(data);
-					if (type === DATA) {
-						emit(data * 3);
-					}
-				};
-			},
-		);
+		const custom = operator<number>([s], ({ emit, signal }) => {
+			return (_dep, type, data) => {
+				if (type === STATE) signal(data);
+				if (type === DATA) {
+					emit(data * 3);
+				}
+			};
+		});
 
 		const d = derived([custom], () => custom.get() * 2);
 		const values: number[] = [];

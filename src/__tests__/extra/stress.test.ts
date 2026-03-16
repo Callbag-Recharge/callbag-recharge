@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
+import { empty } from "../../extra/empty";
 import { exhaustMap } from "../../extra/exhaustMap";
 import { filter } from "../../extra/filter";
 import { fromIter } from "../../extra/fromIter";
@@ -11,25 +13,13 @@ import { interval } from "../../extra/interval";
 import { map } from "../../extra/map";
 import { merge } from "../../extra/merge";
 import { of } from "../../extra/of";
-import { empty } from "../../extra/empty";
 import { rescue } from "../../extra/rescue";
 import { retry } from "../../extra/retry";
 import { scan } from "../../extra/scan";
-import { subscribe } from "../../extra/subscribe";
+import { subscribe as sub, subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
-import { subscribe as sub } from "../../extra/subscribe";
-import {
-	batch,
-	derived,
-	effect,
-	Inspector,
-	operator,
-	pipe,
-	producer,
-	state,
-} from "../../index";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
+import { batch, derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -308,9 +298,13 @@ describe("complex chains", () => {
 		const values: number[] = [];
 		let ended = false;
 
-		subscribe(result, (v) => {
-			if (v !== undefined) values.push(v);
-		}, { onEnd: () => (ended = true) });
+		subscribe(
+			result,
+			(v) => {
+				if (v !== undefined) values.push(v);
+			},
+			{ onEnd: () => (ended = true) },
+		);
 
 		expect(values).toEqual([1, 2, 3, 4]);
 		expect(ended).toBe(true);
@@ -484,11 +478,7 @@ describe("rapid churn", () => {
 		const values: number[] = [];
 		let ended = false;
 
-		subscribe(
-			s,
-			(v) => values.push(v),
-			{ onEnd: () => (ended = true) },
-		);
+		subscribe(s, (v) => values.push(v), { onEnd: () => (ended = true) });
 
 		vi.advanceTimersByTime(1000);
 

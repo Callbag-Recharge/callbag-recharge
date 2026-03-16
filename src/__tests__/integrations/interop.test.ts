@@ -8,7 +8,18 @@
 
 import { beforeEach, describe, expect, it } from "vitest";
 import { subscribe } from "../../extra/subscribe";
-import { DIRTY, derived, effect, Inspector, producer, RESOLVED, STATE, state } from "../../index";
+import { wrap } from "../../extra/wrap";
+import {
+	DIRTY,
+	derived,
+	effect,
+	Inspector,
+	producer,
+	RESOLVED,
+	START,
+	STATE,
+	state,
+} from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -278,5 +289,394 @@ describe("Diamond resolution with raw callbag operators in the chain", () => {
 		expect(effectCount).toBe(1);
 
 		dispose();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Raw callbag source helper — creates a pushable raw callbag source
+// ---------------------------------------------------------------------------
+
+function rawCbSource<T>() {
+	let sink: ((type: number, data?: any) => void) | null = null;
+	const source = (type: number, payload: any) => {
+		if (type !== 0) return;
+		sink = payload;
+		sink!(0, (t: number) => {
+			if (t === 2) sink = null;
+		});
+	};
+	return {
+		source,
+		push: (v: T) => sink?.(1, v),
+		end: (err?: unknown) => sink?.(2, err),
+	};
+}
+
+// ---------------------------------------------------------------------------
+// wrap() — source wrapping (tier 2)
+// ---------------------------------------------------------------------------
+
+describe("wrap() — source wrapping (tier 2)", () => {
+	it("wraps a raw callbag source into a Store", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		const values: number[] = [];
+		const unsub = subscribe(store, (v) => values.push(v));
+
+		raw.push(1);
+		raw.push(2);
+		raw.push(3);
+
+		expect(values).toEqual([1, 2, 3]);
+		unsub();
+	});
+
+	it("get() returns the last emitted value", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		const unsub = subscribe(store, () => {});
+		raw.push(42);
+		expect(store.get()).toBe(42);
+
+		raw.push(99);
+		expect(store.get()).toBe(99);
+		unsub();
+	});
+
+	it("supports multicast — multiple subscribers", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		const v1: number[] = [];
+		const v2: number[] = [];
+		const unsub1 = subscribe(store, (v) => v1.push(v));
+		const unsub2 = subscribe(store, (v) => v2.push(v));
+
+		raw.push(10);
+		expect(v1).toEqual([10]);
+		expect(v2).toEqual([10]);
+
+		unsub1();
+		raw.push(20);
+		expect(v1).toEqual([10]); // unsubscribed
+		expect(v2).toEqual([10, 20]);
+
+		unsub2();
+	});
+
+	it("forwards completion to subscribers", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		let ended = false;
+		subscribe(store, () => {}, {
+			onEnd: () => {
+				ended = true;
+			},
+		});
+
+		raw.push(1);
+		raw.end();
+		expect(ended).toBe(true);
+	});
+
+	it("forwards errors to subscribers", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		let receivedError: unknown;
+		subscribe(store, () => {}, {
+			onEnd: (err) => {
+				receivedError = err;
+			},
+		});
+
+		raw.end(new Error("boom"));
+		expect(receivedError).toBeInstanceOf(Error);
+		expect((receivedError as Error).message).toBe("boom");
+	});
+
+	it("sends DIRTY before each DATA (tier 2 cycle)", () => {
+		const raw = rawCbSource<number>();
+		const store = wrap<number>(raw.source);
+
+		const signals: Array<{ type: number; data: unknown }> = [];
+		store.source(START, (type: number, data: any) => {
+			if (type === STATE) signals.push({ type: STATE, data });
+			if (type === 1) signals.push({ type: 1, data });
+		});
+
+		raw.push(5);
+		expect(signals).toEqual([
+			{ type: STATE, data: DIRTY },
+			{ type: 1, data: 5 },
+		]);
+	});
+
+	it("cleans up raw source on last subscriber disconnect", () => {
+		let cleaned = false;
+		const rawSource = (type: number, payload: any) => {
+			if (type !== 0) return;
+			const sink = payload;
+			sink(0, (t: number) => {
+				if (t === 2) cleaned = true;
+			});
+		};
+		const store = wrap<number>(rawSource);
+
+		const unsub = subscribe(store, () => {});
+		expect(cleaned).toBe(false);
+		unsub();
+		expect(cleaned).toBe(true);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// wrap() — operator wrapping (tier 1, STATE bypass)
+// ---------------------------------------------------------------------------
+
+describe("wrap() — operator wrapping (tier 1)", () => {
+	it("transforms values through raw callbag map", () => {
+		const s = state(5);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 10),
+		);
+
+		const values: number[] = [];
+		const unsub = subscribe(wrapped, (v) => values.push(v));
+
+		s.set(3);
+		s.set(7);
+
+		expect(values).toEqual([30, 70]);
+		unsub();
+	});
+
+	it("get() returns the initial transformed value before any changes", () => {
+		const s = state(5);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 10),
+		);
+
+		// Before subscription, get() pulls through rawOp via getter
+		expect(wrapped.get()).toBe(50);
+	});
+
+	it("get() returns the last transformed value after changes", () => {
+		const s = state(5);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 10),
+		);
+
+		const unsub = subscribe(wrapped, () => {});
+		s.set(3);
+		expect(wrapped.get()).toBe(30);
+		unsub();
+	});
+
+	it("forwards STATE signals (DIRTY/RESOLVED) — STATE bypass", () => {
+		const s = state(0);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 2),
+		);
+
+		const signals: Array<{ type: number; data: unknown }> = [];
+		wrapped.source(START, (type: number, data: any) => {
+			if (type === STATE) signals.push({ type: STATE, data });
+			if (type === 1) signals.push({ type: 1, data });
+		});
+
+		s.set(5);
+		expect(signals).toEqual([
+			{ type: STATE, data: DIRTY },
+			{ type: 1, data: 10 },
+		]);
+	});
+
+	it("supports multicast — multiple subscribers", () => {
+		const s = state(1);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n + 100),
+		);
+
+		const v1: number[] = [];
+		const v2: number[] = [];
+		const unsub1 = subscribe(wrapped, (v) => v1.push(v));
+		const unsub2 = subscribe(wrapped, (v) => v2.push(v));
+
+		s.set(5);
+		expect(v1).toEqual([105]);
+		expect(v2).toEqual([105]);
+
+		unsub1();
+		s.set(10);
+		expect(v1).toEqual([105]); // unsubscribed
+		expect(v2).toEqual([105, 110]);
+
+		unsub2();
+	});
+
+	it("diamond resolution: wrapped operator in one branch", () => {
+		const s = state(1);
+		// Branch A: through raw map wrapper (tier 1)
+		const a = wrap<number, number>(
+			s,
+			rawCbMap((n) => n + 1),
+		);
+		// Branch B: through derived
+		const b = derived([s], () => s.get() * 10);
+		// Join: diamond node
+		let computeCount = 0;
+		const c = derived([a, b], () => {
+			computeCount++;
+			return a.get() + b.get();
+		});
+
+		const values: number[] = [];
+		subscribe(c, (v) => values.push(v));
+		computeCount = 0;
+
+		s.set(2);
+		expect(values).toEqual([23]); // (2+1) + (2*10) = 3 + 20 = 23
+		expect(computeCount).toBe(1); // computed exactly once
+	});
+
+	it("diamond resolution: both branches are wrapped operators", () => {
+		const s = state(1);
+		const a = wrap<number, number>(
+			s,
+			rawCbMap((n) => n + 1),
+		);
+		const b = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 10),
+		);
+
+		let computeCount = 0;
+		const c = derived([a, b], () => {
+			computeCount++;
+			return a.get() + b.get();
+		});
+
+		const values: number[] = [];
+		subscribe(c, (v) => values.push(v));
+		computeCount = 0;
+
+		s.set(2);
+		expect(values).toEqual([23]); // (2+1) + (2*10) = 23
+		expect(computeCount).toBe(1);
+	});
+
+	it("RESOLVED propagation: derived with equals → wrap → downstream skips", () => {
+		const s = state(1);
+		const parity = derived([s], () => s.get() % 2, {
+			equals: (a, b) => a === b,
+		});
+		// Wrap parity through a raw map (tier 1 — STATE bypass)
+		const wrapped = wrap<number, number>(
+			parity,
+			rawCbMap((n) => n * 10),
+		);
+
+		let effectCount = 0;
+		const dispose = effect([wrapped], () => {
+			effectCount++;
+			wrapped.get();
+		});
+		effectCount = 0;
+
+		// s: 1 → 3, parity stays 1 → RESOLVED → wrap forwards RESOLVED → effect skips
+		s.set(3);
+		expect(effectCount).toBe(0);
+
+		// s: 3 → 4, parity changes 1 → 0 → DATA flows through → effect fires
+		s.set(4);
+		expect(effectCount).toBe(1);
+
+		dispose();
+	});
+
+	it("upstream error propagates through wrapped operator", () => {
+		const p = producer<number>(undefined, { initial: 0 });
+		const wrapped = wrap<number, number>(
+			p,
+			rawCbMap((n) => n * 2),
+		);
+
+		let receivedError: unknown;
+		subscribe(wrapped, () => {}, {
+			onEnd: (err) => {
+				receivedError = err;
+			},
+		});
+
+		p.error(new Error("upstream fail"));
+		expect(receivedError).toBeInstanceOf(Error);
+		expect((receivedError as Error).message).toBe("upstream fail");
+	});
+
+	it("upstream completion propagates through wrapped operator", () => {
+		const p = producer<number>(undefined, { initial: 0 });
+		const wrapped = wrap<number, number>(
+			p,
+			rawCbMap((n) => n * 2),
+		);
+
+		let ended = false;
+		subscribe(wrapped, () => {}, {
+			onEnd: () => {
+				ended = true;
+			},
+		});
+
+		p.complete();
+		expect(ended).toBe(true);
+	});
+
+	it("reconnect: handler-local state resets on disconnect→reconnect", () => {
+		const s = state(0);
+		const wrapped = wrap<number, number>(
+			s,
+			rawCbMap((n) => n * 3),
+		);
+
+		const values1: number[] = [];
+		const unsub1 = subscribe(wrapped, (v) => values1.push(v));
+		s.set(1);
+		s.set(2);
+		expect(values1).toEqual([3, 6]);
+		unsub1();
+
+		// Reconnect — fresh pipeline
+		const values2: number[] = [];
+		const unsub2 = subscribe(wrapped, (v) => values2.push(v));
+		s.set(3);
+		expect(values2).toEqual([9]);
+		unsub2();
+	});
+
+	it("chained raw callbag operators through wrap", () => {
+		const s = state(1);
+		// Chain two raw maps: *2, then +100
+		const doubleMap = (source: any) =>
+			rawCbMap<number, number>((n) => n + 100)(rawCbMap<number, number>((n) => n * 2)(source));
+		const wrapped = wrap<number, number>(s, doubleMap);
+
+		const values: number[] = [];
+		const unsub = subscribe(wrapped, (v) => values.push(v));
+
+		s.set(5);
+		expect(values).toEqual([110]); // (5*2) + 100 = 110
+
+		s.set(10);
+		expect(values).toEqual([110, 120]); // (10*2) + 100 = 120
+		unsub();
 	});
 });

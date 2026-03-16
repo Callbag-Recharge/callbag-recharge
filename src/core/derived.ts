@@ -15,14 +15,14 @@ import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
 import type { NodeStatus } from "./protocol";
 import {
+	beginDeferredStart,
 	DATA,
 	DIRTY,
 	END,
+	endDeferredStart,
 	RESOLVED,
 	START,
 	STATE,
-	beginDeferredStart,
-	endDeferredStart,
 } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
@@ -92,7 +92,7 @@ export class DerivedImpl<T> {
 
 	_recompute(): void {
 		const result = this._fn();
-		if (this._eqFn && (this._flags & D_HAS_CACHED) && this._eqFn(this._cachedValue as T, result)) {
+		if (this._eqFn && this._flags & D_HAS_CACHED && this._eqFn(this._cachedValue as T, result)) {
 			// Value unchanged — send RESOLVED (subtree skipping)
 			this._status = "RESOLVED";
 			this._dispatch(STATE, RESOLVED);

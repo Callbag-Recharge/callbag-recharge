@@ -148,6 +148,53 @@ function myOp<A, B>(/* options */): StoreOperator<A, B> {
 
 **Multi-dep operators (combine, merge, partition):** Use bitmask dirty tracking identical to `derived` — forward DIRTY only on the first dirty dep, forward RESOLVED only when all bits clear. See §7.
 
+**Primary + secondary deps pattern (`withLatestFrom`):** Some operators need multiple deps wired for diamond resolution but only emit when a specific "primary" dep (dep 0) fires DATA. Secondary deps (dep 1..N) provide context values but don't drive emissions. The pattern uses `operator()` with a full bitmask, but tracks whether the primary dep received DATA in the current cycle:
+
+```ts
+// Template for primary + secondary deps operator
+function myOp<A, R>(others: Store<unknown>[], fn: (...args) => R): StoreOperator<A, R> {
+  return (source) => {
+    const allDeps = [source, ...others];
+    return operator<R>(allDeps, ({ emit, signal, complete, error }) => {
+      const dirtyDeps = new Bitmask(allDeps.length);
+      let primaryReceivedData = false;
+
+      return (dep, type, data) => {
+        if (type === STATE) {
+          if (data === DIRTY) {
+            const wasClean = dirtyDeps.empty();
+            dirtyDeps.set(dep);
+            if (wasClean) { primaryReceivedData = false; signal(DIRTY); }
+          } else if (data === RESOLVED) {
+            if (dirtyDeps.test(dep)) {
+              dirtyDeps.clear(dep);
+              if (dirtyDeps.empty()) {
+                primaryReceivedData ? emit(compute()) : signal(RESOLVED);
+              }
+            }
+          } else { signal(data); }
+        }
+        if (type === DATA) {
+          if (dep === 0) primaryReceivedData = true;  // only primary drives output
+          dirtyDeps.clear(dep);
+          if (dirtyDeps.empty()) {
+            primaryReceivedData ? emit(compute()) : signal(RESOLVED);
+          }
+        }
+        if (type === END) { data !== undefined ? error(data) : complete(); }
+      };
+    }, { initial: compute(), getter: () => compute() });
+  };
+}
+```
+
+This pattern ensures:
+- **No diamond glitch:** bitmask waits for all deps (primary + secondary) to settle before computing, so secondary dep values are always current
+- **No stale reads:** secondary deps are real deps wired into the reactive graph, not read via `.get()` on disconnected stores
+- **Source-driven semantics:** only the primary dep's DATA triggers emission; secondary-only changes produce RESOLVED (suppression)
+
+Use this pattern when an operator needs context from additional stores but should only emit when the main source changes. Do not use it when all deps should drive emissions equally (use `combine` instead).
+
 **When to send RESOLVED vs emit:** If the operator decides not to emit a value in response to incoming DATA (filter rejects, distinctUntilChanged sees equal), it MUST send `signal(RESOLVED)` — not stay silent. Staying silent leaves downstream nodes waiting forever with a non-empty dirty bitmask.
 
 ### Rule 2: Use `producer()` for tier 2 (async, time-based, dynamic subscription)

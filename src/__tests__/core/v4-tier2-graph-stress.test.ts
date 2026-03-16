@@ -10,46 +10,46 @@
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { subscribe } from "../../extra/subscribe";
-import { filter } from "../../extra/filter";
-import { map } from "../../extra/map";
-import { scan } from "../../extra/scan";
-import { take } from "../../extra/take";
-import { skip } from "../../extra/skip";
-import { merge } from "../../extra/merge";
-import { combine } from "../../extra/combine";
-import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
-import { switchMap } from "../../extra/switchMap";
-import { concatMap } from "../../extra/concatMap";
-import { exhaustMap } from "../../extra/exhaustMap";
-import { debounce } from "../../extra/debounce";
-import { throttle } from "../../extra/throttle";
-import { delay } from "../../extra/delay";
-import { retry } from "../../extra/retry";
-import { rescue } from "../../extra/rescue";
-import { repeat } from "../../extra/repeat";
-import { concat } from "../../extra/concat";
-import { of } from "../../extra/of";
-import { interval } from "../../extra/interval";
-import { fromIter } from "../../extra/fromIter";
-import { pipeRaw, SKIP } from "../../extra/pipeRaw";
-import { sample } from "../../extra/sample";
 import { bufferTime } from "../../extra/bufferTime";
+import { combine } from "../../extra/combine";
+import { concat } from "../../extra/concat";
+import { concatMap } from "../../extra/concatMap";
+import { debounce } from "../../extra/debounce";
+import { delay } from "../../extra/delay";
+import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
+import { exhaustMap } from "../../extra/exhaustMap";
+import { filter } from "../../extra/filter";
+import { fromIter } from "../../extra/fromIter";
+import { interval } from "../../extra/interval";
+import { map } from "../../extra/map";
+import { merge } from "../../extra/merge";
+import { of } from "../../extra/of";
+import { pipeRaw, SKIP } from "../../extra/pipeRaw";
+import { repeat } from "../../extra/repeat";
+import { rescue } from "../../extra/rescue";
+import { retry } from "../../extra/retry";
+import { sample } from "../../extra/sample";
+import { scan } from "../../extra/scan";
+import { skip } from "../../extra/skip";
+import { subscribe } from "../../extra/subscribe";
+import { switchMap } from "../../extra/switchMap";
+import { take } from "../../extra/take";
+import { throttle } from "../../extra/throttle";
 import {
 	batch,
+	DATA,
+	DIRTY,
 	derived,
+	END,
 	effect,
 	Inspector,
 	operator,
 	pipe,
 	producer,
-	state,
-	DIRTY,
 	RESOLVED,
-	STATE,
 	START,
-	DATA,
-	END,
+	STATE,
+	state,
 } from "../../index";
 
 beforeEach(() => {

@@ -13,7 +13,6 @@ export const RESOLVED = Symbol("RESOLVED");
 
 export type Signal = typeof DIRTY | typeof RESOLVED;
 
-
 /** Node status — tracks current lifecycle state (v4) */
 export type NodeStatus =
 	| "DISCONNECTED"

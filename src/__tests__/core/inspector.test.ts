@@ -175,10 +175,7 @@ describe("Inspector", () => {
 
 	it("v4: _reset() clears hooks and edges", () => {
 		Inspector.onEmit = () => {};
-		Inspector.registerEdge(
-			state(1, { name: "x" }),
-			state(2, { name: "y" }),
-		);
+		Inspector.registerEdge(state(1, { name: "x" }), state(2, { name: "y" }));
 		Inspector._reset();
 		expect(Inspector.onEmit).toBeNull();
 		expect(Inspector.getEdges().size).toBe(0);

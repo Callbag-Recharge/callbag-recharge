@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -19,9 +20,8 @@ import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
 import { throttle } from "../../extra/throttle";
 import { throwError } from "../../extra/throwError";
-import { timeout, TimeoutError } from "../../extra/timeout";
+import { TimeoutError, timeout } from "../../extra/timeout";
 import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -40,7 +40,7 @@ afterEach(() => {
 function observeRaw<T>(store: { source: (type: number, payload?: any) => void }) {
 	const data: T[] = [];
 	let ended = false;
-	let endError: unknown = undefined;
+	let endError: unknown;
 	const signals: unknown[] = [];
 	store.source(START, (type: number, d: any) => {
 		if (type === START) return;

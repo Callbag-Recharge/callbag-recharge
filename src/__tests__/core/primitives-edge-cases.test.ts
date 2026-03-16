@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA, END, START, STATE } from "../../core/protocol";
 import { subscribe } from "../../extra/subscribe";
 import { batch, derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA, END, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -696,16 +696,13 @@ describe("operator edge cases", () => {
 		const s = state(0);
 		const values: number[] = [];
 
-		const op = operator<number>(
-			[s],
-			({ seed, emit, signal }) => {
-				seed(999);
-				return (_dep, type, data) => {
-					if (type === STATE) signal(data);
-					if (type === DATA) emit((data as number) + 1);
-				};
-			},
-		);
+		const op = operator<number>([s], ({ seed, emit, signal }) => {
+			seed(999);
+			return (_dep, type, data) => {
+				if (type === STATE) signal(data);
+				if (type === DATA) emit((data as number) + 1);
+			};
+		});
 
 		subscribe(op, (v) => values.push(v));
 

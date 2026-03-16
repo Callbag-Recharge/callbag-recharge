@@ -16,38 +16,36 @@ import { subscribe } from "./subscribe";
  */
 export function throttle<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
-		const store = producer<A>(
-			({ emit, error, complete }) => {
-				let timer: ReturnType<typeof setTimeout> | null = null;
+		const store = producer<A>(({ emit, error, complete }) => {
+			let timer: ReturnType<typeof setTimeout> | null = null;
 
-				const unsub = subscribe(
-					input,
-					(v) => {
-						if (timer !== null) return; // still within throttle window
-						emit(v);
-						timer = setTimeout(() => {
-							timer = null;
-						}, ms);
+			const unsub = subscribe(
+				input,
+				(v) => {
+					if (timer !== null) return; // still within throttle window
+					emit(v);
+					timer = setTimeout(() => {
+						timer = null;
+					}, ms);
+				},
+				{
+					onEnd: (err) => {
+						if (timer !== null) clearTimeout(timer);
+						timer = null;
+						if (err !== undefined) {
+							error(err);
+						} else {
+							complete();
+						}
 					},
-					{
-						onEnd: (err) => {
-							if (timer !== null) clearTimeout(timer);
-							timer = null;
-							if (err !== undefined) {
-								error(err);
-							} else {
-								complete();
-							}
-						},
-					},
-				);
+				},
+			);
 
-				return () => {
-					if (timer !== null) clearTimeout(timer);
-					unsub();
-				};
-			},
-		);
+			return () => {
+				if (timer !== null) clearTimeout(timer);
+				unsub();
+			};
+		});
 
 		Inspector.register(store, { kind: "throttle" });
 		return store;

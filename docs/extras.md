@@ -13,6 +13,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `fromPromise(promise)` | Converts a Promise into a single-value source |
 | `fromObs(observable)` | Converts an Observable (RxJS-compatible) into a source |
 | `fromIter(iterable)` | Converts a sync iterable into a source |
+| `fromAsyncIter(iterableOrFactory)` | Converts an AsyncIterable into a source; factory form `() => AsyncIterable` supports retry/repeat |
 | `of(...values)` | Synchronously emits each provided value, then completes |
 | `empty()` | Completes immediately without emitting any values |
 | `throwError(err)` | Errors immediately with the given value |
@@ -44,6 +45,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `flat` | Flattens a source of sources (mergeAll semantics) |
 | `share` | Shares a single upstream subscription across multiple sinks |
 | `buffer(notifier)` | Accumulates values into arrays; flushes on notifier emission |
+| `withLatestFrom(...others, fn)` | When source emits, grabs current values from others; primary+secondary dep pattern (see architecture §4) |
 | `subject` | Multicast primitive; both a source and manual emitter |
 
 ### Tier 2 operators (cycle boundaries, built on `producer()`)
@@ -62,6 +64,15 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `rescue(fn)` | On error, switches to a fallback store |
 | `retry(n)` | Re-subscribes on error up to n times |
 | `repeat(factory, n?)` | Re-subscribes via factory on completion, up to n total times |
+| `audit(ms)` | Trailing-edge throttle; emits latest value after `ms` ms silence window |
+| `bufferCount(count, startEvery?)` | Count-based buffering; tumbling (default) or sliding window |
+| `reduce(fn, seed)` | Collects finite source into a single result via reducer; emits on completion |
+| `toArray()` | Collects finite source values into an array; emits on completion |
+| `groupBy(keyFn)` | Routes values into sub-stores by key; output is `Map<K, Store<V>>` |
+| `race(...sources)` | Emits from whichever source fires first; unsubscribes others |
+| `window(notifier)` | Splits values into nested window stores; new window on notifier emission |
+| `windowCount(count)` | Splits values into nested window stores of `count` values each |
+| `windowTime(ms)` | Splits values into nested window stores that last `ms` milliseconds each |
 
 ### Piping
 
@@ -87,74 +98,6 @@ Many of the original `callbag-*` repos (e.g., `callbag-take-until`, `callbag-deb
 2. **Completion propagation** — END signals flow both upstream and downstream
 3. **Teardown on unsubscribe** — sinks disconnecting mid-stream triggers cleanup (timers cleared, inner subs disposed, buffers released)
 4. **No retained references** — after teardown, no closures hold references to values or sinks
-
----
-
-## Roadmap: New Extras
-
-### P0 — Critical gaps
-
-#### `fromAsyncIter`
-- **What:** Source from `AsyncIterable` / `AsyncGenerator`
-- **Why:** Async iterables are the universal streaming interface in modern JS:
-  - `fetch().body` (ReadableStream → async iterable)
-  - OpenAI / Anthropic SDK streaming responses
-  - Database cursors (Prisma, Drizzle)
-  - Node.js streams (via `Readable[Symbol.asyncIterator]`)
-  - gRPC streaming responses
-- **Tier:** 2 (each yielded value starts a new cycle)
-- **API:** `fromAsyncIter(iterableOrFactory)` — factory form `() => AsyncIterable` allows `retry`/`repeat` to re-invoke
-- **Effort:** Low — producer + async iteration loop + AbortController cleanup
-- **Notes:** Must support cancellation (abort iterator when last sink leaves)
-
-### P1 — Important for common patterns
-
-#### `withLatestFrom`
-- **What:** When source emits, grab current values from other stores
-- **Why:** "When chunk arrives, include current config" — common in AI apps, forms, real-time
-- **Tier:** 1 (reads deps synchronously via `.get()`)
-- **API:** `withLatestFrom(source, ...others, fn)`
-- **Effort:** Low — operator that calls `.get()` on deps when source emits
-
-#### `bufferCount`
-- **What:** Buffer N items, flush as array when count reached
-- **Why:** "Flush every 100 rows" — more natural than time-based for ETL/batch writes
-- **Tier:** 2 (built on producer)
-- **API:** `bufferCount(source, count, startEvery?)`
-- **Effort:** Low
-
-### P2 — Nice to have
-
-#### `groupBy`
-- **What:** Route values into sub-streams by key function
-- **Why:** Kafka partition semantics, ETL partitioning, categorized event handling
-- **Tier:** 2
-- **API:** `groupBy(source, keyFn)` → store of `Map<K, Store<V>>`
-- **Effort:** Medium — needs inner store lifecycle management
-
-#### `reduce` / `toArray`
-- **What:** Collect all values from a finite source into a single result
-- **Why:** ETL aggregation, collecting finite streams
-- **Tier:** 2
-- **API:** `reduce(source, fn, seed)` → `Store<Acc>`, `toArray(source)` → `Store<T[]>`
-- **Effort:** Low — scan + take-on-complete
-
-#### `race`
-- **What:** Emit from whichever source fires first, unsubscribe others
-- **Why:** "Try CDN and origin, use whichever responds first"
-- **Tier:** 2
-- **Effort:** Low
-
-### P3 — Advanced
-
-#### `window` / `windowCount` / `windowTime`
-- Advanced nested-observable windowing (tumbling, sliding, session)
-- Medium effort
-
-#### `audit`
-- Trailing-edge throttle — emit latest value after silence period
-- Complements `throttle` (leading) and `debounce` (resets)
-- Low effort
 
 ---
 

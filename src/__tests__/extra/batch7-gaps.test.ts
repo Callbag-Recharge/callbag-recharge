@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { DATA } from "../../core/protocol";
 import { flat } from "../../extra/flat";
 import { fromIter } from "../../extra/fromIter";
 import { of } from "../../extra/of";
@@ -7,7 +8,6 @@ import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { derived, Inspector, operator, pipe, producer, state } from "../../index";
-import { DATA } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

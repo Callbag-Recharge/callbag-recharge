@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
+import { DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 import { elementAt } from "../../extra/elementAt";
 import { empty } from "../../extra/empty";
 import { find } from "../../extra/find";
@@ -12,7 +13,6 @@ import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
 import { throwError } from "../../extra/throwError";
 import { Inspector, pipe, producer, state } from "../../index";
-import { DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 
 beforeEach(() => {
 	Inspector._reset();

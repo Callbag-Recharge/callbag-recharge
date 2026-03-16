@@ -43,13 +43,18 @@ See [docs/architecture-v4.md](docs/architecture-v4.md) for full design.
 
 **Tier 1** (participate in diamond resolution, forward type 3):
 - Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`, `of`, `empty`, `throwError`, `never`
-- Operators: `take`, `skip`, `first`, `last`, `find`, `elementAt`, `partition`, `merge`, `combine`, `concat`, `flat`, `share`
+- Operators: `take`, `skip`, `first`, `last`, `find`, `elementAt`, `partition`, `merge`, `combine`, `concat`, `flat`, `share`, `withLatestFrom` (primary+secondary deps pattern)
 - Sinks: `forEach`, `subscribe`
 - Piping: `pipeRaw`, `SKIP`
 
 **Tier 2** (cycle boundaries, all built on `producer()`):
-- Time-based: `debounce`, `throttle`, `delay`, `bufferTime`, `timeout`, `sample`
+- Sources: `fromAsyncIter`
+- Time-based: `debounce`, `throttle`, `delay`, `bufferTime`, `timeout`, `sample`, `audit`
+- Buffering: `bufferCount`, `buffer`
 - Dynamic subscription: `switchMap`, `flat`, `concatMap`, `exhaustMap`
+- Aggregation: `reduce`, `toArray`, `groupBy`
+- Multi-source: `race`
+- Windowing: `window`, `windowCount`, `windowTime`
 - Error handling: `rescue`, `retry`
 - Resubscription: `repeat`
 
