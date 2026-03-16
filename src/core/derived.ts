@@ -11,6 +11,7 @@
  * Boolean fields packed into _flags bitmask to reduce hidden class size.
  */
 
+import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
 import type { NodeStatus } from "./protocol";
 import {
@@ -39,7 +40,7 @@ export class DerivedImpl<T> {
 	_upstreamTalkbacks: Array<(type: number) => void> = [];
 	_cachedValue: T | undefined;
 	_flags: number;
-	_dirtyDeps = 0;
+	_dirtyDeps!: Bitmask;
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
 	_deps: Store<unknown>[];
 	_fn: () => T;
@@ -49,6 +50,7 @@ export class DerivedImpl<T> {
 		this._fn = fn;
 		this._eqFn = opts?.equals;
 		this._flags = 0;
+		this._dirtyDeps = new Bitmask(deps.length);
 
 		this.source = this.source.bind(this);
 
@@ -157,7 +159,6 @@ export class DerivedImpl<T> {
 		for (let i = 0; i < this._deps.length; i++) {
 			if (this._flags & D_COMPLETED) break;
 			const depIndex = i;
-			const depBit = 1 << depIndex;
 			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
 					this._upstreamTalkbacks.push(data);
@@ -167,17 +168,17 @@ export class DerivedImpl<T> {
 
 				if (type === STATE) {
 					if (data === DIRTY) {
-						const wasEmpty = this._dirtyDeps === 0;
-						this._dirtyDeps |= depBit;
+						const wasEmpty = this._dirtyDeps.empty();
+						this._dirtyDeps.set(depIndex);
 						if (wasEmpty) {
 							this._flags &= ~D_ANY_DATA;
 							this._status = "DIRTY";
 							this._dispatch(STATE, DIRTY);
 						}
 					} else if (data === RESOLVED) {
-						if (this._dirtyDeps & depBit) {
-							this._dirtyDeps &= ~depBit;
-							if (this._dirtyDeps === 0) {
+						if (this._dirtyDeps.test(depIndex)) {
+							this._dirtyDeps.clear(depIndex);
+							if (this._dirtyDeps.empty()) {
 								if (this._flags & D_ANY_DATA) {
 									this._recompute();
 								} else {
@@ -192,15 +193,15 @@ export class DerivedImpl<T> {
 						this._dispatch(STATE, data);
 					}
 				} else if (type === DATA) {
-					if (this._dirtyDeps & depBit) {
-						this._dirtyDeps &= ~depBit;
+					if (this._dirtyDeps.test(depIndex)) {
+						this._dirtyDeps.clear(depIndex);
 						this._flags |= D_ANY_DATA;
-						if (this._dirtyDeps === 0) {
+						if (this._dirtyDeps.empty()) {
 							this._recompute();
 						}
 					} else {
 						// DATA without prior DIRTY: raw callbag compat
-						if (this._dirtyDeps === 0) {
+						if (this._dirtyDeps.empty()) {
 							this._status = "DIRTY";
 							this._dispatch(STATE, DIRTY);
 							this._recompute();
@@ -222,7 +223,7 @@ export class DerivedImpl<T> {
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._flags &= ~(D_CONNECTED | D_STANDALONE);
-		this._dirtyDeps = 0;
+		this._dirtyDeps.reset();
 		const output = this._output;
 		const wasMulti = this._flags & D_MULTI;
 		this._output = null;
@@ -244,7 +245,7 @@ export class DerivedImpl<T> {
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._flags &= ~D_CONNECTED;
-		this._dirtyDeps = 0;
+		this._dirtyDeps.reset();
 	}
 
 	get(): T {

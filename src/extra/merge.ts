@@ -1,3 +1,4 @@
+import { Bitmask } from "../core/bitmask";
 import { operator } from "../core/operator";
 import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
@@ -22,32 +23,30 @@ export function merge<T>(...sources: Store<T>[]): Store<T | undefined> {
 	return operator<T | undefined>(
 		sources as Store<unknown>[],
 		({ emit, signal, complete, error }) => {
-			let dirtyDeps = 0;
+			const dirtyDeps = new Bitmask(sources.length);
 			let activeCount = sources.length;
 
 			return (dep, type, data) => {
-				const depBit = 1 << dep;
-
 				if (type === STATE) {
 					if (data === DIRTY) {
-						const wasClean = dirtyDeps === 0;
-						dirtyDeps |= depBit;
+						const wasClean = dirtyDeps.empty();
+						dirtyDeps.set(dep);
 						if (wasClean) signal(DIRTY);
 					} else if (data === RESOLVED) {
-						if (dirtyDeps & depBit) {
-							dirtyDeps &= ~depBit;
-							if (dirtyDeps === 0) signal(RESOLVED);
+						if (dirtyDeps.test(dep)) {
+							dirtyDeps.clear(dep);
+							if (dirtyDeps.empty()) signal(RESOLVED);
 						}
 					} else {
 						signal(data); // Forward unknown STATE signals (v4 forward-compat)
 					}
 				}
 				if (type === DATA) {
-					dirtyDeps &= ~depBit;
+					dirtyDeps.clear(dep);
 					emit(data as T);
 				}
 				if (type === END) {
-					dirtyDeps &= ~depBit;
+					dirtyDeps.clear(dep);
 					if (data !== undefined) {
 						error(data);
 					} else {

@@ -1,3 +1,4 @@
+import { Bitmask } from "../core/bitmask";
 import { operator } from "../core/operator";
 import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
@@ -25,25 +26,23 @@ export function combine<Sources extends Store<unknown>[]>(
 	return operator<Result>(
 		sources as Store<unknown>[],
 		({ emit, signal, complete, error }) => {
-			let dirtyDeps = 0;
+			const dirtyDeps = new Bitmask(sources.length);
 			let anyDataReceived = false;
 			let activeCount = sources.length;
 
 			return (dep, type, data) => {
-				const depBit = 1 << dep;
-
 				if (type === STATE) {
 					if (data === DIRTY) {
-						const wasClean = dirtyDeps === 0;
-						dirtyDeps |= depBit;
+						const wasClean = dirtyDeps.empty();
+						dirtyDeps.set(dep);
 						if (wasClean) {
 							anyDataReceived = false;
 							signal(DIRTY);
 						}
 					} else if (data === RESOLVED) {
-						if (dirtyDeps & depBit) {
-							dirtyDeps &= ~depBit;
-							if (dirtyDeps === 0) {
+						if (dirtyDeps.test(dep)) {
+							dirtyDeps.clear(dep);
+							if (dirtyDeps.empty()) {
 								if (anyDataReceived) {
 									emit([...values] as unknown as Result);
 								} else {
@@ -57,15 +56,15 @@ export function combine<Sources extends Store<unknown>[]>(
 				}
 				if (type === DATA) {
 					values[dep] = data;
-					if (dirtyDeps & depBit) {
-						dirtyDeps &= ~depBit;
+					if (dirtyDeps.test(dep)) {
+						dirtyDeps.clear(dep);
 						anyDataReceived = true;
-						if (dirtyDeps === 0) {
+						if (dirtyDeps.empty()) {
 							emit([...values] as unknown as Result);
 						}
 					} else {
 						// DATA without prior DIRTY (raw callbag source)
-						if (dirtyDeps === 0) {
+						if (dirtyDeps.empty()) {
 							signal(DIRTY);
 							emit([...values] as unknown as Result);
 						} else {

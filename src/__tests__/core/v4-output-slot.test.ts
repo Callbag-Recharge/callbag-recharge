@@ -256,11 +256,11 @@ describe("Derived output slot", () => {
 		const b = derived([a], () => a.get() * 2);
 		const impl = b as any;
 
-		// Single-dep should not use _dirtyDeps (always 0)
-		expect(impl._dirtyDeps).toBe(0);
+		// Single-dep should not use _dirtyDeps (always empty)
+		expect(impl._dirtyDeps.empty()).toBe(true);
 
 		a.set(5);
-		expect(impl._dirtyDeps).toBe(0);
+		expect(impl._dirtyDeps.empty()).toBe(true);
 		expect(b.get()).toBe(10);
 	});
 

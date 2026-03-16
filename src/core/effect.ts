@@ -13,6 +13,7 @@
  * library, so the class shell provided no benefit.
  */
 
+import { Bitmask } from "./bitmask";
 import {
 	beginDeferredStart,
 	DATA,
@@ -29,7 +30,7 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 	let cleanup: (() => void) | undefined;
 	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
-	let dirtyDeps = 0;
+	const dirtyDeps = new Bitmask(deps.length);
 	let anyDataReceived = false;
 
 	function run(): void {
@@ -44,8 +45,8 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 
 	for (let i = 0; i < deps.length; i++) {
 		if (disposed) break;
-		const depBit = 1 << i;
-		deps[i].source(START, (type: number, data: any) => {
+		const depIndex = i;
+		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) {
 				talkbacks.push(data);
 				return;
@@ -53,12 +54,12 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 			if (disposed) return;
 			if (type === STATE) {
 				if (data === DIRTY) {
-					if (dirtyDeps === 0) anyDataReceived = false;
-					dirtyDeps |= depBit;
+					if (dirtyDeps.empty()) anyDataReceived = false;
+					dirtyDeps.set(depIndex);
 				} else if (data === RESOLVED) {
-					if (dirtyDeps & depBit) {
-						dirtyDeps &= ~depBit;
-						if (dirtyDeps === 0) {
+					if (dirtyDeps.test(depIndex)) {
+						dirtyDeps.clear(depIndex);
+						if (dirtyDeps.empty()) {
 							if (anyDataReceived) run();
 							// else: all deps RESOLVED, skip
 						}
@@ -66,16 +67,16 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 				}
 			}
 			if (type === DATA) {
-				if (dirtyDeps & depBit) {
-					dirtyDeps &= ~depBit;
+				if (dirtyDeps.test(depIndex)) {
+					dirtyDeps.clear(depIndex);
 					anyDataReceived = true;
-					if (dirtyDeps === 0) {
+					if (dirtyDeps.empty()) {
 						run();
 					}
 				} else {
 					// DATA without prior DIRTY: raw callbag source or batch
 					// edge case. Match derived's behavior — treat as immediate.
-					if (dirtyDeps === 0) {
+					if (dirtyDeps.empty()) {
 						run();
 					} else {
 						anyDataReceived = true;

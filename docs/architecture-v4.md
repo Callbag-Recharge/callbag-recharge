@@ -335,24 +335,32 @@ C computes exactly once. B._value is updated via its tap. Diamond resolution hol
 
 **Key:** The bitmask waits for both paths. The ordering (which DATA arrives first) doesn't matter. Correctness is guaranteed by waiting for all bits to clear.
 
-### Bitmask algorithm (unchanged from v3, applied at multi-dep nodes only)
+### Bitmask algorithm (applied at multi-dep nodes only)
+
+The `Bitmask` class (`core/bitmask.ts`) provides per-dep dirty tracking safe for any number of deps:
+
+- **≤32 deps:** stores the bitmask as a plain number (`_v`). Bitwise ops on a single 32-bit integer — zero overhead vs. the v3 inline approach.
+- **>32 deps:** stores bits in a `Uint32Array` (`_w`), with `_v` tracking the count of set bits. `empty()` is O(1) via the count rather than scanning words.
+
+In both cases `empty()` is a single `_v === 0` comparison. Method dispatch is monomorphic (one class, one hidden class for all instances).
 
 ```ts
-let dirtyDeps = 0;
+const dirtyDeps = new Bitmask(deps.length);
 
 // On STATE DIRTY from depIndex:
-const bit = 1 << depIndex;
-const wasClean = dirtyDeps === 0;
-dirtyDeps |= bit;
+const wasClean = dirtyDeps.empty();
+dirtyDeps.set(depIndex);
 if (wasClean) signal(DIRTY);           // forward on first dirty dep only
 
 // On STATE RESOLVED from depIndex:
-dirtyDeps &= ~(1 << depIndex);
-if (dirtyDeps === 0) signal(RESOLVED); // all resolved without DATA
+if (dirtyDeps.test(depIndex)) {
+  dirtyDeps.clear(depIndex);
+  if (dirtyDeps.empty()) signal(RESOLVED); // all resolved without DATA
+}
 
 // On DATA from depIndex:
-dirtyDeps &= ~(1 << depIndex);         // clear bit; no-op if not set (raw callbag)
-if (dirtyDeps === 0) recompute();      // act only when all deps resolved
+dirtyDeps.clear(depIndex);             // clear bit; no-op if not set (raw callbag)
+if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 ```
 
 **Single-dep chains:** No bitmask. Forward every DIRTY directly.
