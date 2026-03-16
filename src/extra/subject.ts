@@ -59,8 +59,11 @@ export function subject<T>(): Subject<T> {
 			if (!hasSinks()) return;
 			_status = "DIRTY";
 			dispatch(STATE, DIRTY);
+			// Guard: sinks may have disconnected during DIRTY dispatch
+			if (!hasSinks()) return;
 			if (isBatching()) {
 				deferEmission(() => {
+					if (!hasSinks()) return;
 					_status = "SETTLED";
 					dispatch(DATA, currentValue);
 				});

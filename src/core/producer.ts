@@ -18,7 +18,17 @@
 
 import { Inspector } from "./inspector";
 import type { NodeStatus, Signal } from "./protocol";
-import { DATA, DIRTY, deferEmission, deferStart, END, isBatching, START, STATE } from "./protocol";
+import {
+	DATA,
+	DIRTY,
+	deferEmission,
+	deferStart,
+	END,
+	isBatching,
+	RESOLVED,
+	START,
+	STATE,
+} from "./protocol";
 import type { ProducerStore, SourceOptions, Store } from "./types";
 
 export type ProducerFn<T> = (actions: {
@@ -131,9 +141,10 @@ export class ProducerImpl<T> {
 	}
 
 	signal(s: Signal): void {
-		if ((this._flags & P_COMPLETED) || !this._output) return;
+		if (this._flags & P_COMPLETED || !this._output) return;
 		if (s === DIRTY) this._status = "DIRTY";
-		else this._status = "RESOLVED";
+		else if (s === RESOLVED) this._status = "RESOLVED";
+		// Unknown signals: dispatch without _status change (v4 forward-compat)
 		this._dispatch(STATE, s);
 	}
 
@@ -177,7 +188,7 @@ export class ProducerImpl<T> {
 	}
 
 	_start(): void {
-		if ((this._flags & P_STARTED) || !this._fn) return;
+		if (this._flags & P_STARTED || !this._fn) return;
 		this._flags |= P_STARTED;
 		// Pass this directly — emit/signal/complete/error are bound in constructor
 		const result = this._fn(this as any);
@@ -200,7 +211,7 @@ export class ProducerImpl<T> {
 		if (type === START) {
 			const sink = payload;
 			if (this._flags & P_COMPLETED) {
-				if ((this._flags & P_RESUB) && this._output === null) {
+				if (this._flags & P_RESUB && this._output === null) {
 					this._flags &= ~P_COMPLETED;
 					this._status = "DISCONNECTED";
 				} else {

@@ -24,7 +24,7 @@
 
 import { Inspector } from "./inspector";
 import type { NodeStatus, Signal } from "./protocol";
-import { DATA, DIRTY, END, START, STATE } from "./protocol";
+import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";
 import type { Actions, SourceOptions, Store } from "./types";
 
 export type OperatorOpts<B> = SourceOptions<B>;
@@ -106,7 +106,8 @@ export class OperatorImpl<B> {
 			signal: (s: Signal) => {
 				if (completed) return;
 				if (s === DIRTY) this._status = "DIRTY";
-				else this._status = "RESOLVED";
+				else if (s === RESOLVED) this._status = "RESOLVED";
+				// Unknown signals: dispatch without _status change (v4 forward-compat)
 				this._dispatch(STATE, s);
 			},
 			complete: () => {
@@ -206,7 +207,7 @@ export class OperatorImpl<B> {
 		if (type === START) {
 			const sink = payload;
 			if (this._flags & O_COMPLETED) {
-				if ((this._flags & O_RESUB) && this._output === null) {
+				if (this._flags & O_RESUB && this._output === null) {
 					this._flags &= ~O_COMPLETED;
 					this._status = "DISCONNECTED";
 				} else {
