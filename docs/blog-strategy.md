@@ -75,7 +75,7 @@ Each "engineering evolution" post follows this pattern:
 |---|-------|----------------|----------------|
 | 4 | **"Why Control Signals Don't Belong in the Data Stream"** | v2→v3 transition, sessions 8452282f + 8601463b, `architecture-v3.md` | Most unique insight — explains what makes callbag-recharge different |
 | 5 | **"Why Our Computed States Are Eagerly Reactive"** | Sessions 12795037 + f23a9e35 — STANDALONE mode | Contrasts with Preact Signals/SolidJS lazy approach |
-| 6 | **"Diamond Resolution Without Pull-Phase Computation"** | Session ce974b95, `architecture-v4.md` §8 | Core correctness story |
+| 6 | **"Diamond Resolution Without Pull-Phase Computation"** | Session ce974b95, `architecture.md` §8 | Core correctness story |
 
 #### Deep Dives (10+ hrs each)
 
@@ -134,8 +134,8 @@ Each "engineering evolution" post follows this pattern:
 
 | File | Location | Content |
 |------|----------|---------|
-| `architecture-v4.md` | `docs/` | Canonical — output slot, STANDALONE, chain model |
-| `architecture-v4-review.md` | `docs/` | Review notes, error asymmetry, trade-offs |
+| `architecture.md` | `docs/` | Canonical — output slot, STANDALONE, chain model |
+| `architecture-v4-review.md (archived)` | `docs/` | Review notes, error asymmetry, trade-offs |
 | `state-management.md` | `docs/` | Competitive landscape & positioning |
 | `benchmarks.md` | `docs/` | Performance data |
 | `optimizations.md` | `docs/` | V8 optimization techniques |

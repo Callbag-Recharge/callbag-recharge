@@ -197,6 +197,6 @@ This is a lesson in **iterative refinement:** sometimes an earlier design (ADOPT
 - `src/__tests__/core/v4-adopt.test.ts` — Deleted (tests for a protocol that no longer exists)
 - `src/core/derived.ts`, `src/core/operator.ts` — Simplified output slot handling
 - `CLAUDE.md` — Updated to reflect simplified architecture (no ADOPT)
-- `docs/architecture-v4.md` — Updated §6 (output slot) to explain why ADOPT isn't needed
+- `docs/architecture.md` — Updated §6 (output slot) to explain why ADOPT isn't needed
 
 ---END SESSION---

@@ -55,5 +55,5 @@ npm install callbag-recharge
 
 ## Links
 - GitHub: https://github.com/Callbag-Recharge/callbag-recharge
-- Architecture: docs/architecture-v4.md
+- Architecture: docs/architecture.md
 - Benchmarks: docs/benchmarks.md

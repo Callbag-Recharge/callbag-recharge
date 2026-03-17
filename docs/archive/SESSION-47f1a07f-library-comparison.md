@@ -212,7 +212,7 @@ Over maximum simplicity (Zustand) or maximum magic (Jotai).
 ## FILES CHANGED
 
 - `docs/state-management.md` — Comprehensive comparison of Zustand, Jotai, SolidJS, Preact Signals, and Recharge
-- `docs/architecture-v4.md` — Added "Compatibility targets" section positioning Recharge against TC39 Signals, raw callbag, RxJS
+- `docs/architecture.md` — Added "Compatibility targets" section positioning Recharge against TC39 Signals, raw callbag, RxJS
 - Future roadmap: `src/compat/jotai.ts`, `src/compat/zustand.ts`, `src/compat/signals.ts` — bridge layers for interop
 
 ---END SESSION---

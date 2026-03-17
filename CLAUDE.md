@@ -25,7 +25,7 @@ callbag-recharge is a reactive state management library where **every store is a
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array (`EffectImpl` class). Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
 ### Key design patterns (output slot + chain model)
 
-See [docs/architecture-v4.md](docs/architecture-v4.md) for full architecture design.
+See [docs/architecture.md](docs/architecture.md) for full architecture design.
 
 - **Output slot model:** Replaces `_sinks: Set | null` with lazy output slot: `null → fn → Set`. Single subscriber avoids Set allocation (~200 bytes saved per node). P0 optimization.
 - **Node status:** Every node tracks `_status: NodeStatus` (DISCONNECTED, DIRTY, SETTLED, RESOLVED, COMPLETED, ERRORED). Surfaced via `Inspector.inspect()`.

@@ -95,7 +95,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `wrap(rawSource)` | Promotes a raw callbag source to a tier 2 Store (producer-based, autoDirty) |
 | `wrap(input, rawOp)` | Promotes a raw callbag map-like operator to a tier 1 Store (STATE bypass for diamond resolution) |
 
-**Constraint:** `wrap(input, rawOp)` is synchronous map-only. Filtering or tier 2 raw operators must use `operator()` directly with explicit signal handling. See `docs/architecture-v4-review.md` §2.7 for full rationale.
+**Constraint:** `wrap(input, rawOp)` is synchronous map-only. Filtering or tier 2 raw operators must use `operator()` directly with explicit signal handling. See `docs/archive/architecture-v4-review.md` §2.7 for full rationale.
 
 ---
 

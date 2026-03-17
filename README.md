@@ -132,7 +132,7 @@ Import only what you need from `callbag-recharge/extra`.
 5. **`undefined` means empty** — no special symbols, no `.ready` flag
 6. **Observability is external** — Inspector singleton with WeakMaps, zero per-store cost
 
-See [docs/architecture-v4.md](./docs/architecture-v4.md) for the full design and implementation details.
+See [docs/architecture.md](./docs/architecture.md) for the full design and implementation details.
 
 ---
 
@@ -154,7 +154,7 @@ store.source(0, (type, data) => {
 
 ## Documentation
 
-- [Architecture](./docs/architecture-v4.md) — layers, design principles, how each primitive works
+- [Architecture](./docs/architecture.md) — layers, design principles, how each primitive works
 - [Benchmarks](./docs/benchmarks.md) — head-to-head comparison vs Preact Signals and raw Callbag
 - [Optimizations](./docs/optimizations.md) — techniques to close performance gaps
 
