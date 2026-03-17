@@ -85,12 +85,37 @@ package.json                       ← Added ./patterns/createStore export
 tsup.config.ts                     ← Added entry point
 ```
 
+## Zustand Middleware — Not Needed
+
+Discussed whether to build a Zustand adapter for plugin compatibility. Decided against it.
+
+**Why Zustand middleware doesn't plug in directly:** Zustand middleware wraps the `StateCreator` function `(set, get, api) => ...` — a three-argument chain composition model. Our `StateCreator` is `(set, get) => T` (no `api` arg). The `StoreApi` shape matches for reading/subscribing, but the middleware composition model is different.
+
+**Why we don't need them:** callbag-recharge's primitives cover the same ground natively:
+
+| Zustand middleware | callbag-recharge equivalent |
+|---|---|
+| `persist` | `effect([store.store], () => localStorage.setItem(...))` — 2 lines |
+| `devtools` | `Inspector.dumpGraph()` / `Inspector.observe()` — built-in, runtime graph, no extension |
+| `immer` | Wrap `set` with `produce` in the initializer — 1 line |
+| `subscribeWithSelector` | `store.select()` — already better (diamond-safe, memoized) |
+
+A compatibility layer would require matching Zustand's full `StateCreator<T, Mps, Mcs>` generic middleware type signature — complex TypeScript gymnastics for marginal gain.
+
 ## Rejected Alternatives
 
+- **Zustand middleware adapter** — Different composition model (`StateCreator` wrapping vs StoreApi shape). Native primitives (`effect`, `Inspector`, `select`) cover all use cases. Not worth the TypeScript complexity.
 - **Deep merge instead of shallow** — Matches Zustand behavior. Deep merge is expensive and surprising for arrays. Users should use updater functions for nested state.
 - **Implicit tracking (Pinia-style)** — Contradicts explicit deps design principle (see SESSION on pure callbag refactor).
 - **Built-in React hook** — Framework-agnostic by design. React bindings are a separate concern.
 - **Select deduplication/caching** — `select()` returns a new derived store each call (by design). Users store selectors in variables, same as Zustand. Caching would require WeakMap overhead for a pattern that doesn't need it.
+
+## Post-Review Cleanup
+
+After the code review fixes, simplified the implementation further:
+- **Removed `initState` / `initialState` dual variables** — `initialState` is the single mutable variable for both phases. `frozenInitial` captures the snapshot for `getInitialState()`.
+- **Removed `backing` / `source` dual names** — `source` is the only name. Starts `null` (phase 1), becomes the `state()` store (phase 2).
+- **Documented why `coreSubscribe` over `effect`** — `coreSubscribe` is a lightweight sink (just a callback, no node allocation, no Inspector registration). `effect()` creates a full graph node — unnecessary overhead for "call me when values change."
 
 ## Test Coverage
 
@@ -98,6 +123,7 @@ tsup.config.ts                     ← Added entry point
 
 ## Outcome
 
-- `createStore` pattern: production-ready, Zustand StoreApi compatible
+- `createStore` pattern: production-ready, no Zustand adapter needed
 - `teardown()`: new protocol-level primitive for graph destruction
+- Native equivalents documented for all major Zustand middleware (persist, devtools, immer, subscribeWithSelector)
 - Patterns directory convention established for future patterns (memoryStore, etc.)

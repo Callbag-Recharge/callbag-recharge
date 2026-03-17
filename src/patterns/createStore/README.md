@@ -212,20 +212,80 @@ const dispose = effect([userStore.store], () => {
 dispose()
 ```
 
-## Zustand Middleware Compatibility
+## Replacing Zustand Middleware
 
-`createStore` matches Zustand's `StoreApi<T>` interface:
+Zustand middleware (`persist`, `devtools`, `immer`) compose by wrapping the `StateCreator` — a different composition model than callbag-recharge. But you don't need them: callbag-recharge's primitives cover the same ground natively, often in fewer lines.
+
+### persist → `effect()` (2 lines)
 
 ```ts
-interface StoreApi<T> {
-  setState: (partial, replace?) => void
-  getState: () => T
-  getInitialState: () => T
-  subscribe: (listener) => () => void
-}
+import { effect } from 'callbag-recharge'
+
+const store = createStore((set) => ({
+  count: 0,
+  increment: () => set(s => ({ count: s.count + 1 })),
+}))
+
+// Auto-persist to localStorage on every state change
+effect([store.store], () => {
+  localStorage.setItem('my-store', JSON.stringify(store.getState()))
+})
+
+// Hydrate on startup
+const saved = localStorage.getItem('my-store')
+if (saved) store.setState(JSON.parse(saved), true)
 ```
 
-This means Zustand middleware that wraps `StoreApi` (persist, devtools, immer) can be adapted to work with callbag-recharge stores.
+### devtools → `Inspector` (built-in, more powerful)
+
+```ts
+import { Inspector } from 'callbag-recharge'
+
+// Dump entire reactive graph (all nodes, values, edges, status)
+Inspector.dumpGraph()
+
+// Observe a specific store at the protocol level
+Inspector.observe(store.store)
+
+// Trace value changes with callback
+Inspector.trace(store.store, (value) => {
+  console.log('State changed:', value)
+})
+```
+
+No browser extension needed — works in Node.js, tests, CI, anywhere.
+
+### immer → wrap `set` in the initializer (1 line)
+
+```ts
+import { produce } from 'immer'
+
+const store = createStore((set) => {
+  const immerSet = (fn: (draft: State) => void) =>
+    set(s => produce(s, fn))
+
+  return {
+    todos: [] as Todo[],
+    addTodo: (text: string) => immerSet(d => {
+      d.todos.push({ text, done: false })
+    }),
+    toggleTodo: (i: number) => immerSet(d => {
+      d.todos[i].done = !d.todos[i].done
+    }),
+  }
+})
+```
+
+### subscribeWithSelector → `select()` (already built-in, better)
+
+```ts
+// Zustand: subscribeWithSelector middleware + manual equality
+// callbag-recharge: just use select()
+const count = store.select(s => s.count)
+
+// Subscribe to only count changes — diamond-safe, auto-memoized
+subscribe(count, (value) => console.log('count:', value))
+```
 
 ## Inspecting the Store Graph
 
@@ -273,7 +333,7 @@ function createStore<T extends object>(
 | `subscribe(listener)` | Listen to state changes. Returns unsubscribe function |
 | `select(selector, equals?)` | Create a derived `Store<U>` from a selector function |
 | `store` | The underlying `WritableStore<T>` for composition |
-| `destroy()` | Disconnect internal subscriptions |
+| `destroy()` | Send END to all downstream subscribers and derived stores, cascading through the entire subgraph. Store enters COMPLETED state. |
 
 ### `batch(fn)`
 
@@ -281,6 +341,18 @@ Re-exported from core. Coalesces state updates within `fn` into a single notific
 
 ```ts
 function batch<T>(fn: () => T): T
+```
+
+### `teardown(store)`
+
+Re-exported from core. Protocol-level graph destruction — sends END to all downstream sinks of any store node. Works with `state()`, `derived()`, `producer()`, `operator()`.
+
+```ts
+import { teardown } from 'callbag-recharge/patterns/createStore'
+// or
+import { teardown } from 'callbag-recharge'
+
+teardown(someStore)  // sends END to all downstream, cascading
 ```
 
 ## Migration from Zustand
