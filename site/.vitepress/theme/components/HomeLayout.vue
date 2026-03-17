@@ -88,7 +88,7 @@ const primitives = [
           <span class="title-line-1">State that</span>
           <span class="title-line-2"><em class="flows-word">flows</em><span class="period">.</span></span>
         </h1>
-        <p class="hero-chinese">在流动的水里只取一瓢</p>
+        <p class="hero-chinese">川流不息，唯取一瓢</p>
         <p class="hero-sub">
           5 primitives. 60+ operators. Diamond-safe. Framework-agnostic.
           <br />From atoms to streams in one library.
@@ -453,15 +453,20 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
 }
 
 .flows-word {
-  font-family: 'Caveat', cursive;
+  font-family: 'Tangerine', cursive;
   font-style: normal;
-  font-weight: 600;
-  font-size: 1.15em;
+  font-weight: 700;
+  font-size: 1.8em;
   letter-spacing: 0.01em;
   background: linear-gradient(135deg, var(--cr-aqua), #7df0d5, var(--cr-aqua-dim));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  line-height: 0.8;
+  vertical-align: bottom;
+  display: inline-block;
+  padding: 0 0.15em;
+  margin-left: -0.05em;
 }
 
 .period {

@@ -163,7 +163,7 @@ Combine the best patterns from each library:
 
 ### Why Trust This Library — Three Promises
 
-> 在流动的水里只取一瓢，不打扰，又很清澈
+> 川流不息，唯取一瓢
 > *"Take one scoop from flowing water — undisturbed, crystal clear."*
 
 1. **Glitch-free diamond resolution** — Tier 1 nodes (state, derived, operators) use two-phase push (DIRTY then values) with dirty-dep counting. When A → B, A → C, B+C → D, D computes exactly once with consistent values. Jotai, Nanostores, and TC39 Signals all glitch here. You can trust every derived value is correct.
@@ -264,7 +264,7 @@ Every one of these maps directly to callbag-recharge primitives. No other state 
 
 ## Positioning & Slogans
 
-> 在流动的水里只取一瓢，不打扰，又很清澈（清楚）
+> 川流不息，唯取一瓢
 
 | Slogan | Angle |
 |--------|-------|
@@ -569,7 +569,7 @@ Adding a `createStore()` or `defineAtom()` wrapper would add a concept without a
 
 ### The vision
 
-> 在流动的水里只取一瓢，不打扰，又很清澈
+> 川流不息，唯取一瓢
 > *"Take one scoop from flowing water — undisturbed, crystal clear."*
 
 **callbag-recharge is the universal reactive layer.** Not a state manager that needs a streaming library. Not a streaming library that needs a state manager. One library where state *is* a stream — sync, async, and real-time, all in the same graph, with the same operators, the same batching, and the same guarantees.
@@ -633,4 +633,4 @@ No library owns "state management for the AI era." The streaming, cancellation, 
 
 First mover in GEO for this space → compounding flywheel → default recommendation → adoption moat.
 
-**State that flows. 在流动的水里只取一瓢。**
+**State that flows. 川流不息，唯取一瓢。**
