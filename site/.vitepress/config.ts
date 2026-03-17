@@ -5,6 +5,12 @@ export default defineConfig({
 	description: "State that flows. Reactive state management for TypeScript.",
 	base: "/callbag-recharge/",
 
+	appearance: false,
+
+	markdown: {
+		theme: "material-theme-palenight",
+	},
+
 	head: [
 		["link", { rel: "icon", href: "/callbag-recharge/favicon.ico" }],
 		["meta", { property: "og:title", content: "callbag-recharge" }],
@@ -16,6 +22,28 @@ export default defineConfig({
 			},
 		],
 		["meta", { property: "og:type", content: "website" }],
+		[
+			"link",
+			{
+				rel: "preconnect",
+				href: "https://fonts.googleapis.com",
+			},
+		],
+		[
+			"link",
+			{
+				rel: "preconnect",
+				href: "https://fonts.gstatic.com",
+				crossorigin: "",
+			},
+		],
+		[
+			"link",
+			{
+				rel: "stylesheet",
+				href: "https://fonts.googleapis.com/css2?family=Caveat:wght@400;500;600;700&family=Instrument+Sans:ital,wght@0,400;0,500;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap",
+			},
+		],
 	],
 
 	themeConfig: {
@@ -24,10 +52,6 @@ export default defineConfig({
 			{ text: "API", link: "/api/state" },
 			{ text: "Extras", link: "/extras/" },
 			{ text: "Architecture", link: "/architecture/" },
-			{
-				text: "GitHub",
-				link: "https://github.com/Callbag-Recharge/callbag-recharge",
-			},
 		],
 
 		sidebar: [
