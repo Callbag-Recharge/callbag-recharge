@@ -8,25 +8,25 @@ onMounted(() => {
 
 const features = [
 	{
-		icon: "~3.7 KB",
+		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>',
 		title: "Tiny Core",
 		desc: "Zero dependencies. ~376 bytes per store. Tree-shakeable extras.",
 		color: "#4de8c2",
 	},
 	{
-		icon: "\u2666",
+		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z"/></svg>',
 		title: "Diamond-Safe",
 		desc: "Two-phase push guarantees glitch-free derived values. Always correct.",
 		color: "#f0a858",
 	},
 	{
-		icon: "60+",
-		title: "Operators",
+		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v3"/></svg>',
+		title: "60+ Operators",
 		desc: "switchMap, debounce, retry, scan, merge, combine, and more.",
 		color: "#a78bfa",
 	},
 	{
-		icon: "\u25CE",
+		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
 		title: "Inspectable",
 		desc: "Every node observable via Inspector. See your reactive graph.",
 		color: "#f472b6",
@@ -117,7 +117,7 @@ const primitives = [
           class="feature-card"
           :style="{ '--delay': `${i * 0.1}s`, '--accent': f.color }"
         >
-          <div class="feature-icon">{{ f.icon }}</div>
+          <div class="feature-icon" v-html="f.icon"></div>
           <h3 class="feature-title">{{ f.title }}</h3>
           <p class="feature-desc">{{ f.desc }}</p>
         </div>
@@ -620,11 +620,14 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
 }
 
 .feature-icon {
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 1.6rem;
-  font-weight: 700;
-  color: var(--accent);
   margin-bottom: 1rem;
+  color: var(--accent);
+}
+
+.feature-icon svg {
+  display: block;
+  stroke: currentColor;
+  filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 40%, transparent));
 }
 
 .feature-title {
