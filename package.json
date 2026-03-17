@@ -27,6 +27,16 @@
 				"default": "./dist/extra/index.cjs"
 			}
 		},
+		"./patterns/createStore": {
+			"import": {
+				"types": "./dist/patterns/createStore/index.d.ts",
+				"default": "./dist/patterns/createStore/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/createStore/index.d.cts",
+				"default": "./dist/patterns/createStore/index.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",

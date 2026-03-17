@@ -28,6 +28,7 @@ export {
 	RESOLVED,
 	START,
 	STATE,
+	teardown,
 } from "./core/protocol";
 // Core primitives
 export { state } from "./core/state";

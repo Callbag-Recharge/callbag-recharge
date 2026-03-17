@@ -103,6 +103,28 @@ Comprehensive benchmark suite comparing Recharge to Preact Signals, SolidJS, RxJ
 
 **Outcome:** docs/benchmarks.md, docs/optimizations.md, performance regression guards in test suite.
 
+### Session unified-state-management (March 16) — Unified State Management Across Frontend & Backend
+**Topic:** Why frontend state management and backend event processing are the same problem, and how callbag-recharge + Inspector unifies them
+
+The strategic discussion identifying that the frontend/backend divide in state management is artificial — caused by tools being afraid of different things (frontend fears streaming, backend fears fine-grained reactivity). callbag-recharge bridges both because callbag protocol doesn't distinguish timescales.
+
+**Key insight:** Inspector is the unifying principle. The reason these worlds feel opaque is lack of runtime graph visibility. AI memory (3-layer model: working, session, long-term) is the P0 application because it naturally spans all timescales.
+
+**Rejected:** Wrap Redis/Kafka as connectors only; ship separate frontend/backend packages; use Inspector as Jotai compat registry; add implicit tracking to core.
+
+**Outcome:** `memoryStore` pattern (P0), `createStore()` pattern (P1), compat layer strategy (Jotai registry-based, Zustand StoreApi match), backend positioning strategy.
+
+### Session createStore-pattern (March 17) — createStore Pattern Implementation
+**Topic:** Zustand-style single-store pattern backed by callbag-recharge, protocol-level teardown(), adversarial code review
+
+Implemented the `createStore()` pattern matching Zustand's `create((set, get) => ...)` ergonomics with callbag-recharge's killer advantage: diamond-safe `select()` selectors backed by `derived()`. Added protocol-level `teardown()` utility for graph destruction. Ran adversarial code review (Blind Hunter + Edge Case Hunter) finding 8 issues — all fixed: initializer safety, replace semantics, action preservation, single source of truth, Object.hasOwn, cascading destroy.
+
+**Key insight:** `select()` backed by `derived()` with push-phase memoization is architecturally superior to Zustand's manual selectors. `teardown()` fills a protocol gap — `complete()` exists on ProducerStore but not on WritableStore or derived nodes.
+
+**Rejected:** Deep merge (matches Zustand shallow); implicit tracking (contradicts explicit deps); built-in React hook (framework-agnostic); select dedup/caching (unnecessary overhead).
+
+**Outcome:** `createStore` pattern (production-ready, 31 tests), `teardown()` protocol primitive, patterns directory convention established.
+
 ---
 
 ## Additional Sessions (Partial Coverage)

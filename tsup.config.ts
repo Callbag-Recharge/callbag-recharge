@@ -51,6 +51,7 @@ export default defineConfig({
 		"src/extra/elementAt.ts",
 		"src/extra/partition.ts",
 		"src/extra/repeat.ts",
+		"src/patterns/createStore/index.ts",
 	],
 	format: ["esm", "cjs"],
 	dts: true,

@@ -98,3 +98,24 @@ export function deferStart(start: () => void): void {
 		start();
 	}
 }
+
+// ---------------------------------------------------------------------------
+// teardown — protocol-level graph destruction
+// ---------------------------------------------------------------------------
+// Sends END to all downstream sinks of a store node, cascading through the
+// entire subgraph. After teardown, the node is in COMPLETED state and won't
+// accept new values or subscriptions.
+//
+// Works with any node that uses the output slot model:
+// - ProducerImpl / StateImpl / OperatorImpl → calls .complete()
+// - DerivedImpl → calls ._handleEnd() (no public complete() on derived)
+// ---------------------------------------------------------------------------
+
+export function teardown(store: { source: (type: number, payload?: any) => void }): void {
+	const node = store as any;
+	if (typeof node.complete === "function") {
+		node.complete();
+	} else if (typeof node._handleEnd === "function") {
+		node._handleEnd(undefined);
+	}
+}

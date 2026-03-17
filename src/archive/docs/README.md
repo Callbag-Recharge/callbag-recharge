@@ -67,6 +67,18 @@ This directory preserves the most important design discussions from the callbag-
    - Length: 252 lines
    - Best for: Performance story and trade-offs
 
+9. **SESSION-unified-state-management.md**
+   - Unified State Management — Frontend, Backend, and AI Memory
+   - When: March 16, 2026
+   - Length: ~350 lines
+   - Best for: Strategic positioning, compat layer design, memoryStore pattern, why frontend/backend state management are the same problem
+
+10. **SESSION-createStore-pattern.md**
+    - createStore Pattern — Zustand-Style Single Store
+    - When: March 17, 2026
+    - Length: ~150 lines
+    - Best for: createStore implementation decisions, adversarial code review findings, protocol-level teardown() design, patterns directory convention
+
 ## Reading Paths
 
 ### For Architecture Newcomers (4 sessions, ~1 hour)
@@ -157,10 +169,10 @@ Each file references:
 
 | Metric | Value |
 |--------|-------|
-| Total sessions | 8 |
-| Total lines | 1,967 |
-| Date range | Mar 14–16, 2026 |
-| Archive files | 11 |
+| Total sessions | 10 |
+| Total lines | ~2,450 |
+| Date range | Mar 14–17, 2026 |
+| Archive files | 13 |
 
 ## Next Steps
 

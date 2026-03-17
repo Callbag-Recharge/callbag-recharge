@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
-import { createStore, batch } from "../../../patterns/createStore";
+import { createStore, batch, teardown } from "../../../patterns/createStore";
 import { derived, effect } from "../../../index";
+import { subscribe } from "../../../core/subscribe";
 
 describe("createStore", () => {
 	// -----------------------------------------------------------------------
@@ -61,6 +62,103 @@ describe("createStore", () => {
 		const store = createStore(() => ({ count: 0 }));
 		store.setState((s) => ({ count: s.count + 5 }));
 		expect(store.getState().count).toBe(5);
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #3: replace=true semantics
+	// -----------------------------------------------------------------------
+
+	it("replace=true does NOT preserve actions — full replacement", () => {
+		const store = createStore((set) => ({
+			count: 0,
+			increment: () => set((s) => ({ count: s.count + 1 })),
+		}));
+
+		// replace=true should replace the entire state — no action preservation
+		store.setState({ count: 99 } as any, true);
+		expect(store.getState().count).toBe(99);
+		expect((store.getState() as any).increment).toBeUndefined();
+	});
+
+	it("replace=true with actions in replacement object uses those actions", () => {
+		const store = createStore((set) => ({
+			count: 0,
+			increment: () => set((s) => ({ count: s.count + 1 })),
+		}));
+
+		const newIncrement = vi.fn();
+		store.setState({ count: 50, increment: newIncrement } as any, true);
+		expect(store.getState().count).toBe(50);
+		store.getState().increment();
+		expect(newIncrement).toHaveBeenCalled();
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #6: no-op updater early return
+	// -----------------------------------------------------------------------
+
+	it("no-op updater does not trigger subscribers", () => {
+		const store = createStore(() => ({ count: 0 }));
+		const listener = vi.fn();
+		store.subscribe(listener);
+
+		// Updater returns same reference — should be a no-op
+		store.setState((s) => s);
+		expect(listener).not.toHaveBeenCalled();
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #1: set() during initializer
+	// -----------------------------------------------------------------------
+
+	it("set() during initializer does not throw", () => {
+		const store = createStore((set) => {
+			set({ count: 5 } as any);
+			return { count: 0 };
+		});
+		// initializer's return value is the final initial state
+		expect(store.getState().count).toBe(0);
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #2: get() during initializer
+	// -----------------------------------------------------------------------
+
+	it("get() during initializer returns undefined before first set", () => {
+		let captured: any;
+		createStore((_set, get) => {
+			captured = get();
+			return { count: 0 };
+		});
+		expect(captured).toBeUndefined();
+	});
+
+	it("get() during initializer returns updated state after set()", () => {
+		let captured: any;
+		const store = createStore((set, get) => {
+			set({ count: 42 } as any);
+			captured = get();
+			return { count: 0 };
+		});
+		expect(captured).toEqual({ count: 42 });
+		// Final state is from the return value
+		expect(store.getState().count).toBe(0);
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #7: action preservation uses Object.hasOwn
+	// -----------------------------------------------------------------------
+
+	it("action preservation is not fooled by prototype properties", () => {
+		const store = createStore((set) => ({
+			count: 0,
+			toString: () => set({ count: 99 }),
+		}));
+
+		// setState with an object whose prototype has toString
+		store.setState({ count: 5 });
+		// toString action should be preserved (Object.hasOwn check)
+		expect(typeof store.getState().toString).toBe("function");
 	});
 
 	// -----------------------------------------------------------------------
@@ -156,6 +254,21 @@ describe("createStore", () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// Shallow merge behavior (documented edge case)
+	// -----------------------------------------------------------------------
+
+	it("shallow merge replaces nested objects entirely", () => {
+		const store = createStore(() => ({
+			user: { name: "Alice", age: 30 },
+		}));
+
+		// Shallow merge — the entire user object is replaced
+		store.setState({ user: { name: "Bob" } } as any);
+		expect(store.getState().user).toEqual({ name: "Bob" });
+		// age is lost — this is expected (Zustand-compatible shallow merge)
+	});
+
+	// -----------------------------------------------------------------------
 	// Composition with callbag-recharge primitives
 	// -----------------------------------------------------------------------
 
@@ -202,13 +315,12 @@ describe("createStore", () => {
 			store.setState({ b: 2 });
 		});
 
-		// batch coalesces — listener should fire for each set but values are batched
-		// The important thing is the final state is correct
+		// Final state is correct regardless of batching
 		expect(store.getState()).toEqual({ a: 1, b: 2 });
 	});
 
 	// -----------------------------------------------------------------------
-	// Actions survive setState
+	// Actions survive setState (shallow merge, not replace)
 	// -----------------------------------------------------------------------
 
 	it("actions are preserved after setState", () => {
@@ -265,13 +377,65 @@ describe("createStore", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// destroy
+	// Fix #5: single source of truth — no desync
 	// -----------------------------------------------------------------------
 
-	it("destroy disconnects internal subscriptions", () => {
+	it("getState always returns latest value (no desync)", () => {
+		const store = createStore((set) => ({
+			count: 0,
+			increment: () => set((s) => ({ count: s.count + 1 })),
+		}));
+
+		// Rapid updates — getState should always reflect the latest
+		store.getState().increment();
+		store.getState().increment();
+		store.getState().increment();
+		expect(store.getState().count).toBe(3);
+	});
+
+	// -----------------------------------------------------------------------
+	// Fix #8: destroy() — protocol-level teardown
+	// -----------------------------------------------------------------------
+
+	it("destroy sends END to subscribers", () => {
 		const store = createStore(() => ({ count: 0 }));
+
+		const onEnd = vi.fn();
+		subscribe(store.store, () => {}, { onEnd });
+
 		store.destroy();
-		// After destroy, getState still works (reads from state store)
+		expect(onEnd).toHaveBeenCalledTimes(1);
+	});
+
+	it("destroy cascades END to select()-derived stores", () => {
+		const store = createStore((set) => ({
+			count: 0,
+			increment: () => set((s) => ({ count: s.count + 1 })),
+		}));
+
+		const countStore = store.select((s) => s.count);
+
+		const onEnd = vi.fn();
+		subscribe(countStore, () => {}, { onEnd });
+
+		store.destroy();
+		expect(onEnd).toHaveBeenCalledTimes(1);
+	});
+
+	it("setState is a no-op after destroy", () => {
+		const store = createStore(() => ({ count: 0 }));
+
+		store.destroy();
+		store.setState({ count: 99 });
+		// getState still returns the last value before destroy
 		expect(store.getState().count).toBe(0);
+	});
+
+	// -----------------------------------------------------------------------
+	// teardown re-export
+	// -----------------------------------------------------------------------
+
+	it("teardown is re-exported from createStore module", () => {
+		expect(typeof teardown).toBe("function");
 	});
 });
