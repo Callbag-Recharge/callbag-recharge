@@ -51,13 +51,29 @@ src/
 │   ├── derived.ts   ← syntax sugar over operator with terminator management
 │   ├── effect.ts    ← sink role — imports protocol + types
 │   └── pipe.ts      ← map/filter/scan sugar via derived
-├── extra/           ← operators, sources, sinks — import from core only
+├── extra/           ← operators, sources, sinks — import from core + utils only
+├── utils/           ← pure utilities — zero reactive deps (except reactiveEviction)
+│   ├── backoff.ts   ← BackoffStrategy: constant, linear, exponential, fibonacci, decorrelatedJitter
+│   ├── eviction.ts  ← EvictionPolicy: fifo, lru, lfu, scored, random
+│   └── reactiveEviction.ts ← reactiveScored: O(log n) min-heap with reactive score stores
+├── data/            ← Level 3 reactive data structures — import from core + utils
+│   ├── reactiveMap.ts   ← reactive key-value store (replaces kvStore)
+│   ├── reactiveLog.ts   ← append-only reactive log with bounded size
+│   ├── reactiveIndex.ts ← reactive secondary index (indexKey → Set<primaryKey>)
+│   └── types.ts         ← shared type definitions
+├── memory/          ← Level 3 agent memory — import from core + utils + data
+│   ├── node.ts      ← memoryNode: content + meta + reactive score
+│   ├── collection.ts← collection: bounded container with decay-scored eviction
+│   └── decay.ts     ← scoring: recency decay, importance, frequency
 └── index.ts         ← public API barrel
 ```
 
 **Strict rules** (unchanged):
-- `core/` never imports from `extra/`
-- `extra/` imports from `core/` only, never from each other
+- `core/` never imports from `extra/`, `utils/`, `data/`, or `memory/`
+- `extra/` imports from `core/` and `utils/` only, never from each other
+- `utils/` never imports from `extra/`, `data/`, or `memory/` (except `reactiveEviction.ts` which imports `core/effect`)
+- `data/` imports from `core/` and `utils/` only
+- `memory/` imports from `core/`, `utils/`, and `data/`
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
 ---
@@ -703,3 +719,63 @@ For all extras:
   - Match RxJS semantics unless in the divergences table (§13)
   - All nodes register with Inspector (kind, name); skip for inner anonymous nodes
 ```
+
+---
+
+## 19. Utils Layer — Pure Strategies
+
+`src/utils/` contains pure functions/objects that configure behavior for operators and data structures. They are **not reactive nodes** — they have zero callbag dependencies (except `reactiveEviction.ts` which bridges into the graph).
+
+### Backoff Strategies (`utils/backoff.ts`)
+
+```ts
+type BackoffStrategy = (attempt: number, error?: unknown) => number | null;
+```
+
+Returns ms to wait before next retry, or `null` to stop. Built-in: `constant`, `linear`, `exponential` (with jitter), `fibonacci`, `decorrelatedJitter` (AWS-recommended). `withMaxAttempts(strategy, n)` caps any strategy.
+
+**Consumers:** `retry` (enhanced), future `circuitBreaker`, future `producer` reconnect.
+
+### Eviction Policies (`utils/eviction.ts`)
+
+```ts
+interface EvictionPolicy<K> {
+  touch(key: K): void;     insert(key: K): void;
+  delete(key: K): void;    evict(count?: number): K[];
+  size(): number;           clear(): void;
+}
+```
+
+Pure bookkeeping — tracks access patterns, decides eviction order. Built-in: `fifo`, `lru`, `lfu`, `scored`, `random`.
+
+**Consumers:** `reactiveMap` (bounded), `collection` (scored), future patterns.
+
+### Reactive Scored (`utils/reactiveEviction.ts`)
+
+`reactiveScored(getStore, scoreOf)` — O(log n) min-heap that subscribes to score stores via `effect()`, auto-sifts on updates. Used by `collection` for decay-based memory eviction.
+
+---
+
+## 20. Level 3 Data Structures
+
+`src/data/` contains reactive data structures built on core primitives + utils. Each uses the version-gated pattern: a `state<number>` version counter bumped on structural changes, with derived stores that materialize lazily from the version.
+
+### reactiveMap (`data/reactiveMap.ts`)
+
+Reactive key-value store. Single source of truth (`_map: Map`), internal state stores drive `select()`. Version-gated `keysStore`/`sizeStore`. Supports TTL, pluggable eviction, namespaces, keyspace events.
+
+### reactiveLog (`data/reactiveLog.ts`)
+
+Append-only reactive log. Each entry gets a monotonic sequence number. Supports bounded size (circular buffer — oldest trimmed on overflow). Reactive `lengthStore`, `latest`, `tail(n)`, and events.
+
+### reactiveIndex (`data/reactiveIndex.ts`)
+
+Reactive secondary index mapping `indexKey → Set<primaryKey>`. Maintains a reverse map (`primaryKey → Set<indexKey>`) for O(1) update/remove. Reactive `select(indexKey)`, `keysStore`, `sizeStore`. Designed to be driven by a source data structure that calls `add/remove/update` when entries change.
+
+**Pattern:** All three data structures follow the same architecture:
+- Plain JS collections as source of truth (Map, array)
+- `state<number>` version counter for structural changes
+- `derived` stores for lazy reactive views
+- `state` with `equals: () => false` for event streams
+- `batch()` for atomic multi-mutation operations
+- `teardown()` in `destroy()` for cleanup

@@ -11,6 +11,7 @@ import { subscribe } from "../../extra/subscribe";
 import { tap } from "../../extra/tap";
 import { TimeoutError, timeout } from "../../extra/timeout";
 import { Inspector, pipe, producer, state } from "../../index";
+import { constant as backoffConstant } from "../../utils/backoff";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -766,6 +767,143 @@ describe("retry", () => {
 
 		src.complete(); // normal completion — no error
 		expect(gotEnd).toBe(true);
+	});
+
+	// --- Enhanced retry with options ---
+
+	it("retry({ count }) works like retry(n)", () => {
+		let producerCount = 0;
+		let errorSink: ((type: number, data?: unknown) => void) | null = null;
+		const src = {
+			get() {
+				return producerCount;
+			},
+			source(type: number, payload?: unknown) {
+				if (type === 0) {
+					producerCount++;
+					const sink = payload as (type: number, data?: unknown) => void;
+					errorSink = sink;
+					sink(0, (t: number) => {
+						if (t === 2) errorSink = null;
+					});
+				}
+			},
+		};
+
+		const r = pipe(src, retry({ count: 2 }));
+		let endData: unknown;
+		r.source(0, (type: number, data?: unknown) => {
+			if (type === 2) endData = data;
+		});
+
+		errorSink?.(2, new Error("fail"));
+		expect(producerCount).toBe(2); // retried once
+
+		errorSink?.(2, new Error("fail"));
+		expect(producerCount).toBe(3); // retried twice
+
+		errorSink?.(2, new Error("final"));
+		expect(producerCount).toBe(3); // no more
+		expect(endData).toBeInstanceOf(Error);
+	});
+
+	it("retry({ delay: constant }) delays before reconnect", () => {
+		let producerCount = 0;
+		let errorSink: ((type: number, data?: unknown) => void) | null = null;
+		const src = {
+			get() {
+				return 0;
+			},
+			source(type: number, payload?: unknown) {
+				if (type === 0) {
+					producerCount++;
+					const sink = payload as (type: number, data?: unknown) => void;
+					errorSink = sink;
+					sink(0, (t: number) => {
+						if (t === 2) errorSink = null;
+					});
+				}
+			},
+		};
+
+		const r = pipe(src, retry({ count: 3, delay: backoffConstant(1000) }));
+		r.source(0, () => {});
+
+		expect(producerCount).toBe(1);
+		errorSink?.(2, new Error("fail"));
+		// Not yet reconnected — waiting for delay
+		expect(producerCount).toBe(1);
+		vi.advanceTimersByTime(1000);
+		expect(producerCount).toBe(2); // reconnected after delay
+	});
+
+	it("retry({ while }) stops retrying when predicate returns false", () => {
+		let producerCount = 0;
+		let errorSink: ((type: number, data?: unknown) => void) | null = null;
+		const src = {
+			get() {
+				return 0;
+			},
+			source(type: number, payload?: unknown) {
+				if (type === 0) {
+					producerCount++;
+					const sink = payload as (type: number, data?: unknown) => void;
+					errorSink = sink;
+					sink(0, (t: number) => {
+						if (t === 2) errorSink = null;
+					});
+				}
+			},
+		};
+
+		const r = pipe(
+			src,
+			retry({
+				count: 10,
+				while: (err) => (err as Error).message !== "fatal",
+			}),
+		);
+		let endData: unknown;
+		r.source(0, (type: number, data?: unknown) => {
+			if (type === 2) endData = data;
+		});
+
+		errorSink?.(2, new Error("transient"));
+		expect(producerCount).toBe(2); // retried
+
+		errorSink?.(2, new Error("fatal"));
+		expect(producerCount).toBe(2); // NOT retried
+		expect((endData as Error).message).toBe("fatal");
+	});
+
+	it("retry cleans up timer on teardown", () => {
+		let errorSink: ((type: number, data?: unknown) => void) | null = null;
+		const src = {
+			get() {
+				return 0;
+			},
+			source(type: number, payload?: unknown) {
+				if (type === 0) {
+					const sink = payload as (type: number, data?: unknown) => void;
+					errorSink = sink;
+					sink(0, (t: number) => {
+						if (t === 2) errorSink = null;
+					});
+				}
+			},
+		};
+
+		const r = pipe(src, retry({ count: 3, delay: backoffConstant(5000) }));
+		let talkback: ((type: number) => void) | null = null;
+		r.source(0, (type: number, data?: unknown) => {
+			if (type === 0) talkback = data as (type: number) => void;
+		});
+
+		errorSink?.(2, new Error("fail"));
+		// Timer is pending — unsubscribe should clean it up
+		talkback?.(2);
+		// No errors should occur when timer fires
+		vi.advanceTimersByTime(10_000);
 	});
 });
 

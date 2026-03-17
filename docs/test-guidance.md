@@ -57,6 +57,14 @@ src/__tests__/
 │   ├── selection-operators.test.ts     — first/last/find/elementAt/partition
 │   ├── sources.test.ts                 — fromIter/fromPromise/fromObs/fromEvent/interval/buffer
 │   └── stress.test.ts                  — reentrancy, rapid churn, complex chains, memory
+├── utils/          ← pure utility tests
+│   ├── backoff.test.ts               — backoff strategies (constant, linear, exponential, fibonacci, decorrelatedJitter, withMaxAttempts)
+│   ├── eviction.test.ts              — eviction policies (fifo, lru, lfu, scored, random)
+│   └── reactiveEviction.test.ts      — reactive scored eviction (min-heap + effect subscriptions)
+├── data/           ← Level 3 reactive data structure tests
+│   ├── reactiveMap.test.ts           — CRUD, reactive API, TTL, namespace, eviction, lifecycle
+│   ├── reactiveLog.test.ts           — append, bounded trim, reactive stores, events, lifecycle
+│   └── reactiveIndex.test.ts         — add/remove/update, reactive select/keys/size, lifecycle
 └── integrations/
     └── interop.test.ts                 — external callbag operator compatibility
 ```

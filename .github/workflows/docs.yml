@@ -55,7 +55,9 @@ jobs:
 
       - name: Update repo description
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Use REPO_TOKEN (PAT with repo scope) if you want description updated; else step is best-effort.
+          GH_TOKEN: ${{ secrets.REPO_TOKEN || github.token }}
+        continue-on-error: true
         run: |
           SIZE="${{ steps.size.outputs.bundle_size_gzip_kb }}"
           gh repo edit --description "Reactive stores — ~${SIZE} KB gzip core, every step is inspectable"
