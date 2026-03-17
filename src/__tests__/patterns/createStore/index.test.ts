@@ -1,7 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
-import { createStore, batch, teardown } from "../../../patterns/createStore";
-import { derived, effect } from "../../../index";
+import { describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../../core/subscribe";
+import { derived, effect } from "../../../index";
+import { batch, createStore, teardown } from "../../../patterns/createStore";
 
 describe("createStore", () => {
 	// -----------------------------------------------------------------------

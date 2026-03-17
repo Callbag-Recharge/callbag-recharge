@@ -63,23 +63,23 @@
 
 /* ─── Nav glass effect ─── */
 .VPNav {
-	background: rgba(10, 22, 40, 0.8) !important;
+	background: rgba(10, 22, 40, 0.8);
 	backdrop-filter: blur(20px) saturate(1.4);
 	-webkit-backdrop-filter: blur(20px) saturate(1.4);
-	border-bottom: 1px solid var(--cr-border-subtle) !important;
+	border-bottom: 1px solid var(--cr-border-subtle);
 }
 
 .VPNavBar .title {
-	font-family: "Instrument Sans", "Outfit", -apple-system, sans-serif !important;
+	font-family: "Instrument Sans", "Outfit", -apple-system, sans-serif;
 	font-weight: 700;
 	letter-spacing: -0.03em;
-	color: var(--cr-aqua) !important;
+	color: var(--cr-aqua);
 }
 
 /* ─── Sidebar refinements ─── */
 .VPSidebar {
-	background: var(--cr-deep) !important;
-	border-right: 1px solid var(--cr-border-subtle) !important;
+	background: var(--cr-deep);
+	border-right: 1px solid var(--cr-border-subtle);
 }
 
 .VPSidebar .VPSidebarItem.level-0 .text {
@@ -91,8 +91,8 @@
 }
 
 .VPSidebar a.active {
-	color: var(--cr-aqua) !important;
-	border-left-color: var(--cr-aqua) !important;
+	color: var(--cr-aqua);
+	border-left-color: var(--cr-aqua);
 }
 
 /* ─── Content typography ─── */
@@ -145,12 +145,12 @@
 	margin-bottom: 1.25rem;
 }
 
-.vp-doc li + li {
-	margin-top: 0.4rem;
-}
-
 .vp-doc li {
 	line-height: 1.75;
+}
+
+.vp-doc li + li {
+	margin-top: 0.4rem;
 }
 
 .vp-doc blockquote {
@@ -172,12 +172,12 @@
 .vp-doc div[class*="language-"] {
 	border: 1px solid var(--cr-border-subtle);
 	border-radius: 12px;
-	background: #091322 !important;
+	background: #091322;
 	box-shadow: 0 4px 24px rgba(0, 0, 0, 0.3);
 }
 
 .vp-doc div[class*="language-"]::before {
-	color: var(--cr-aqua-dim) !important;
+	color: var(--cr-aqua-dim);
 	font-family: var(--vp-font-family-mono);
 	font-size: 0.7rem;
 	letter-spacing: 0.05em;
@@ -271,8 +271,8 @@
 
 /* ─── Footer ─── */
 .VPFooter {
-	border-top: 1px solid var(--cr-border-subtle) !important;
-	background: var(--cr-deep) !important;
+	border-top: 1px solid var(--cr-border-subtle);
+	background: var(--cr-deep);
 }
 
 /* ─── Smooth transitions ─── */

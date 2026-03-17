@@ -37,6 +37,16 @@
 				"default": "./dist/patterns/createStore/index.cjs"
 			}
 		},
+		"./memory": {
+			"import": {
+				"types": "./dist/memory/index.d.ts",
+				"default": "./dist/memory/index.js"
+			},
+			"require": {
+				"types": "./dist/memory/index.d.cts",
+				"default": "./dist/memory/index.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",
@@ -60,7 +70,8 @@
 		"format": "biome format --write .",
 		"docs:dev": "cd site && npx vitepress dev",
 		"docs:build": "cd site && npx vitepress build",
-		"docs:preview": "cd site && npx vitepress preview"
+		"docs:preview": "cd site && npx vitepress preview",
+		"size": "node scripts/bundle-size.mjs"
 	},
 	"keywords": [
 		"callbag",
@@ -88,6 +99,7 @@
 		"callbag-map": "^1.1.0",
 		"callbag-pipe": "^1.2.0",
 		"callbag-subscribe": "^1.5.1",
+		"esbuild": "^0.24.2",
 		"tsup": "^8.5.1",
 		"typescript": "^5.7.0",
 		"vitest": "^3.0.0"

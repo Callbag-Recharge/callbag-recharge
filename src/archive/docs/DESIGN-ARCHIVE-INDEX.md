@@ -125,6 +125,51 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 
 **Outcome:** `createStore` pattern (production-ready, 31 tests), `teardown()` protocol primitive, patterns directory convention established.
 
+### Session agentic-memory-research (March 17) — SOTA Agentic Memory Research + AI Tool Full-Chain Analysis
+**Topic:** Research all major agent memory systems and AI tool surfaces to identify common patterns for callbag-recharge as a unified reactive state management layer
+
+**Key insight:** No existing agent memory system uses reactive/push-based state management. All are pull-based (query → retrieve → return). Push-based dirty tracking + incremental computation is a genuinely novel contribution. In-process reactive stores eliminate serialization, deserialization, and TCP overhead entirely — 10,000x faster than Redis localhost.
+
+**Rejected:** Job queues/Kafka for in-process agent state; Redis as a requirement; RBAC in core primitives.
+
+**Outcome:** 6-phase plan from reactive KV store through knowledge graphs. Benchmark targets (10ns point read vs Redis 100μs). SESSION-agentic-memory-research.md.
+
+### Session generic-utils-design (March 17) — Generic Utility Layer Design
+**Topic:** Backoff strategies, eviction policies, circuit breaker, rate limiter — reusable strategy layer between extras and patterns
+
+**Key insight:** Strategies are not nodes — they're pure functions/objects that configure behavior. Every utility has 3+ consumers across the ecosystem. Backoff is foundational (circuit breaker and retry both consume it). Eviction policy is the most broadly used (every bounded data structure needs one).
+
+**Rejected:** Inlining strategies in each consumer; making utilities reactive nodes; building utilities only for Redis compat.
+
+**Outcome:** Proposed `src/utils/` layer with 4 utilities. Build order: backoff → evictionPolicy → rateLimiter → circuitBreaker.
+
+### Session redis-replacement-analysis (March 17) — Redis Drop-in Replacement Strategy + First-Principles Data Structure Redesign
+**Topic:** What Redis actually is (5 things glued together), where we beat it (10,000x latency), first-principles redesign of reactive data structures for modern needs
+
+**Key insight:** Three insights drove the redesign: (1) Design for modern needs first, Redis compat is a thin mapping layer. (2) The Map is the source of truth, stores are read-only derived views — eliminates the dual-state problem in kvStore. (3) Reactive score functions (reactiveIndex) are architecturally impossible in Redis.
+
+**Rejected:** Copying all 7 Redis structures; making store(key) writable (dual source of truth); reactiveSet as separate primitive (derived + state<Set> suffices); designing for Redis API first.
+
+**Outcome:** Three modern primitives: `reactiveMap` (redesigned kvStore with atomic update, getOrSet, eviction, namespace, single write path), `reactiveLog` (append log with reactive tail/slice, not a doubly-linked list), `reactiveIndex` (sorted index with reactive score functions). Plus `pubsub()` thin layer and ~100 line Redis compat mapping. kvStore code review findings (9 patch items) informed the reactiveMap redesign.
+
+### Session level3-strategic-plan (March 17) — Level 3 Strategic Plan: Data Structures + Orchestration
+**Topic:** Four-level progressive architecture (primitives → operators → data+orchestration → persistence+distribution), combining UniversalNode research, Redis replacement analysis, and agentic memory research into a concrete build plan
+
+**Key insight:** Performance and completeness are not in conflict if heavy parts are pluggable. Level 3 gets 10ns reads with NodeV0 (id + version). Level 4 adds CID/caps on demand. The boundary between Level 3 and Level 4 is the performance firewall. Diamond resolution IS a DAG executor — no new scheduling engine needed.
+
+**Rejected:** Eager CID on every set() (blows 10ns target); UniversalNode as mandatory base; Kafka/job queue for in-process state; copying all 7 Redis structures.
+
+**Outcome:** Four-level architecture. Level 3 build order: reactiveMap → reactiveLog → reactiveIndex → collection refactor → NodeV0 → pubsub → fromCron+taskState. Module structure: `src/data/` (data structures), `src/memory/` (agent memory on top of data), `src/orchestrate/` (DAG/scheduling). kvStore replaced by reactiveMap.
+
+### Session universal-data-structure-research (March 17) — Universal Data Structure from First Principles
+**Topic:** First-principles research into the optimal "node" data structure for modern demands (web, Web3, AI, infrastructure) that pairs with callbag-recharge as the communication/edge layer
+
+**Key insight:** Every domain (web, Web3, AI, infrastructure, IoT, data engineering) converges on 5 universal properties: reactive by default, streaming-native, lazy+push notification, explicit dependencies, self-describing metadata. The "mutable pointer to immutable data" pattern (Git refs→commits, IPFS IPNS→CID, our Store→UniversalNode) is the correct architecture. Content addressing gives integrity, dedup, caching, and diffing for free. Capability-based access matches callbag's existing protocol-level ocap model.
+
+**Rejected:** CRDTs as base (100x metadata overhead); ACLs/RBAC (need central authority); always-eager content addressing (hash every write); FHE for access control (10,000-1,000,000x slower); single encoding format (need pluggable codecs).
+
+**Outcome:** `UniversalNode<T>` interface with 7 irreducible properties (identity via dual id+CID, schema, versioning via version+prev chain, capability-based access, relationships via deps+refs, pluggable encoding with DAG-CBOR default, intrinsic+extrinsic metadata). Three-phase roadmap: V0 (+60B/node: id+version), V1 (+150B: +CID+prev+schema), V2 (+200B: +caps+refs+encryption). Audit of 30+ existing data structures/formats across 10 categories. Cross-domain demand analysis across 6 domains. Security & performance deep-dive.
+
 ---
 
 ## Additional Sessions (Partial Coverage)

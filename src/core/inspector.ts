@@ -45,6 +45,8 @@ export interface ObserveResult<T> {
 	dispose: () => void;
 }
 
+// Static-only class is intentional API for Inspector namespace
+// biome-ignore lint/complexity/noStaticOnlyClass: public API surface
 export class Inspector {
 	// WeakMaps for metadata — keyed by any graph node (stores, effects, etc.)
 	private static _names = new WeakMap<object, string>();

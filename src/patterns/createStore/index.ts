@@ -11,9 +11,9 @@
  * this store directly.
  */
 
+import { derived } from "../../core/derived";
 import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
-import { derived } from "../../core/derived";
 import { subscribe as coreSubscribe } from "../../core/subscribe";
 import type { Store, WritableStore } from "../../core/types";
 
@@ -21,10 +21,7 @@ import type { Store, WritableStore } from "../../core/types";
 // Types
 // ---------------------------------------------------------------------------
 
-type SetStateAction<T> =
-	| T
-	| Partial<T>
-	| ((state: T) => T | Partial<T>);
+type SetStateAction<T> = T | Partial<T> | ((state: T) => T | Partial<T>);
 
 type Get<T> = () => T;
 type Set<T> = (partial: SetStateAction<T>, replace?: boolean) => void;
@@ -71,9 +68,7 @@ interface CreateStoreResult<T> extends StoreApi<T> {
 // createStore
 // ---------------------------------------------------------------------------
 
-export function createStore<T extends object>(
-	initializer: StateCreator<T>,
-): CreateStoreResult<T> {
+export function createStore<T extends object>(initializer: StateCreator<T>): CreateStoreResult<T> {
 	// --- Phase 1: initialization ---
 	// `source` doesn't exist yet. get()/set() use `initialState` directly.
 	// source is `let` so set() during the initializer doesn't throw.
@@ -89,9 +84,7 @@ export function createStore<T extends object>(
 	const set: Set<T> = (partial, replace) => {
 		const prev = get();
 		const nextPartial =
-			typeof partial === "function"
-				? (partial as (s: T) => T | Partial<T>)(prev)
-				: partial;
+			typeof partial === "function" ? (partial as (s: T) => T | Partial<T>)(prev) : partial;
 
 		// No-op early return — avoids unnecessary allocation
 		if (nextPartial === prev && !replace) return;
@@ -154,15 +147,10 @@ export function createStore<T extends object>(
 
 	// -- Select: the killer feature --
 
-	const select = <U>(
-		selector: (state: T) => U,
-		equals?: (a: U, b: U) => boolean,
-	): Store<U> => {
-		return derived(
-			[source as Store<T>],
-			() => selector(source!.get() as T),
-			{ equals: equals ?? (Object.is as (a: U, b: U) => boolean) },
-		);
+	const select = <U>(selector: (state: T) => U, equals?: (a: U, b: U) => boolean): Store<U> => {
+		return derived([source as Store<T>], () => selector(source!.get() as T), {
+			equals: equals ?? (Object.is as (a: U, b: U) => boolean),
+		});
 	};
 
 	// destroy() uses protocol-level teardown — sends END to all downstream

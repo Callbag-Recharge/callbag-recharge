@@ -16,17 +16,7 @@
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../extra/subscribe";
-import {
-	batch,
-	DATA,
-	DIRTY,
-	derived,
-	Inspector,
-	producer,
-	RESOLVED,
-	STATE,
-	state,
-} from "../../index";
+import { batch, DIRTY, derived, Inspector, producer, RESOLVED, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
