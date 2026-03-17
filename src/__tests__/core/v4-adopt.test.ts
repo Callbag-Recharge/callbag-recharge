@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { effect } from "../../core/effect";
-import { DATA, END, START, STATE } from "../../core/protocol";
+import { START, STATE } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 

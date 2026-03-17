@@ -60,7 +60,7 @@ describe("fromIter", () => {
 	it("multiple subscribers each get full sequence", () => {
 		const s = fromIter([10, 20]);
 		const vals1: number[] = [];
-		const vals2: number[] = [];
+		const _vals2: number[] = [];
 		subscribe(s, (v) => vals1.push(v as number));
 
 		// Second subscriber after first completed — should get END immediately

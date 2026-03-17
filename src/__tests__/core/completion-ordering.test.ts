@@ -591,7 +591,7 @@ describe("derived handles upstream END", () => {
 			{ initial: 0 },
 		);
 		// Subscribe and complete immediately
-		const unsub = subscribe(p, () => {});
+		const _unsub = subscribe(p, () => {});
 		completeFn!();
 
 		// Now p is completed. Derived from p should get END during connection.
@@ -728,41 +728,41 @@ describe("effect handles upstream END", () => {
 
 describe("effect handles DATA without prior DIRTY (raw callbag source)", () => {
 	it("raw callbag source sends DATA without DIRTY → effect runs", () => {
-		let rawEmit: ((v: number) => void) | undefined;
+		let _rawEmit: ((v: number) => void) | undefined;
 		const rawSource = {
 			get: () => 0,
 			source: (type: number, sink: any) => {
 				if (type === START) {
 					sink(START, () => {});
-					rawEmit = (v: number) => sink(DATA, v);
+					_rawEmit = (v: number) => sink(DATA, v);
 				}
 			},
 		};
 
 		let runCount = 0;
-		let lastValue: number | undefined;
+		let _lastValue: number | undefined;
 
 		effect([rawSource as any], () => {
-			lastValue = rawSource.get();
+			_lastValue = rawSource.get();
 			runCount++;
 			return undefined;
 		});
 
 		expect(runCount).toBe(1); // initial run
 
-		rawEmit!(42);
+		_rawEmit!(42);
 		expect(runCount).toBe(2); // DATA without DIRTY triggers effect
 	});
 
 	it("raw callbag DATA while other deps are dirty → marks data received", () => {
 		const s = state(0);
-		let rawEmit: ((v: number) => void) | undefined;
+		let _rawEmit: ((v: number) => void) | undefined;
 		const rawSource = {
 			get: () => 0,
 			source: (type: number, sink: any) => {
 				if (type === START) {
 					sink(START, () => {});
-					rawEmit = (v: number) => sink(DATA, v);
+					_rawEmit = (v: number) => sink(DATA, v);
 				}
 			},
 		};

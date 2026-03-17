@@ -1,26 +1,20 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { ProducerStore, Store } from "../../core/types";
+import type { Store } from "../../core/types";
 import {
 	audit,
 	bufferCount,
-	empty,
 	fromAsyncIter,
-	fromIter,
 	groupBy,
-	map,
-	never,
-	of,
 	race,
 	reduce,
 	subscribe,
-	throwError,
 	toArray,
 	windowCount,
 	window as windowOp,
 	windowTime,
 	withLatestFrom,
 } from "../../extra";
-import { derived, effect, pipe, producer, state } from "../../index";
+import { derived, pipe, producer, state } from "../../index";
 
 // ---------------------------------------------------------------------------
 // P0 — fromAsyncIter

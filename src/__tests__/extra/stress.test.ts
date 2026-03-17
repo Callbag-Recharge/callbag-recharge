@@ -1,12 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
 import { concatMap } from "../../extra/concatMap";
-import { debounce } from "../../extra/debounce";
 import { empty } from "../../extra/empty";
-import { exhaustMap } from "../../extra/exhaustMap";
 import { filter } from "../../extra/filter";
 import { fromIter } from "../../extra/fromIter";
 import { interval } from "../../extra/interval";
@@ -16,10 +13,10 @@ import { of } from "../../extra/of";
 import { rescue } from "../../extra/rescue";
 import { retry } from "../../extra/retry";
 import { scan } from "../../extra/scan";
-import { subscribe as sub, subscribe } from "../../extra/subscribe";
+import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
-import { batch, derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
+import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -536,8 +533,8 @@ describe("rapid churn", () => {
 describe("memory safety", () => {
 	it("completed producer releases all sink references", () => {
 		const p = producer<number>();
-		const unsub1 = subscribe(p, () => {});
-		const unsub2 = subscribe(p, () => {});
+		const _unsub1 = subscribe(p, () => {});
+		const _unsub2 = subscribe(p, () => {});
 
 		p.complete();
 

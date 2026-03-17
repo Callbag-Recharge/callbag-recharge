@@ -68,7 +68,7 @@ describe("Producer output slot", () => {
 
 		expect(impl._status).toBe("DISCONNECTED");
 
-		const unsub = subscribe(p, () => {});
+		const _unsub = subscribe(p, () => {});
 		p.emit(1);
 		expect(impl._status).toBe("SETTLED");
 
@@ -404,8 +404,8 @@ describe("Multi-subscriber derived completion", () => {
 		const ended2: unknown[] = [];
 
 		// Two external subscribers → MULTI mode
-		const unsub1 = subscribe(d, () => {}, { onEnd: (e) => ended1.push(e) });
-		const unsub2 = subscribe(d, () => {}, { onEnd: (e) => ended2.push(e) });
+		const _unsub1 = subscribe(d, () => {}, { onEnd: (e) => ended1.push(e) });
+		const _unsub2 = subscribe(d, () => {}, { onEnd: (e) => ended2.push(e) });
 
 		// Verify MULTI mode
 		expect((d as any)._output).toBeInstanceOf(Set);
@@ -425,8 +425,8 @@ describe("Multi-subscriber derived completion", () => {
 		const errors1: unknown[] = [];
 		const errors2: unknown[] = [];
 
-		const unsub1 = subscribe(d, () => {}, { onEnd: (e) => errors1.push(e) });
-		const unsub2 = subscribe(d, () => {}, { onEnd: (e) => errors2.push(e) });
+		const _unsub1 = subscribe(d, () => {}, { onEnd: (e) => errors1.push(e) });
+		const _unsub2 = subscribe(d, () => {}, { onEnd: (e) => errors2.push(e) });
 
 		p.error("boom");
 

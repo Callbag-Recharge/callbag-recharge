@@ -8,7 +8,7 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!dist", "!node_modules"]
+		"includes": ["**", "!dist", "!node_modules", "!**/dist"]
 	},
 	"linter": {
 		"enabled": true,
@@ -18,7 +18,7 @@
 				"noExplicitAny": "off"
 			},
 			"style": {
-				"noNonNullAssertion": "warn"
+				"noNonNullAssertion": "off"
 			}
 		}
 	},

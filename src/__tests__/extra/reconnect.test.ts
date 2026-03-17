@@ -1,19 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DATA, END, START, STATE } from "../../core/protocol";
+import { DATA, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
-import { concat } from "../../extra/concat";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
 import { delay } from "../../extra/delay";
 import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
-import { elementAt } from "../../extra/elementAt";
 import { exhaustMap } from "../../extra/exhaustMap";
 import { filter } from "../../extra/filter";
-import { find } from "../../extra/find";
-import { first } from "../../extra/first";
-import { flat } from "../../extra/flat";
-import { fromIter } from "../../extra/fromIter";
 import { map } from "../../extra/map";
 import { merge } from "../../extra/merge";
 import { of } from "../../extra/of";
@@ -51,7 +45,7 @@ describe("Tier 1 operators — reconnect", () => {
 
 		// First subscription
 		const values1: number[] = [];
-		const unsub1 = subscribe(t, (v) => values1.push(v));
+		const _unsub1 = subscribe(t, (v) => values1.push(v));
 		s.set(1);
 		s.set(2); // take(2) completes
 		expect(values1).toEqual([1, 2]);
@@ -371,7 +365,7 @@ describe("Tier 2 operators — reconnect", () => {
 		// Reconnect — timeout timer restarts from scratch
 		const values2: number[] = [];
 		let endErr: unknown;
-		const unsub2 = subscribe(t, (v) => values2.push(v as number), {
+		const _unsub2 = subscribe(t, (v) => values2.push(v as number), {
 			onEnd: (err) => (endErr = err),
 		});
 		// No emission within 200ms
@@ -485,7 +479,7 @@ describe("Tier 2 operators — reconnect", () => {
 
 		const values1: number[] = [];
 		let endErr1: unknown;
-		const unsub1 = subscribe(r, (v) => values1.push(v as number), {
+		const _unsub1 = subscribe(r, (v) => values1.push(v as number), {
 			onEnd: (err) => (endErr1 = err),
 		});
 		// After retries, should eventually succeed or error

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
+import { DIRTY, END, START, STATE } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -775,7 +775,7 @@ describe("skip: upstream completion/error", () => {
 		const sk = pipe(s.store, skip(100));
 
 		let ended = false;
-		sk.source(START, (type: number, d: any) => {
+		sk.source(START, (type: number, _d: any) => {
 			if (type === START) return;
 			if (type === END) ended = true;
 		});

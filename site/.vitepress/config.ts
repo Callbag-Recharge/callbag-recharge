@@ -12,8 +12,7 @@ export default defineConfig({
 			"meta",
 			{
 				property: "og:description",
-				content:
-					"State that flows. Reactive state management for TypeScript.",
+				content: "State that flows. Reactive state management for TypeScript.",
 			},
 		],
 		["meta", { property: "og:type", content: "website" }],

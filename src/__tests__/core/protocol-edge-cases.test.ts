@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
-import { combine } from "../../extra/combine";
-import { debounce } from "../../extra/debounce";
-import { filter } from "../../extra/filter";
 import { fromObs } from "../../extra/fromObs";
 import { map } from "../../extra/map";
 import { subscribe } from "../../extra/subscribe";
@@ -482,7 +479,7 @@ describe("connection deferral", () => {
 
 		const values: number[] = [];
 		// subscribe internally uses beginDeferredStart/endDeferredStart
-		subscribe(p, (v, prev) => {
+		subscribe(p, (v, _prev) => {
 			values.push(v);
 		});
 

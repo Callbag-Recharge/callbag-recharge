@@ -42,7 +42,7 @@ export function scan<A, B>(
 					}
 					if (type === DATA) {
 						const next = reducer(acc, data as A);
-						if (eqFn && eqFn(acc, next)) {
+						if (eqFn?.(acc, next)) {
 							signal(RESOLVED);
 							return;
 						}

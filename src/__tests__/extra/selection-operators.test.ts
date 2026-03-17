@@ -74,7 +74,7 @@ describe("first", () => {
 
 	it("disconnects upstream after first value (no further DATA)", () => {
 		let emitCount = 0;
-		const p = producer<number>(({ emit }) => {
+		const p = producer<number>(({ emit: _emit }) => {
 			// This runs on first subscriber connect
 		});
 		const f = pipe(p, first());
@@ -513,7 +513,7 @@ describe("partition", () => {
 
 	it("both branches share single upstream subscription (refcounted)", () => {
 		let startCount = 0;
-		const p = producer<number>(({ emit }) => {
+		const p = producer<number>(({ emit: _emit }) => {
 			startCount++;
 		});
 		const [a, b] = partition<number>((v) => v > 0)(p);

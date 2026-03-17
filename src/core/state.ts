@@ -24,7 +24,7 @@
 
 import { Inspector } from "./inspector";
 import { P_AUTO_DIRTY, P_COMPLETED, P_PENDING, ProducerImpl } from "./producer";
-import { DATA, DIRTY, STATE, deferEmission, isBatching } from "./protocol";
+import { DATA, DIRTY, deferEmission, isBatching, STATE } from "./protocol";
 import type { StoreOptions, WritableStore } from "./types";
 
 export class StateImpl<T> extends ProducerImpl<T> {

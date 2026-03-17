@@ -16,21 +16,16 @@ import { concat } from "../../extra/concat";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
 import { delay } from "../../extra/delay";
-import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
 import { exhaustMap } from "../../extra/exhaustMap";
 import { filter } from "../../extra/filter";
 import { fromIter } from "../../extra/fromIter";
 import { interval } from "../../extra/interval";
-import { map } from "../../extra/map";
 import { merge } from "../../extra/merge";
 import { of } from "../../extra/of";
-import { pipeRaw, SKIP } from "../../extra/pipeRaw";
-import { repeat } from "../../extra/repeat";
 import { rescue } from "../../extra/rescue";
 import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { scan } from "../../extra/scan";
-import { skip } from "../../extra/skip";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
@@ -43,10 +38,8 @@ import {
 	END,
 	effect,
 	Inspector,
-	operator,
 	pipe,
 	producer,
-	RESOLVED,
 	START,
 	STATE,
 	state,

@@ -13,7 +13,6 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { combine } from "../../extra/combine";
-import { concat } from "../../extra/concat";
 import { debounce } from "../../extra/debounce";
 import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
 import { filter } from "../../extra/filter";
@@ -21,14 +20,12 @@ import { map } from "../../extra/map";
 import { merge } from "../../extra/merge";
 import { pipeRaw, SKIP } from "../../extra/pipeRaw";
 import { scan } from "../../extra/scan";
-import { skip } from "../../extra/skip";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
 import {
 	batch,
 	DATA,
-	DIRTY,
 	derived,
 	END,
 	effect,
@@ -36,7 +33,6 @@ import {
 	operator,
 	pipe,
 	producer,
-	RESOLVED,
 	START,
 	STATE,
 	state,
@@ -428,11 +424,11 @@ describe("RESOLVED subtree skipping in complex graphs", () => {
 		const da = derived([a], () => a.get(), { equals: Object.is });
 		const c = derived([da, b], () => da.get() + b.get());
 
-		let cCount = 0;
+		let _cCount = 0;
 		effect([c], () => {
-			cCount++;
+			_cCount++;
 		});
-		cCount = 0;
+		_cCount = 0;
 
 		a.set(1); // same → da RESOLVED
 		b.set(200); // different → b DATA
@@ -703,16 +699,16 @@ describe("reentrancy in complex graphs", () => {
 		const d = derived([trigger, feedback], () => trigger.get() + feedback.get());
 
 		const dVals: number[] = [];
-		let effectRuns = 0;
+		let _effectRuns = 0;
 		effect([d], () => {
-			effectRuns++;
+			_effectRuns++;
 			dVals.push(d.get());
 			// Reentrant: write to feedback on first trigger change
 			if (trigger.get() === 1 && feedback.get() === 0) {
 				feedback.set(100);
 			}
 		});
-		effectRuns = 0;
+		_effectRuns = 0;
 		dVals.length = 0;
 
 		trigger.set(1);
@@ -969,7 +965,7 @@ describe("correctness traps", () => {
 		const a = state(0);
 		const safe = derived([a], () => a.get() + 1);
 
-		let errorCaught: unknown = null;
+		let _errorCaught: unknown = null;
 		const unsafe = derived([a], () => {
 			if (a.get() === 5) throw new Error("boom");
 			return a.get() * 2;
@@ -983,7 +979,7 @@ describe("correctness traps", () => {
 		try {
 			a.set(5);
 		} catch (e) {
-			errorCaught = e;
+			_errorCaught = e;
 		}
 
 		// Safe should still be correct
@@ -1345,11 +1341,11 @@ describe("extras in diamond configurations", () => {
 		const direct = derived([a], () => a.get());
 		const result = derived([deduped, direct], () => (deduped.get() ?? 0) + direct.get());
 
-		let resultCount = 0;
+		let _resultCount = 0;
 		effect([result], () => {
-			resultCount++;
+			_resultCount++;
 		});
-		resultCount = 0;
+		_resultCount = 0;
 
 		a.set(1); // deduped: 0→0 (same, RESOLVED), direct: 1
 		// result should still recompute because direct changed

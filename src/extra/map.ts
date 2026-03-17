@@ -27,7 +27,7 @@ export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperat
 					}
 					if (type === DATA) {
 						const mapped = fn(data as A);
-						if (eqFn && eqFn(prev, mapped)) {
+						if (eqFn?.(prev, mapped)) {
 							signal(RESOLVED);
 							return;
 						}
