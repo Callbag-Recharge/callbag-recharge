@@ -168,10 +168,13 @@ describe("Derived output slot", () => {
 		const b = derived([a], () => a.get() * 2);
 		const impl = b as any;
 
-		// STANDALONE: no external subscribers, but connected
+		// v4.1: lazy STANDALONE — not connected until first get()
 		expect(impl._output).toBeNull();
-		expect(impl._flags & 16).toBeTruthy(); // D_STANDALONE
-		expect(b.get()).toBe(2); // value is current
+		expect(impl._flags & 16).toBeFalsy(); // D_STANDALONE not set yet
+
+		// First get() triggers lazy connection → STANDALONE
+		expect(b.get()).toBe(2);
+		expect(impl._flags & 16).toBeTruthy(); // D_STANDALONE now set
 
 		// SINGLE: first external subscriber
 		const values1: number[] = [];
@@ -212,11 +215,14 @@ describe("Derived output slot", () => {
 		const b = derived([a], () => a.get() * 2);
 		const impl = b as any;
 
-		// After construction: SETTLED (computed initial)
+		// v4.1: After construction — DISCONNECTED (lazy STANDALONE)
+		expect(impl._status).toBe("DISCONNECTED");
+
+		// First get() triggers lazy connection → SETTLED
+		expect(b.get()).toBe(2);
 		expect(impl._status).toBe("SETTLED");
 
 		// After state change: should go through DIRTY → SETTLED
-		// We verify the final state after the synchronous cycle
 		a.set(5);
 		expect(impl._status).toBe("SETTLED");
 		expect(b.get()).toBe(10);
@@ -312,11 +318,12 @@ describe("Derived output slot", () => {
 			return a.get() * 2;
 		});
 
-		// Initial computation at construction
-		expect(computeCount).toBe(1);
+		// v4.1: No computation at construction (lazy STANDALONE)
+		expect(computeCount).toBe(0);
 
-		// Subscribe and unsubscribe multiple times
+		// Subscribe triggers lazy connection + computation
 		const unsub1 = subscribe(b, () => {});
+		expect(computeCount).toBe(1);
 		unsub1();
 		const unsub2 = subscribe(b, () => {});
 		unsub2();
@@ -371,10 +378,12 @@ describe("Derived output slot", () => {
 			return b.get();
 		});
 
-		// Initial: cCount = 1 (from construction)
-		expect(cCount).toBe(1);
+		// v4.1: cCount = 0 (lazy STANDALONE — not computed yet)
+		expect(cCount).toBe(0);
 
+		// Effect triggers lazy connection + computation
 		effect([c], () => {});
+		expect(cCount).toBe(1);
 
 		a.set(2); // still "low" — b sends RESOLVED
 		expect(cCount).toBe(1); // c did not recompute

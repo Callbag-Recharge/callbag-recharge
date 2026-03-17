@@ -851,7 +851,12 @@ describe("status model consistency", () => {
 		const b = derived([a], () => a.get() * 2);
 		const c = derived([a, b], () => a.get() + b.get());
 
-		// After construction + initial propagation
+		// v4.1: After construction — DISCONNECTED (lazy STANDALONE)
+		expect(b._status).toBe("DISCONNECTED");
+		expect(c._status).toBe("DISCONNECTED");
+
+		// First get() triggers lazy connection cascade
+		expect(c.get()).toBe(3); // 1 + 1*2
 		expect(b._status).toBe("SETTLED");
 		expect(c._status).toBe("SETTLED");
 
@@ -865,9 +870,12 @@ describe("status model consistency", () => {
 	it("RESOLVED status: state equals guard blocks emit entirely, no DIRTY reaches derived", () => {
 		// state(1).set(1) — state's own equals guard (Object.is) blocks the
 		// entire emission. No DIRTY is sent, so derived never enters DIRTY→RESOLVED.
-		// Derived stays SETTLED from its initial computation.
+		// Derived stays SETTLED from lazy connection.
 		const a = state(1);
 		const b = derived([a], () => a.get(), { equals: Object.is });
+
+		// v4.1: trigger lazy connection first
+		expect(b.get()).toBe(1);
 
 		a.set(1); // same value → state blocks emit entirely
 		expect(b._status).toBe("SETTLED"); // no DIRTY was ever sent
@@ -1053,20 +1061,24 @@ describe("correctness traps", () => {
 		expect(b.get()).toBe(10);
 	});
 
-	it("get() during derived computation returns stale-but-defined value", () => {
+	it("get() during derived computation returns correct value (lazy STANDALONE)", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);
 
 		let bValueDuringC: number | undefined;
 		const c = derived([a, b], () => {
-			// During c's computation, b should already be updated
-			// because b's tap fires before c recomputes (chain model)
+			// During c's computation, b.get() returns its current value.
+			// With lazy STANDALONE, b may lazily connect when c first computes.
 			bValueDuringC = b.get();
 			return a.get() + b.get();
 		});
 
+		// v4.1: trigger lazy connection cascade via c.get()
+		expect(c.get()).toBe(3); // 1 + 2
+		expect(bValueDuringC).toBe(2);
+
 		a.set(5);
-		// In the chain model, b._value should be 10 by the time c runs
+		// After connection, b recomputes to 10 before c recomputes
 		expect(bValueDuringC).toBe(10);
 		expect(c.get()).toBe(15);
 	});

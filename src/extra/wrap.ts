@@ -54,7 +54,7 @@ function wrapSource<T>(rawSource: Callbag): Store<T> {
 	});
 
 	Inspector.register(store, { kind: "wrap" });
-	return store;
+	return store as unknown as Store<T>;
 }
 
 /**

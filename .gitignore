@@ -149,3 +149,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# VitePress docs site
+site/node_modules/
+site/.vitepress/dist/
+site/.vitepress/cache/

@@ -276,18 +276,22 @@ describe("Pipe + operators", () => {
 });
 
 describe("Backpressure / pull", () => {
-	it("v4: derived is eager (STANDALONE) — computes at construction and on changes", () => {
+	it("v4.1: derived is lazy — computes on first get() then on changes", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() + 1);
 		const d = derived([count], computeFn);
 
-		// v4: computed once at construction (STANDALONE mode)
+		// v4.1: not computed at construction — fully lazy
+		expect(computeFn).toHaveBeenCalledTimes(0);
+
+		// First get() triggers computation + lazy STANDALONE connection
+		expect(d.get()).toBe(1); // 0 + 1
 		expect(computeFn).toHaveBeenCalledTimes(1);
 
 		count.set(1);
 		count.set(2);
 		count.set(3);
-		// v4: STANDALONE connection recomputes on each state change
+		// STANDALONE connection recomputes on each state change
 		expect(computeFn).toHaveBeenCalledTimes(4); // 1 initial + 3 sets
 
 		expect(d.get()).toBe(4); // 3 + 1, returns cached

@@ -19,8 +19,8 @@ callbag-recharge is a reactive state management library where **every store is a
 ### Core primitives (src/core/)
 
 - **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()), `resubscribable` (allow re-subscription after error/complete — enables retry/rescue/repeat). Actions: `emit`, `signal`, `complete`, `error`.
-- **`state(initial)`** — thin wrapper over `producer()`. `set()` = `emit()` with `equals` defaulting to `Object.is`. `update(fn)` is sugar over `set`.
-- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. **Eagerly connects** at construction (STANDALONE mode) — `get()` always returns current cached value. Single-dep nodes skip bitmask (P0 optimization).
+- **`state(initial)`** — thin wrapper over `producer()`. `set()` inlines emit logic (fast path — skips bound method call). `equals` defaults to `Object.is`. `update(fn)` is sugar over `set`.
+- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. **Lazy STANDALONE** — no computation or connection at construction; first `get()` or `source()` triggers compute + connect. Single-dep nodes skip bitmask (P0 optimization). `derived.from(dep, opts?)` creates an identity-mode derived that skips `fn()` on recompute.
 - **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array (`EffectImpl` class). Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
 ### Key design patterns (output slot + chain model)
@@ -29,7 +29,7 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 
 - **Output slot model:** Replaces `_sinks: Set | null` with lazy output slot: `null → fn → Set`. Single subscriber avoids Set allocation (~200 bytes saved per node). P0 optimization.
 - **Node status:** Every node tracks `_status: NodeStatus` (DISCONNECTED, DIRTY, SETTLED, RESOLVED, COMPLETED, ERRORED). Surfaced via `Inspector.inspect()`.
-- **STANDALONE mode:** Derived nodes eagerly connect to deps at construction. `get()` always returns cached value (no lazy recompute). Deps stay connected even without external subscribers.
+- **Lazy STANDALONE mode:** Derived nodes defer computation and connection until first `get()` or `source()`. After connection, `get()` returns cached value. Deps stay connected even without external subscribers. Unused derived stores incur zero overhead beyond object allocation.
 - **Type 3 control channel:** State management signals (DIRTY, RESOLVED) flow on callbag type 3 (STATE). Type 1 DATA carries only real values — never sentinels. Unknown type 3 signals forwarded unchanged (forward-compatibility).
 - **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
 - **Tier model:** Tier 1 (state graph + passthrough operators) participates in diamond resolution via type 3. Tier 2 (async/timer/dynamic-subscription operators) are cycle boundaries — each `emit` starts a new DIRTY+value cycle.

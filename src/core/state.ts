@@ -3,22 +3,28 @@
  * Adds set()/update() API and defaults equals to Object.is.
  *
  * Stateful: maintains value via producer. get() returns current value.
- * set() = emit(), update(fn) = emit(fn(get())).
+ * set() inlines the emit logic for faster no-subscriber writes.
+ * update(fn) = set(fn(get())).
  *
  * v3: inherits producer's autoDirty — set() sends DIRTY on type 3 then
  * value on type 1. Object.is equality guard prevents redundant emissions.
  *
- * Note on completion: set() delegates to emit(), which is a no-op after
- * complete()/error() — both the emission and the _value update are skipped.
- * This differs from TC39 Signals where Signal.State has no completion
- * concept and is always writable for its entire lifetime. The divergence
- * is intentional: callbag-recharge is stream-based (callbag protocol with
- * START/DATA/END), so completion semantics apply. TC39 Signals are
- * persistent reactive cells with no lifecycle.
+ * v4.1: set() fast path — inlines emit() logic to skip the bound method
+ * call overhead. For the no-subscriber case (_output === null), this is
+ * just an Object.is check + _value assignment.
+ *
+ * Note on completion: set() is a no-op after complete()/error() — both the
+ * emission and the _value update are skipped. This differs from TC39 Signals
+ * where Signal.State has no completion concept and is always writable for
+ * its entire lifetime. The divergence is intentional: callbag-recharge is
+ * stream-based (callbag protocol with START/DATA/END), so completion
+ * semantics apply. TC39 Signals are persistent reactive cells with no
+ * lifecycle.
  */
 
 import { Inspector } from "./inspector";
-import { ProducerImpl } from "./producer";
+import { P_AUTO_DIRTY, P_COMPLETED, P_PENDING, ProducerImpl } from "./producer";
+import { DATA, DIRTY, STATE, deferEmission, isBatching } from "./protocol";
 import type { StoreOptions, WritableStore } from "./types";
 
 export class StateImpl<T> extends ProducerImpl<T> {
@@ -38,12 +44,42 @@ export class StateImpl<T> extends ProducerImpl<T> {
 		return this._value as T;
 	}
 
+	/**
+	 * Fast path: inlines ProducerImpl.emit() to skip the bound method call.
+	 * For no-subscriber writes, this is just an equals check + value assign.
+	 */
 	set(value: T): void {
-		this.emit(value);
+		if (this._flags & P_COMPLETED) return;
+		// _eqFn is always set for state (Object.is or custom)
+		if (this._value !== undefined && this._eqFn!(this._value as T, value)) return;
+		this._value = value;
+		if (!this._output) return;
+		// Subscriber dispatch — same logic as ProducerImpl.emit()
+		if (isBatching()) {
+			if (!(this._flags & P_PENDING)) {
+				this._flags |= P_PENDING;
+				if (this._flags & P_AUTO_DIRTY) {
+					this._status = "DIRTY";
+					this._dispatch(STATE, DIRTY);
+				}
+				deferEmission(() => {
+					this._flags &= ~P_PENDING;
+					this._status = "SETTLED";
+					this._dispatch(DATA, this._value);
+				});
+			}
+		} else {
+			if (this._flags & P_AUTO_DIRTY) {
+				this._status = "DIRTY";
+				this._dispatch(STATE, DIRTY);
+			}
+			this._status = "SETTLED";
+			this._dispatch(DATA, this._value);
+		}
 	}
 
 	update(fn: (current: T) => T): void {
-		this.emit(fn(this._value as T));
+		this.set(fn(this._value as T));
 	}
 }
 

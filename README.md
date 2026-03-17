@@ -2,7 +2,7 @@
 
 **State that flows.** Reactive state management for TypeScript, built on the [callbag protocol](https://github.com/callbag/callbag).
 
-- **~1.1 KB** core ESM, zero dependencies
+- **~3.7 KB** gzipped core ESM, zero dependencies
 - **Glitch-free** diamond updates via two-phase push
 - **~376 bytes per store** — plain objects, no wrapper overhead
 - **Full TypeScript** from the ground up
@@ -41,7 +41,7 @@ Signals gave us ergonomic reactive state. Callbag gave us zero-overhead streams.
 |---|---|---|---|---|
 | Inspect intermediate values | No | Derivations only | No | **Every step** |
 | Two-phase push (glitch-free) | N/A | Yes | No | **Yes** |
-| Bundle size | ~30 KB | ~3-5 KB | ~1-2 KB | **~1.1 KB** (core) |
+| Bundle size | ~30 KB | ~3-5 KB | ~1-2 KB | **~3.7 KB** (core, gzip) |
 | Memory per node | Heavy | Medium | Minimal | **~376 bytes** |
 
 ---

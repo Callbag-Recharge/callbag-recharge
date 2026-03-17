@@ -88,16 +88,20 @@ describe("Derived (like Signal.Computed)", () => {
 		expect(quadrupled.get()).toBe(12);
 	});
 
-	it("v4: computes eagerly at construction (STANDALONE mode)", () => {
+	it("v4.1: computes lazily on first get() (lazy STANDALONE)", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
 		const doubled = derived([count], computeFn);
 
-		// v4: computed once at construction (STANDALONE mode)
+		// v4.1: not computed at construction — fully lazy
+		expect(computeFn).toHaveBeenCalledTimes(0);
+
+		doubled.get();
+		// First get() triggers computation + connection
 		expect(computeFn).toHaveBeenCalledTimes(1);
 
 		doubled.get();
-		// get() returns cached value — no recomputation
+		// Subsequent get() returns cached — no recomputation
 		expect(computeFn).toHaveBeenCalledTimes(1);
 	});
 

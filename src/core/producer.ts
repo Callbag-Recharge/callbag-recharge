@@ -45,12 +45,14 @@ export type ProducerOpts<T> = SourceOptions<T> & {
 
 // Flag bits for _flags bitmask
 const P_STARTED = 1;
-const P_COMPLETED = 2;
-const P_AUTO_DIRTY = 4;
+const P_MULTI = 64;
+
+// Exported for subclass fast paths (StateImpl)
+export const P_COMPLETED = 2;
+export const P_AUTO_DIRTY = 4;
 const P_RESET = 8;
 const P_RESUB = 16;
-const P_PENDING = 32;
-const P_MULTI = 64;
+export const P_PENDING = 32;
 
 export class ProducerImpl<T> {
 	_value: T | undefined;

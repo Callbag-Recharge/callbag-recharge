@@ -1,1086 +1,739 @@
-# Architecture v3 — Type 3 Control Channel
+# Architecture & Implementation Guide
 
-This document describes the target architecture for callbag-recharge's next major refactor. The core idea: separate **state management signals** (DIRTY, RESOLVED) from **data transport** (values) by using callbag type 3 as a dedicated control channel, keeping type 1 DATA as pure values.
-
----
-
-## Motivation
-
-### Current design (v2): two-phase push on a single DATA channel
-
-The v2 architecture sends both DIRTY sentinels and actual values on type 1 DATA:
-
-```ts
-sink(1, DIRTY)   // invalidation signal
-sink(1, value)   // actual data
-```
-
-This forces **every node** in the graph to bifurcate its DATA handler:
-
-```ts
-if (data === DIRTY) { /* phase 1 logic */ }
-else { /* phase 2 logic */ }
-```
-
-Consequences:
-- Every operator (take, skip, map, filter) must understand DIRTY to participate in diamond resolution
-- `subscribe` needs a `pending` flag to distinguish DIRTY from values
-- Extra operators require full rewrites to be "two-phase aware"
-- The library is incompatible with raw callbag operators since DATA carries non-value signals
-- Global `enqueueEffect`, `pendingValueEmitters`, and `propagating` flags manage complex phase transitions
-
-### Target design (v3): separate control channel
-
-All data flows as plain values on type 1. State management signals flow on type 3:
-
-```
-sink(0, talkback)      // START — callbag handshake
-sink(1, value)         // DATA  — always a real value, never a sentinel
-sink(2, error?)        // END   — completion or error
-sink(3, signal)        // STATE — control signals (DIRTY, RESOLVED, future PAUSE/RESUME)
-```
-
-One graph. One set of callbag connections. Type 3 is just a different message type on the same wire. No separate state graph, no parallel notification system.
-
-### Benefits
-
-- **Type 1 DATA is pure callbag again.** Values only. Compatible with external callbag operators.
-- **Operators don't need DIRTY awareness.** `take`, `skip`, `map`, `filter` handle type 1 values like any callbag operator. Type 3 signals pass through via a simple forwarding convention.
-- **State management is opt-in.** Only nodes that need diamond resolution listen to type 3.
-- **RESOLVED enables true subtree skipping.** `equals` memoization can skip entire downstream computation, not just suppress values.
-- **Minimal global state.** Only `batch` needs global coordination. No `enqueueEffect`, no `propagating` flag, no phase 2 queue.
-- **Extensible.** Future signals (PAUSE, RESUME) are new constants on type 3 — no API changes needed.
+This document is the definitive reference for implementing and maintaining callbag-recharge. Read it before writing any new primitive, operator, or extra. This is the implementation law.
 
 ---
 
-## Control channel signals
+## 1. Core Principles
 
-Type 3 carries state management signals. The initial vocabulary:
+These are inviolable. Any implementation that breaks one of these is wrong, regardless of whether tests pass.
 
-| Signal | Meaning | Sent by |
-|--------|---------|---------|
-| `DIRTY` | "My value is about to change" | Sources (producer, state) and operators when a dep goes dirty |
-| `RESOLVED` | "I was dirty but my value didn't change" | Operators when equals suppresses, filter rejects, or all deps resolved without change |
+1. **Type 1 DATA carries only real values.** Never sentinel objects, never `undefined` as a signal. `DIRTY`, `RESOLVED`, and future control signals live exclusively on type 3 STATE.
 
-Future extensions (not in initial implementation):
+2. **Type 3 STATE is forwarded, not swallowed.** Every node that doesn't fully understand a type 3 signal must forward it downstream. Unknown signals pass through. This ensures compatibility with future signals (PAUSE, RESUME) without changing existing code.
 
-| Signal | Meaning |
-|--------|---------|
-| `PAUSE` | Backpressure — "stop sending values" |
-| `RESUME` | "OK, send again" |
+3. **DIRTY before DATA, always.** A node must send `signal(DIRTY)` before it sends `emit(value)`. This is the two-phase push protocol. `autoDirty: true` on producer handles this automatically. Manual producers and raw callbag operators must do it themselves.
 
-Signals are opt-in. Nodes that don't understand a signal forward it (convention) or ignore it. DATA stays clean.
+4. **RESOLVED means "I was dirty, value didn't change."** Send RESOLVED only if a prior DIRTY was sent from the same node in the same cycle. Never send RESOLVED without a preceding DIRTY. Never send RESOLVED to suppress a value you never promised.
 
----
+5. **Every resource allocation has a matching deallocation.** Timers, subscriptions, talkbacks, inner loops — all must be cleaned up on teardown. The cleanup path is called on: last sink disconnect, `complete()`, and `error()`.
 
-## Primitives
+6. **Completion is terminal.** After a node completes or errors, it emits nothing further. `_flags & P_COMPLETED` / `O_COMPLETED` / `D_COMPLETED` guard every emit/signal path. Exception: `resubscribable` producers can restart when re-subscribed after completion with no active sinks.
 
-### Taxonomy
+7. **Effects run inline.** There is no `enqueueEffect`. When all dirty deps of an effect have resolved (either DATA or RESOLVED), the effect function runs synchronously in the same call stack. No global scheduler.
 
-```
-              General          Specialized
-              -------          -----------
-Source        Producer    ->   State (equality-checked set)
-Transform     Operator    ->   Derived (multi-dep dirty tracking + cache)
-Sink          Effect
-```
+8. **Batch defers DATA, not DIRTY.** During `batch()`, type 3 DIRTY propagates immediately and synchronously through the entire graph. Type 1 DATA emissions are deferred until the outermost batch exits. This is why diamond resolution works in batches — the full dirty state is established before any value flows.
 
-Five primitives total, three callbag roles with two specializations.
+9. **Dep identity, not version numbers.** Derived nodes track which deps are dirty via a bitmask (dep index = bit position). Multiple DIRTYs from the same dep are idempotent. DATA from a dep removes that dep's bit. When the bitmask reaches 0, all deps have resolved.
 
-### Tier model
-
-| Tier | What | Glitch-free | Built with |
-|------|------|-------------|------------|
-| **Tier 1** | State graph + passthrough operators | Yes — type 3 DIRTY flows through | Producer, State, Operator, Derived, Effect |
-| **Tier 2** | Async/timer/dynamic-subscription operators | No — cycle boundary | Producer wrapping subscribe+emit |
-
-Tier 1 nodes participate in diamond resolution via type 3 signals. Tier 2 nodes are cycle boundaries where each `emit` starts a new DIRTY+value cycle. This matches RxJS behavior — time-based and dynamic-subscription operators are natural glitch boundaries in any reactive system.
+10. **Compatibility targets: TC39 Signals, raw callbag, RxJS semantics.** When in doubt about operator behavior, check RxJS. When in doubt about equality/dedup behavior, check TC39 Signal.State (equals defaults to `Object.is`). When in doubt about protocol, check callbag-spec.
 
 ---
 
-## Producer
+## 2. Folder & Dependency Hierarchy
 
-The general-purpose source primitive. Can emit values, send control signals, and complete.
-
-```ts
-const counter = producer<number>((actions) => {
-  let i = 0;
-  const id = setInterval(() => actions.emit(i++), 1000);
-  return () => clearInterval(id);
-});
-
-counter.get();    // last emitted value
-counter.source;   // callbag source
+```
+src/
+├── core/           ← primitives only — no extra/ imports allowed here
+│   ├── protocol.ts ← DIRTY, RESOLVED, batch, deferStart — no other core imports
+│   ├── types.ts    ← Store, WritableStore, Actions, etc. — no runtime imports
+│   ├── inspector.ts← observability singleton — imports protocol only
+│   ├── producer.ts ← imports protocol + inspector + types
+│   ├── state.ts    ← imports producer + types (inherits inspector via ProducerImpl)
+│   ├── operator.ts ← imports protocol + inspector + types
+│   ├── derived.ts  ← imports protocol + inspector + types
+│   ├── effect.ts   ← imports protocol + types (no store = no inspector)
+│   └── pipe.ts     ← imports derived + types (map/filter/scan sugar)
+├── extra/          ← operators, sources, sinks — may import from core only
+│   ├── index.ts    ← barrel, no logic
+│   └── *.ts        ← individual extras
+└── index.ts        ← public API barrel — re-exports core
 ```
 
-### Actions API
+**Strict rules:**
+- `core/` files never import from `extra/`
+- `extra/` files import from `core/` but never from each other (circular risk)
+- `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
+- Inspector is imported directly by `producer`, `operator`, `derived` only. `state` inherits inspector registration through `ProducerImpl`'s constructor (`StateImpl extends ProducerImpl`). `effect` is a closure-sink with no `get()` or `source()` — it is not a store and is not registered.
 
-The producer function receives an `actions` object:
+---
+
+## 3. Protocol: Type Constants & Signal Vocabulary
 
 ```ts
-type Actions<T> = {
-  emit: (value: T) => void,       // type 1 DATA to downstream sinks
-  signal: (s: Signal) => void,    // type 3 STATE to downstream sinks
-  complete: () => void,            // type 2 END (no error) to downstream sinks
-  error: (e: unknown) => void,    // type 2 END with error data to downstream sinks
+const START = 0;   // Callbag handshake. sink(START, talkback) or source(START, sink).
+const DATA  = 1;   // Real values only. Never DIRTY, never undefined-as-signal.
+const END   = 2;   // Completion (no data) or error (data = error object).
+const STATE = 3;   // Control signals: DIRTY, RESOLVED. Future: PAUSE, RESUME.
+
+const DIRTY    = Symbol("DIRTY");     // "My value is about to change."
+const RESOLVED = Symbol("RESOLVED"); // "I was dirty but didn't change."
+```
+
+**Signal flow direction — the graph is a DAG:**
+```
+sources → operators → derived → effect   (DOWNSTREAM: DATA, DIRTY, RESOLVED, END)
+sources ← operators ← derived ← effect   (UPSTREAM: talkback(END) = unsubscribe only)
+```
+
+No signal ever cycles. Upstream communication is exclusively `talkback(END)` for unsubscribing.
+
+**Callbag handshake:**
+```
+source(START, sink)      // subscriber calls source — goes downstream
+sink(START, talkback)    // source responds with talkback — goes downstream
+talkback(DATA)           // pull request (rarely needed in push model) — goes upstream
+talkback(END)            // unsubscribe — goes upstream
+```
+
+**Two-phase push:**
+```
+sink(STATE, DIRTY)       // phase 1: "prepare — I'm about to change" — downstream
+sink(DATA, value)        // phase 2: "here is the new value" — downstream
+
+sink(STATE, RESOLVED)    // alternative phase 2: "I was dirty, but value didn't change" — downstream
+```
+
+**Completion/error:**
+```
+sink(END)                // normal completion — downstream to sinks; then talkback(END) upstream to deps
+sink(END, error)         // error completion — downstream to sinks; then talkback(END) upstream to deps
+```
+
+---
+
+## 4. The Three Primitive Composition Rules
+
+When implementing a new extra, choose the right building block in this order:
+
+### Rule 1: Use `operator()` for tier 1 (synchronous, stateful transforms)
+
+Use `operator()` when the extra:
+- Transforms or filters values synchronously
+- Needs to participate in diamond resolution (forward DIRTY/RESOLVED)
+- Has static deps (known at creation time)
+
+**`effect` cannot be used to build operators.** Effect is a terminal sink — it has no `get()` or `source()`, produces no store, and cannot be subscribed to by downstream nodes. Effect is always the end of a graph path, never a middle node.
+
+```ts
+// Template for a tier 1 single-dep operator
+function myOp<A, B>(/* options */): StoreOperator<A, B> {
+  return (input) => operator<B>([input], ({ emit, signal, complete, error, disconnect }) => {
+    // init: runs once on first subscriber. Local state here resets on reconnect.
+    let localState = initialState;
+
+    return (depIndex, type, data) => {
+      if (completed) return;                    // completed guard — ALWAYS first
+
+      if (type === STATE) {
+        if (data === DIRTY)    signal(DIRTY);   // forward downstream — every DIRTY from single dep
+        else if (data === RESOLVED) signal(RESOLVED); // forward or absorb (see below)
+        else signal(data);                      // forward unknown STATE — REQUIRED, no exception
+      }
+      if (type === DATA) {
+        // Transform, filter, accumulate, etc.
+        // If emitting:    emit(transformedValue)
+        // If suppressing: signal(RESOLVED)  ← NEVER stay silent after a DIRTY was forwarded
+      }
+      if (type === END) {
+        // 1. Stop processing (completed flag set by complete()/error())
+        // 2. complete()/error() will: disconnect upstream (talkback(END)), then notify sinks downstream
+        if (data !== undefined) error(data);
+        else complete();
+      }
+    };
+  }, { initial: /* if any */ });
 }
 ```
 
-### Auto-DIRTY
+**Multi-dep operators (combine, merge, partition):** Use bitmask dirty tracking identical to `derived` — forward DIRTY only on the first dirty dep, forward RESOLVED only when all bits clear. See §7.
 
-By default, `emit(value)` automatically sends `signal(DIRTY)` before the value. This is the common case for sources — every value emission is a state change.
-
-```ts
-// Default: emit = signal(DIRTY) + type 1 value
-const clicks = producer<MouseEvent>((actions) => {
-  const handler = (e: MouseEvent) => actions.emit(e);  // auto DIRTY + value
-  document.addEventListener('click', handler);
-  return () => document.removeEventListener('click', handler);
-});
-
-// Opt out for manual control (complex operators like switchMap)
-const custom = producer<number>(({ emit, signal }) => {
-  signal(DIRTY);
-  // ... async work ...
-  emit(value);   // raw type 1, no auto DIRTY
-}, { autoDirty: false });
-```
-
-### Options
+**Primary + secondary deps pattern (`withLatestFrom`):** Some operators need multiple deps wired for diamond resolution but only emit when a specific "primary" dep (dep 0) fires DATA. Secondary deps (dep 1..N) provide context values but don't drive emissions. The pattern uses `operator()` with a full bitmask, but tracks whether the primary dep received DATA in the current cycle:
 
 ```ts
-producer<T>(fn?, opts?)
-```
+// Template for primary + secondary deps operator
+function myOp<A, R>(others: Store<unknown>[], fn: (...args) => R): StoreOperator<A, R> {
+  return (source) => {
+    const allDeps = [source, ...others];
+    return operator<R>(allDeps, ({ emit, signal, complete, error }) => {
+      const dirtyDeps = new Bitmask(allDeps.length);
+      let primaryReceivedData = false;
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `initial` | `T` | `undefined` | Initial value before producer starts. Sets `currentValue` so `get()` returns a value immediately. |
-| `autoDirty` | `boolean` | `true` | When true, `emit()` sends `signal(DIRTY)` before the value automatically. |
-| `equals` | `(a: T, b: T) => boolean` | none | Emit guard — skips emission if `equals(currentValue, newValue)` returns true. |
-| `resetOnTeardown` | `boolean` | `false` | Resets `currentValue` to `initial` (or `undefined`) when producer stops (all sinks disconnect). |
-| `getter` | `(cached: T \| undefined) => T` | none | Custom `get()` — receives the cached value and returns a transformed value. |
-| `name` | `string` | none | Inspector display name. |
-
-### Internals
-
-```
-producer<T>(fn, opts?)
-  +-- currentValue: T | undefined (initialized from opts.initial)
-  +-- sinks: Set<callbag sink>
-  +-- get() -> getter ? getter(currentValue) : currentValue
-  +-- source(type, payload) -> callbag handshake, manages sinks
-  +-- Lazy start: producer function runs on first sink connection
-  +-- Auto-cleanup: producer cleanup runs when last sink disconnects
-  +-- resetOnTeardown: currentValue = initial on stop
-  +-- equals: emit guard, skips if value unchanged
-```
-
-The producer function receives actions and returns an optional cleanup function. The producer starts lazily (on first sink) and cleans up when all sinks disconnect.
-
----
-
-## State
-
-Specialized Producer for Signals-compatible writable stores. Sugar over Producer with equality-checked `set()`.
-
-```ts
-const count = state(0);
-count.get();     // 0
-count.set(5);    // equality check -> signal(DIRTY) -> emit(5)
-count.update(n => n + 1);
-```
-
-### Relationship to Producer
-
-State is implemented as a thin wrapper over producer:
-
-```ts
-function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T> {
-  const p = producer<T>(undefined, {
-    initial,
-    autoDirty: true,
-    equals: opts?.equals ?? Object.is,  // equality guard lives in producer's emit
-  });
-
-  return {
-    get: () => p.get() as T,   // cast safe: initial always provided
-    set: p.emit,               // producer's equals handles dedup
-    update(fn) { p.emit(fn(p.get() as T)); },
-    source: p.source,
+      return (dep, type, data) => {
+        if (type === STATE) {
+          if (data === DIRTY) {
+            const wasClean = dirtyDeps.empty();
+            dirtyDeps.set(dep);
+            if (wasClean) { primaryReceivedData = false; signal(DIRTY); }
+          } else if (data === RESOLVED) {
+            if (dirtyDeps.test(dep)) {
+              dirtyDeps.clear(dep);
+              if (dirtyDeps.empty()) {
+                primaryReceivedData ? emit(compute()) : signal(RESOLVED);
+              }
+            }
+          } else { signal(data); }
+        }
+        if (type === DATA) {
+          if (dep === 0) primaryReceivedData = true;  // only primary drives output
+          dirtyDeps.clear(dep);
+          if (dirtyDeps.empty()) {
+            primaryReceivedData ? emit(compute()) : signal(RESOLVED);
+          }
+        }
+        if (type === END) { data !== undefined ? error(data) : complete(); }
+      };
+    }, { initial: compute(), getter: () => compute() });
   };
 }
 ```
 
-State adds: `set()`, `update()`, and defaults `equals` to `Object.is`. The equality guard is producer's `equals` emit guard — `set(value)` is just `emit(value)`. The architecture has one source primitive (Producer), and State is API sugar.
+This pattern ensures:
+- **No diamond glitch:** bitmask waits for all deps (primary + secondary) to settle before computing, so secondary dep values are always current
+- **No stale reads:** secondary deps are real deps wired into the reactive graph, not read via `.get()` on disconnected stores
+- **Source-driven semantics:** only the primary dep's DATA triggers emission; secondary-only changes produce RESOLVED (suppression)
+
+Use this pattern when an operator needs context from additional stores but should only emit when the main source changes. Do not use it when all deps should drive emissions equally (use `combine` instead).
+
+**When to send RESOLVED vs emit:** If the operator decides not to emit a value in response to incoming DATA (filter rejects, distinctUntilChanged sees equal), it MUST send `signal(RESOLVED)` — not stay silent. Staying silent leaves downstream nodes waiting forever with a non-empty dirty bitmask.
+
+### Rule 2: Use `producer()` for tier 2 (async, time-based, dynamic subscription)
+
+Use `producer()` when the extra:
+- Involves timers, promises, observables, inner subscriptions
+- Is a natural cycle boundary (each output starts a new DIRTY+value cycle)
+- Cannot participate in diamond resolution (upstream timing is unknown)
+
+Tier 2 extras use `subscribe()` internally, which is a callbag sink that only sees DATA (type 1). Tier 2 nodes therefore never receive DIRTY/RESOLVED from upstream — they only receive values. Each `emit()` starts a new DIRTY cycle via `autoDirty: true`.
+
+```ts
+// Template for a tier 2 operator
+function myOp<A, B>(/* options */): StoreOperator<A, B> {
+  return (input) => producer<B>(({ emit, complete, error }) => {
+    // Setup: subscribe to input, start timers, etc.
+    const unsub = subscribe(input, (value, prev) => {
+      // ... async logic ...
+      emit(result); // autoDirty: true → sends DIRTY + DATA automatically (downstream)
+    });
+
+    return () => {
+      // Teardown: clear timers, cancel promises, call unsub()
+      unsub();
+    };
+  }, {
+    initial: input.get(),  // prevents spurious re-emit on first subscribe
+    equals: Object.is,     // prevents duplicate emissions
+  });
+}
+```
+
+**Always set `initial` and `equals` for dynamic-subscription operators.** Without `initial`, the first `subscribe()` inside the fn calls `emit()` with the current inner value — often a duplicate. `equals: Object.is` prevents it from broadcasting if unchanged.
+
+**`resetOnTeardown: true`** — use when the operator's value should revert to undefined/initial on disconnect (e.g., `delay` — inflight values are canceled so `get()` should not return a stale value).
+
+**`getter` option** — use when `get()` should return something other than the last emitted value (e.g., `sample` — `get()` returns the latest input value, not the last sampled value).
+
+### Rule 3: Extend primitives (add option to producer/operator) before using raw callbag
+
+If many operators share a pattern that can't be expressed with current options, add a new option to the primitive. Do not duplicate the same raw callbag boilerplate in 10 extras. Example: `resubscribable` was added when retry/rescue/repeat needed it.
+
+**Raw callbag (no primitive) is a last resort** and should only appear in extras that:
+- Need to detect inner completion/error separately from outer (e.g., retry listening for END on the inner source)
+- Have no clean way to express the lifecycle via producer/operator options
 
 ---
 
-## Operator
+## 5. Signal Handling Reference
 
-The general-purpose transform primitive. Receives all signal types from upstream deps and decides what to forward downstream. This is the building block for tier 1 operators.
+### Directions
 
-```ts
-function operator<B>(
-  deps: Store<unknown>[],
-  init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,
-  opts?: { initial?: B }
-): Store<B>
+Every signal travels in exactly one direction:
+- **DIRTY, RESOLVED, DATA, END(completion/error)** → **downstream** (toward sinks)
+- **talkback(END)** → **upstream** (toward sources = unsubscribe)
+
+### What each node MUST do with each incoming signal
+
+| Signal | operator (single-dep) | operator (multi-dep) | derived | effect | tier-2 extra |
+|--------|----------------------|---------------------|---------|--------|--------------|
+| STATE DIRTY | Forward downstream on every DIRTY | Forward downstream on first dirty dep (bitmask: 0→nonzero); ignore subsequent (idempotent) | Forward downstream on first dirty dep (bitmask: 0→nonzero) | Track in dirty bitmask; do NOT forward | Not received (subscribe() sees only DATA) |
+| STATE RESOLVED | Forward downstream, or absorb + send own RESOLVED if suppressing | Decrement bitmask; if 0 → forward RESOLVED downstream | Decrement bitmask; if 0 → send RESOLVED downstream | Decrement bitmask; if 0 → skip fn() | Not received |
+| STATE (unknown) | **Must forward downstream** | **Must forward downstream** | **Must forward downstream** | Ignore (terminal, nothing downstream) | Not received |
+| DATA | Transform/filter/accumulate → emit downstream or signal(RESOLVED) | Same; only act when dirty bitmask = 0 | Recompute when dirty bitmask = 0 → emit downstream or signal(RESOLVED) | Run fn() when dirty bitmask = 0 | Not received (subscribe() handles it externally) |
+| END (completion) | 1. Set completed flag. 2. Disconnect upstream (talkback(END) to all deps). 3. Notify sinks downstream with END. | Same | Same | Run cleanup; disconnect from all dep talkbacks | Not received |
+| END (error) | 1. Set completed flag. 2. Disconnect upstream (talkback(END)). 3. Notify sinks downstream with END(err). | Same | Same | Run cleanup; disconnect from all dep talkbacks | Not received |
+
+**complete() / error() teardown sequence (operator, derived):**
+```
+complete() / error(e):
+  → if completed: return                    // idempotency guard
+  → completed = true
+  → localTalkbacks = talkbacks
+  → talkbacks = []                          // null upstream refs before acting
+  → for each tb of localTalkbacks: tb(END) // disconnect upstream — goes upstream
+  → localSinks = _sinks; _sinks = null     // null field before notifying
+  → for each sink: sink(END) / sink(END,e) // notify downstream
 ```
 
-The `init` function receives actions and returns a handler. The handler is called for every event from every dep, with `depIndex` indicating which dep sent it.
+### DATA without prior DIRTY ("raw callbag compat" rule)
 
-### Actions API
-
-Same shape as Producer, plus `disconnect`:
+Raw callbag sources have no concept of type 3 and never send DIRTY. When a dep sends DATA but never sent DIRTY for the current cycle, treat the DATA as simultaneously resolving that dep:
 
 ```ts
-type Actions<T> = {
-  emit: (value: T) => void,        // type 1 DATA downstream
-  signal: (s: Signal) => void,     // type 3 STATE downstream (DIRTY, RESOLVED, etc.)
-  complete: () => void,             // type 2 END downstream
-  error: (e: unknown) => void,     // type 2 END with error data downstream
-  disconnect: (dep?: number) => void,  // disconnect from upstream dep(s)
+// Correct handling in derived/operator/effect handler:
+if (type === DATA) {
+  // Clear the dirty bit if it was set (normal case),
+  // or leave bitmask unchanged if it wasn't (raw callbag case).
+  dirtyDeps &= ~(1 << depIndex);
+
+  // Only act when ALL known-dirty deps have resolved.
+  if (dirtyDeps === 0) {
+    recompute(); // fn() calls dep.get() to pull all dep values including raw ones
+  }
+  // If dirtyDeps !== 0: other deps are still dirty — wait.
+  // The raw callbag dep's value will be captured by fn() via get() when we finally recompute.
 }
 ```
 
-### Transparent forwarding convention
+**Diamond resolution still holds in mixed graphs.** Example: A→B (state, sends DIRTY), rawC (no DIRTY), D depends on [B, rawC]:
 
-Callbag operators that don't understand type 3 should forward it:
+1. A sends DIRTY → B forwards DIRTY → D sets bit 0 (dirtyDeps = 0b01)
+2. rawC sends DATA → D tries: `dirtyDeps &= ~(1<<1)` (bit 1 was 0, unchanged) → `dirtyDeps = 0b01 ≠ 0` → wait
+3. A sends DATA → B recomputes → B sends DATA → D: `dirtyDeps &= ~(1<<0)` → `dirtyDeps = 0` → recompute. `fn()` calls `rawC.get()` and gets the already-updated value.
 
-```ts
-// Any callbag operator
-if (type === 0) { /* start */ }
-else if (type === 1) { /* data — transform and emit */ }
-else if (type === 2) { /* end */ }
-else { sink(type, data); }  // forward unknown types (including type 3)
-```
+D computes once, correctly, with both deps resolved. The raw dep's DATA is implicitly captured at recompute time via `get()`.
 
-This makes existing callbag operators type 3 compatible without modification. DIRTY signals pass through operator chains automatically.
-
-### Examples
-
-**map** — transform values, forward all signals:
-
-```ts
-function map<A, B>(fn: (a: A) => B): StoreOperator<A, B> {
-  return (input) => operator<B>([input], ({ emit, signal }) => {
-    return (dep, type, data) => {
-      if (type === 3) signal(data);         // forward DIRTY, RESOLVED, etc.
-      if (type === 1) emit(fn(data));       // transform value
-    };
-  });
-}
-```
-
-**filter** — conditionally forward, use RESOLVED when suppressing:
-
-```ts
-function filter<A>(pred: (a: A) => boolean): StoreOperator<A, A> {
-  return (input) => operator<A>([input], ({ emit, signal }) => {
-    return (dep, type, data) => {
-      if (type === 3) signal(data);         // forward signals
-      if (type === 1) {
-        if (pred(data)) emit(data);         // passed — emit value
-        else signal(RESOLVED);              // suppressed — resolve without value
-      }
-    };
-  });
-}
-```
-
-**take** — forward n values then disconnect:
-
-```ts
-function take<A>(n: number): StoreOperator<A, A> {
-  return (input) => operator<A>([input], ({ emit, signal, disconnect, complete }) => {
-    let count = 0;
-    return (dep, type, data) => {
-      if (type === 3) {
-        if (count < n) signal(data);        // forward while active
-      }
-      if (type === 1) {
-        if (count < n) {
-          count++;
-          emit(data);
-          if (count >= n) { disconnect(); complete(); }
-        }
-      }
-      if (type === 2) complete();
-    };
-  });
-}
-```
-
-**skip** — suppress first n values:
-
-```ts
-function skip<A>(n: number): StoreOperator<A, A> {
-  return (input) => operator<A>([input], ({ emit, signal }) => {
-    let count = 0;
-    return (dep, type, data) => {
-      if (type === 3) {
-        if (count >= n) signal(data);
-        // else: will suppress, but don't send RESOLVED yet (wait for value to count)
-      }
-      if (type === 1) {
-        count++;
-        if (count > n) emit(data);
-        else signal(RESOLVED);              // skipped — resolve without value
-      }
-      if (type === 2) signal(data);
-    };
-  });
-}
-```
-
-**scan** — accumulate values:
-
-```ts
-function scan<A, B>(fn: (acc: B, val: A) => B, seed: B): StoreOperator<A, B> {
-  return (input) => operator<B>([input], ({ emit, signal }) => {
-    let acc = seed;
-    return (dep, type, data) => {
-      if (type === 3) signal(data);
-      if (type === 1) { acc = fn(acc, data); emit(acc); }
-    };
-  }, { initial: seed });
-}
-```
-
-### Internals
-
-```
-operator<B>(deps, init, opts?)
-  +-- currentValue: B | undefined (cache for get())
-  +-- sinks: Set<callbag sink>
-  +-- upstreamTalkbacks: talkback[] for disconnecting
-  +-- get() -> return currentValue
-  +-- source(type, payload) -> callbag handshake, connects upstream lazily
-  +-- Lazy connection: connects to deps on first sink, disconnects on last
-```
-
-Operator manages upstream connections, downstream sinks, and the store interface. The handler function provides the custom transform logic.
+**Note:** "forward unknown type" (the passthrough rule) is the mechanism for callbag-compat through intermediate operators. "DATA without prior DIRTY" is the mechanism for consuming raw callbag sources at the dep-tracking level. Both rules are required for full compatibility.
 
 ---
 
-## Derived
+## 6. Lifecycle: Startup, Teardown, Cleanup, Reconnect
 
-Specialized Operator for computed stores with multi-dep dirty tracking, caching, and diamond resolution. Sugar over Operator with a specific handler pattern.
-
-```ts
-const sum = derived([a, b], () => a.get() + b.get());
-```
-
-### Relationship to Operator
-
-Derived is implementable on top of Operator:
-
-```ts
-function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
-  const eqFn = opts?.equals;
-
-  return operator<T>(deps, ({ emit, signal }) => {
-    const dirtyDeps = new Set<number>();
-    let cachedValue: T;
-    let hasCached = false;
-
-    return (depIndex, type, data) => {
-      if (type === 3 && data === DIRTY) {
-        const wasEmpty = dirtyDeps.size === 0;
-        dirtyDeps.add(depIndex);
-        if (wasEmpty) signal(DIRTY);           // forward DIRTY on first dirty dep
-      }
-      if (type === 3 && data === RESOLVED) {
-        if (dirtyDeps.has(depIndex)) {
-          dirtyDeps.delete(depIndex);
-          if (dirtyDeps.size === 0) {
-            signal(RESOLVED);                  // all deps resolved without value change
-          }
-        }
-      }
-      if (type === 1) {
-        if (dirtyDeps.has(depIndex)) {
-          dirtyDeps.delete(depIndex);
-          if (dirtyDeps.size === 0) {
-            // All dirty deps resolved — recompute
-            const result = fn();
-            if (eqFn && hasCached && eqFn(cachedValue, result)) {
-              signal(RESOLVED);                // value unchanged — push-phase memoization
-            } else {
-              cachedValue = result;
-              hasCached = true;
-              emit(result);
-            }
-          }
-        }
-      }
-    };
-  }, opts);
-}
-```
-
-### Diamond resolution
+### Startup sequence (when first sink subscribes)
 
 ```
-state A -> derived B -> derived D -> effect
-            \-> derived C -/
+source(START, sink)
+  → if completed + not resubscribable: sink(START, noop); sink(END); return  // downstream
+  → add sink to _sinks
+  → sink(START, talkback)             // handshake — downstream: sink gets talkback
+  → deferStart(() => _start())        // connection batching: producer fn runs after full chain is wired
+    → _start(): run ProducerFn or connectUpstream
+    → initial value already in _value (from opts.initial) — no re-emit needed
 ```
 
-**Phase 1 (type 3 DIRTY):**
-1. A sends `sink(3, DIRTY)` to B, C
-2. B: `dirtyDeps = {A}` -> forwards `sink(3, DIRTY)` to D
-3. C: `dirtyDeps = {A}` -> forwards `sink(3, DIRTY)` to D
-4. D: `dirtyDeps = {B, C}` (counts 2)
+**Connection batching (`deferStart`):** `beginDeferredStart()` / `endDeferredStart()` queues all producer fn starts. They all fire together at `endDeferredStart()`. This ensures that when `subscribe(store, cb)` is called, the cb captures the baseline value before any producer starts emitting. Without this, a producer that emits synchronously in its fn would race with the subscriber's initial read.
 
-**Phase 2 (type 1 DATA):**
-5. A sends `sink(1, value)` to B, C
-6. B receives value, `dirtyDeps = {}`, recomputes, emits to D. D: resolves B, `dirtyDeps = {C}` — waits.
-7. C receives value, `dirtyDeps = {}`, recomputes, emits to D. D: resolves C, `dirtyDeps = {}` — recomputes, emits.
+### Teardown sequence (last sink unsubscribes)
 
-D computes exactly once with both B and C fully resolved. No glitch.
+```
+talkback(END)  ← upstream from sink
+  → _sinks.delete(sink)
+  → if _sinks.size === 0:
+      _sinks = null
+      _stop()
+        → _flags &= ~P_STARTED
+        → _cleanup?.()          // run user cleanup (clearInterval, unsub, etc.)
+        → _cleanup = undefined
+        → if resetOnTeardown: _value = _initial
+```
 
-### `equals` and RESOLVED — subtree skipping
+### Completion/error sequence
 
-When derived recomputes and `equals(cached, new)` returns true:
+```
+complete() or error(e):
+  → if _flags & P_COMPLETED: return   // idempotency guard
+  → _flags |= P_COMPLETED
+  → for each talkback: talkback(END)  // disconnect upstream — goes upstream
+  → talkbacks = []
+  → localSinks = _sinks; _sinks = null   // null field BEFORE notifying — reentrancy safe
+  → _stop()                              // cleanup BEFORE notifying sinks
+  → for each sink: sink(END) or sink(END, e)  // notify downstream
+```
 
-- Derived sends `signal(RESOLVED)` instead of `emit(value)`
-- Downstream nodes that were counting this dep as dirty decrement their pending count without receiving a new value
-- If ALL of a downstream node's dirty deps sent RESOLVED, that node sends RESOLVED too — **skipping `fn()` entirely**
+**Order matters:** cleanup before notification. This diverges from the callbag ecosystem convention (which notifies sinks first). The cleanup-first order ensures that if a sink re-subscribes during END notification (e.g., retry with `resubscribable: true`), the producer is already in a clean state (`_started = false`, no cleanup fn) so the new subscription starts fresh.
 
-This is more powerful than v2's approach where derived had to emit the unchanged value for bookkeeping. With RESOLVED, entire subtrees can be skipped when values don't change.
+### Reconnect behavior
 
-### `get()` semantics
+Reconnect = last sink disconnects → first sink subscribes again.
 
-- **Connected + settled** (dirtyDeps empty): return cached value (fast path)
-- **Connected + pending** (dirtyDeps non-empty): recompute on demand by calling `fn()` which recursively pulls via deps' `get()`. Result is NOT cached — the callbag flow handles proper cache update.
-- **Not connected** (no sinks): recompute on demand (one-shot pull, no callbag involved)
+- **producer**: `_stop()` called on last disconnect, `_start()` called on new first subscriber. ProducerFn re-runs. All local state (timers, subscriptions) fresh. If `resetOnTeardown: true`, `_value` resets to `_initial`.
+- **operator**: `_disconnectUpstream()` on last sink disconnect, `_connectUpstream()` on new subscriber. `init()` re-runs → all handler-local state resets.
+- **derived**: same as operator — fresh dirty bitmask, recomputes from deps.
+- **effect**: no reconnect. Effect connects once on creation and disposes. Create a new effect to reconnect.
+- **Completed nodes** (after `complete()` or `error()`): cannot reconnect unless `resubscribable: true`. New subscribers get immediate START + END.
 
-This preserves the guarantee that `get()` always returns a consistent value.
+### dispose() idempotency
+
+`dispose()` / `disconnect()` must be idempotent. Every major reactive library (RxJS, MobX, SolidJS, Vue, Preact Signals, Svelte) guarantees this. Implementation: check a `_disposed` flag at the top of dispose; set it before doing anything.
 
 ---
 
-## Effect
+## 7. Dirty Tracking: Bitmask for Dep Charge
 
-Sink primitive with state participation. Tracks dirty deps across multiple inputs, runs `fn()` when all deps resolve.
+`derived`, multi-dep `operator`, and `effect` track which deps are dirty using a numeric bitmask. Each dep occupies one bit at position `depIndex`.
 
 ```ts
-const dispose = effect([count, doubled], () => {
-  console.log(count.get(), doubled.get());
+// depIndex 0 → bit 1 (1 << 0)
+// depIndex 1 → bit 2 (1 << 1)
+// depIndex 2 → bit 4 (1 << 2)
+
+let dirtyDeps = 0;
+
+// On STATE DIRTY from depIndex:
+const bit = 1 << depIndex;
+const wasClean = dirtyDeps === 0;
+dirtyDeps |= bit;
+if (wasClean) signal(DIRTY);          // first dirty dep → forward downstream
+
+// On STATE RESOLVED from depIndex:
+dirtyDeps &= ~(1 << depIndex);
+if (dirtyDeps === 0) signal(RESOLVED); // all resolved without DATA → skip downstream
+
+// On DATA from depIndex (covers both normal and raw callbag cases):
+dirtyDeps &= ~(1 << depIndex);         // clear bit if it was set; no-op if it wasn't
+if (dirtyDeps === 0) recompute();      // safe to act — all known-dirty deps resolved
+```
+
+**Bitmask limit:** 31 deps max (safe bit shifting in JS). If an operator needs more than 31 deps, use a `Set<number>` instead. No existing extra exceeds 31 deps.
+
+**Multiple DIRTYs from same dep:** Idempotent — `|=` sets the bit regardless of whether it was already set. No double-forward of DIRTY.
+
+**Single-dep operators:** No bitmask needed. Forward every DIRTY directly. The `if (wasClean)` check is only needed for multi-dep operators to avoid sending DIRTY multiple times.
+
+---
+
+## 8. Where to Put Guards, Stops, Passthroughs, and Switches
+
+### Guard placement
+
+Guards belong at the **top of the handler**, before any computation:
+
+```ts
+return (depIndex, type, data) => {
+  if (completed) return;        // completed guard — FIRST, always
+  if (type === STATE) { ... }   // then signals
+  if (type === DATA) { ... }    // then data
+  if (type === END) { ... }     // then completion
+};
+```
+
+### Stop / disconnect timing
+
+- **Disconnect from upstream immediately** when an operator decides it needs no more data (e.g., `take` after n values, `first` after one value). Call `disconnect()` or `disconnect(depIndex)` from inside the DATA handler, then call `complete()`. Don't wait for upstream to complete.
+- **Disconnect from multiple deps** when only one is needed further (e.g., `takeUntil` disconnects source after notifier fires).
+
+### Passthrough convention
+
+Passthrough = operator forwards type 3 unchanged, transforms type 1:
+
+```ts
+if (type === STATE) signal(data);       // forward all STATE signals downstream — no exceptions
+if (type === DATA)  emit(transform(data));
+if (type === END)   data ? error(data) : complete();
+```
+
+**Never selectively forward STATE.** If you don't understand a STATE signal, forward it downstream. Only suppress DIRTY/RESOLVED when you have a semantic reason (e.g., filter absorbs upstream RESOLVED and sends its own RESOLVED after rejecting the value).
+
+### Switch / dynamic upstream
+
+Dynamic upstream (the upstream dep changes at runtime) is a tier 2 pattern. Use producer + inner subscribe. Never try to dynamically rewire operator deps — operator deps are static.
+
+```ts
+// Right: producer wrapping inner subscribe
+return (outer) => producer<B>(({ emit, error, complete }) => {
+  let innerUnsub: (() => void) | null = null;
+  let innerEnded = false;                    // guard for sync inner completion
+
+  function subscribeInner(store: Store<B>) {
+    if (innerUnsub) { innerUnsub(); innerUnsub = null; }
+    innerEnded = false;
+    innerUnsub = subscribe(store, (v) => emit(v), {
+      onEnd(err) {
+        innerEnded = true;
+        if (err) error(err);
+        else handleInnerComplete();
+      }
+    });
+    if (innerEnded) innerUnsub = null;       // sync completion race guard — REQUIRED
+  }
+  // ...
 });
 ```
 
-### How it works
-
-Effect subscribes to deps on both type 3 and type 1:
-
-- `sink(3, DIRTY)` from dep -> add dep to `dirtyDeps`
-- `sink(3, RESOLVED)` from dep -> resolve dep without value change
-- `sink(1, value)` from dep -> resolve dep
-- When `dirtyDeps` is empty (all deps resolved) -> run `fn()` **inline**
-
-Effect runs inline when its deps resolve — no global `enqueueEffect` needed. The callbag signal flow determines when the effect runs.
-
-### Re-entrance
-
-If an effect calls `state.set()` during execution, a new DIRTY signal propagates through the graph. This is handled naturally:
-
-```
-1. A.set(1) -> DIRTY to D -> DIRTY to E
-2. A value -> D recomputes -> D value -> E runs fn()
-3. E calls B.set(2) -> DIRTY to D -> DIRTY to E
-4. B value -> D recomputes -> D value -> E runs fn()
-```
-
-Each cycle is clean because `dirtyDeps` tracks deps by identity (Set), not by cycle. When dep X resolves, X is removed from the set regardless of which cycle caused it. Multiple dirties from the same dep are idempotent (already in set).
-
-Self-triggering effects (effect changes its own deps) will recurse — same as RxJS. The user is responsible for guarding against infinite loops, typically via equality checks in `set()`.
-
-### Static connection
-
-Unlike derived, effect connects eagerly on creation (it IS the terminal sink). Dependencies are static — wired once, never reconnect.
+**The sync inner completion race:** When `subscribe()` is called and the inner source completes synchronously, the `onEnd` callback fires and nulls `innerUnsub` — but then `subscribe()` returns its unsub function and the caller assigns it to `innerUnsub`, overwriting the null. Always add the `innerEnded` flag guard after `subscribe()` returns.
 
 ---
 
-## Subscribe
+## 9. Resource Allocation & Cleanup Checklist
 
-A convenience sink (lives in extras, not core). Stateless — just reflects values it receives.
+Every tier 2 extra must clean up all of these if it uses them:
 
-```ts
-const unsub = subscribe(store, (value, prev) => { ... });
-```
+| Resource | Cleanup call |
+|----------|-------------|
+| `setInterval` | `clearInterval(id)` |
+| `setTimeout` | `clearTimeout(id)` |
+| `addEventListener` | `removeEventListener(event, handler)` |
+| `subscribe()` return value | `unsub()` |
+| Inner callbag talkback | `talkback(END)` — upstream |
+| Inner store subscription | `innerUnsub?.()` |
+| Pending promise (flag) | Set `cancelled = true` flag before returning |
+| Observable subscription | `subscription.unsubscribe()` |
 
-With type 3 separation, subscribe is trivially simple:
-
-```ts
-function subscribe<T>(store: Store<T>, cb: (value: T, prev: T | undefined) => void): () => void {
-  let prev: T | undefined;
-
-  store.source(START, (type, data) => {
-    if (type === START) { talkback = data; }
-    if (type === DATA) {
-      const next = data as T;
-      const p = prev;
-      prev = next;
-      cb(next, p);
-    }
-    if (type === END) { talkback = null; }
-  });
-
-  return () => talkback?.(END);
-}
-```
-
-No DIRTY tracking, no pending flag, no `enqueueEffect`. Just a callbag sink that runs a callback on every value.
+Cleanup is triggered by: the teardown return of ProducerFn, last sink disconnect, `complete()`, or `error()`. All paths must reach cleanup — verify by tracing all exit conditions.
 
 ---
 
-## Protocol
+## 10. Operator Behavioral Compatibility
 
-### Callbag signal types
+### Default: follow RxJS
+
+For any operator with an RxJS equivalent, match RxJS semantics exactly. When in doubt, read the [RxJS operator documentation](https://rxjs.dev/api). Do not guess — the semantics are specified there.
+
+### Documented divergences from RxJS
+
+These are places where callbag-recharge intentionally differs:
+
+| Behavior | RxJS | callbag-recharge | Reason |
+|----------|------|-----------------|--------|
+| Value suppression | Operator simply emits nothing | Must send `signal(RESOLVED)` | Downstream nodes have dirty bitmasks that need clearing; silence causes deadlock |
+| `filter` non-match | No emission | `signal(RESOLVED)` | Same as above |
+| `distinctUntilChanged` equal | No emission | `signal(RESOLVED)` | Same as above |
+| `share()` | Adds refcounting / multicasting | No-op (returns input unchanged) | Stores are inherently multicast — multiple `source(START, sink)` calls all receive data |
+| Completion ordering | Notify sinks first, then cleanup | Cleanup first, then notify sinks | Allows `resubscribable` re-subscription during END notification; producer is already in clean state |
+| `batch()` | No equivalent | Defers DATA, sends DIRTY immediately | Required for diamond resolution across multiple simultaneous state changes |
+| `effect` execution | No equivalent (not an RxJS concept) | Inline, synchronous when deps resolve | No global scheduler; runs in the same call stack |
+| `state` completion | N/A (TC39 Signals never complete) | Inherits completion from producer (callbag model) | Not a bug — state is a callbag source, not a pure TC39 Signal |
+
+### TC39 Signals compatibility
+
+`state` is compatible with TC39 Signal.State:
+- `equals` defaults to `Object.is` (same as TC39's default)
+- `set(same)` is a no-op (no emission, no DIRTY)
+- `set()` during batch → DIRTY propagates immediately, value deferred
+
+TC39 Signals have no concept of completion/error — they're infinite. Our `state` inherits completion from producer (it's a callbag), which is a deliberate divergence, not a bug.
+
+### Raw callbag compatibility
+
+Type 1 must be pure values. Any raw callbag consumer can subscribe to a callbag-recharge store and receive only real values on type 1. Any raw callbag source can be consumed by callbag-recharge via `fromObs` or direct `source(START, sink)` — DATA without DIRTY is handled via the bitmask rule in §5.
+
+---
+
+## 11. Optimization Guidelines
+
+### V8 hidden class: use classes for hot primitives
+
+`ProducerImpl`, `OperatorImpl`, `DerivedImpl` are V8 classes (not closures) so that V8 can build a stable hidden class. All instance properties are declared in the constructor with consistent types. Never add properties dynamically.
 
 ```ts
-const START = 0;   // callbag handshake
-const DATA  = 1;   // values (always real values, never sentinels)
-const END   = 2;   // completion or error
-const STATE = 3;   // control signals (DIRTY, RESOLVED, PAUSE, RESUME, ...)
-```
-
-### Signal constants
-
-```ts
-const DIRTY    = Symbol("DIRTY");     // "my value is about to change"
-const RESOLVED = Symbol("RESOLVED");  // "I was dirty but my value didn't change"
-```
-
-### Global state — batch only
-
-The only global coordination is `batch`. No `enqueueEffect`, no `propagating` flag, no phase 2 value queue.
-
-```ts
-let batchDepth = 0;
-const deferredEmissions: Array<() => void> = [];
-
-function batch<T>(fn: () => T): T {
-  batchDepth++;
-  try {
-    return fn();
-  } finally {
-    batchDepth--;
-    if (batchDepth === 0) {
-      // Drain deferred type 1 emissions
-      for (let i = 0; i < deferredEmissions.length; i++) {
-        deferredEmissions[i]();
-      }
-      deferredEmissions.length = 0;
-    }
+// Good: all properties initialized in constructor, same shape always
+class ProducerImpl<T> {
+  _value: T | undefined;
+  _sinks: Set<any> | null = null;
+  _flags: number;
+  // ...
+  constructor(...) {
+    this._value = opts?.initial;
+    // every property set here
   }
 }
 ```
 
-### How a state change propagates
+### Bitmask flags: pack booleans
 
-**Without batch:**
-
-```ts
-state.set(5);
-// 1. Equality check — if unchanged, return
-// 2. Update currentValue
-// 3. sink(3, DIRTY) to all sinks — synchronous, returns when all downstream notified
-// 4. sink(1, value) to all sinks — values flow through the graph
-// 5. Effects run inline when their deps resolve
-```
-
-No queue. DIRTY propagates on type 3, values emit on type 1. The channels don't interfere.
-
-**With batch:**
+Instead of multiple boolean properties (each is a hidden class slot), pack them into a single `_flags: number`:
 
 ```ts
-batch(() => {
-  a.set(1);   // sink(3, DIRTY) propagates immediately, value emission deferred
-  b.set(2);   // sink(3, DIRTY) propagates immediately, value emission deferred
-});
-// batch ends: all deferred values emit on type 1
-// derived nodes resolve, effects run inline
+const P_STARTED    = 1;   // 1 << 0
+const P_COMPLETED  = 2;   // 1 << 1
+const P_AUTO_DIRTY = 4;   // 1 << 2
+const P_RESET      = 8;   // 1 << 3
+const P_RESUB      = 16;  // 1 << 4
+const P_PENDING    = 32;  // 1 << 5
+
+// Read: this._flags & P_STARTED
+// Set:  this._flags |= P_STARTED
+// Clear: this._flags &= ~P_STARTED
 ```
 
-During batch: `set()` sends type 3 DIRTY immediately but defers type 1 value emission. After batch ends: all values emit, derived nodes resolve their dirty sets, effects run.
+### Method binding in constructor (not arrow functions)
 
-### Batch example with complex graph
-
-```
-a1 -> b1 -> c1 -> d1 -> e1
-      b2 -> c2 -/    \
-            c3 -------> e2
-```
-
-d1 depends on c1, c2. e2 depends on d1, c3.
+Arrow function properties create a new function per instance. Binding in the constructor assigns to the instance once and avoids per-instance overhead in V8:
 
 ```ts
-batch(() => { a1.set(x); b2.set(y); c3.set(z); });
-```
+// Bad: arrow function — new Function object per instance
+class Foo { emit = (v: T) => { ... }; }
 
-**DIRTY propagation (during batch, synchronous):**
-
-```
-a1.set(x): a1->b1  b1->c1  c1->d1  d1->e1, d1->e2
-b2.set(y): b2->c2  c2->d1 (already dirty, no re-forward)
-c3.set(z): c3->e2 (already dirty, no re-forward)
-```
-
-Dirty state after all DIRTY propagates:
-
-| Node | dirtyDeps |
-|------|-----------|
-| b1 | {a1} |
-| c1 | {b1} |
-| c2 | {b2} |
-| d1 | {c1, c2} |
-| e1 | {d1} |
-| e2 | {d1, c3} |
-
-**Value propagation (after batch, deferred emissions drain):**
-
-```
-a1 value -> b1 resolves, recomputes, emits
-  -> c1 resolves, recomputes, emits
-    -> d1 resolves c1 -> dirtyDeps = {c2} -> WAITS
-
-b2 value -> c2 resolves, recomputes, emits
-  -> d1 resolves c2 -> dirtyDeps = {} -> recomputes, emits
-    -> e1 resolves, RUNS
-    -> e2 resolves d1 -> dirtyDeps = {c3} -> WAITS
-
-c3 value -> e2 resolves c3 -> dirtyDeps = {} -> RUNS
-```
-
-Every node computes exactly once. Emission order doesn't matter — dep-identity tracking naturally resolves regardless of order.
-
----
-
-## Dirty tracking by dep identity
-
-Each stateful node tracks dirty deps in a `Set<depIndex>` rather than a counter or version number. This handles all cases without global coordination:
-
-### Why not version numbers?
-
-Versioned signals like `(DIRTY, v0)` were considered. The problem: when a value arrives on type 1, which version does it correspond to? Type 1 doesn't carry version info. Correlating versions across type 3 and type 1 would pollute the data channel.
-
-Dep-identity tracking is simpler and more robust:
-
-- DIRTY from dep X -> add X to dirty set
-- Value from dep X -> remove X from dirty set
-- Multiple dirties from same dep are idempotent (already in set)
-- When dirty set is empty -> all deps resolved, safe to recompute
-
-### Re-entrance safety
-
-```
-A.set(1):
-  DIRTY to D -> D.dirtyDeps = {A}
-  value to D -> D resolves A -> recomputes -> emits to E
-  E runs -> B.set(2):
-    DIRTY to D -> D.dirtyDeps = {B}
-    value to D -> D resolves B -> recomputes -> emits to E
-    E runs (no further changes)
-```
-
-Two clean cycles. The set tracks WHICH dep, not which cycle. No version disambiguation needed.
-
-### Versions as debug metadata (optional)
-
-Versions are not needed for the core protocol. However, type 3 signals can optionally carry version metadata for inspector/devtools purposes:
-
-```ts
-sink(3, { signal: DIRTY, version: 7 })    // inspector logs "cycle 7 started"
-sink(3, { signal: RESOLVED, version: 7 }) // inspector logs "cycle 7: no change"
-```
-
-This is observability metadata, not a correctness mechanism. The core protocol uses `dirtyDeps: Set<depIndex>` for all tracking.
-
----
-
-## Mixed state + stream deps (Option 2 + Option 3)
-
-When a derived depends on both state-aware sources and pure callbag sources (streams without DIRTY):
-
-**Option 2 — Transparent forwarding:** Callbag operators forward unknown types (including type 3). This means DIRTY propagates through operator chains like `pipe(state, take(5), map(fn))` without operators needing to understand DIRTY.
-
-**Option 3 — Unexpected DATA handling:** If type 1 DATA arrives from a dep that isn't in `dirtyDeps` (never sent DIRTY), treat it as an immediate trigger — recompute right away.
-
-Together:
-- State deps coordinate via DIRTY/RESOLVED. Diamond resolution works.
-- Pure stream deps trigger immediate recomputation. No glitch-free guarantee for that dep, but correct final values.
-- This naturally handles mixed dependency graphs without special casing.
-
----
-
-## Tier 2 operators (Producer-based)
-
-Complex operators that involve async, timers, or dynamic subscriptions are built as Producers with `autoDirty: true` (the default). Each `emit()` automatically sends `signal(DIRTY)` + value, starting a new DIRTY+value cycle. All 12 tier 2 operators use `producer()` directly.
-
-### Patterns
-
-**Time-based** — simple `subscribe` + timer:
-
-```ts
-function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
-  return (input) => producer<A>(({ emit }) => {
-    let timer: any;
-    const unsub = subscribe(input, (value) => {
-      clearTimeout(timer);
-      timer = setTimeout(() => emit(value), ms);
-    });
-    return () => { clearTimeout(timer); unsub(); };
-  }, { equals: Object.is });
+// Good: prototype method + bind — shares prototype, one bound fn per instance
+class Foo {
+  constructor() { this.emit = this.emit.bind(this); }
+  emit(v: T) { ... }
 }
 ```
 
-**Dynamic subscription** — `initial` + `equals` prevent spurious initial emission during deferred start:
+Binding is required for methods exposed as part of the public API (ProducerStore.emit, source, etc.) so they work when destructured.
+
+### Snapshot-free completion: null before iterate
+
+When completing/erroring, avoid allocating a snapshot array (`[...this._sinks]`). Instead, null the field before iterating the local reference:
 
 ```ts
-function switchMap<A, B>(fn: (a: A) => Store<B>): StoreOperator<A, B | undefined> {
-  return (outer) => {
-    const initialInner = fn(outer.get());
-    return producer<B>(({ emit }) => {
-      let innerUnsub: (() => void) | null = null;
-      function subscribeInner(innerStore: Store<B>) {
-        if (innerUnsub) { innerUnsub(); innerUnsub = null; }
-        emit(innerStore.get());
-        innerUnsub = subscribe(innerStore, (v) => emit(v));
-      }
-      const outerUnsub = subscribe(outer, (v) => subscribeInner(fn(v)));
-      subscribeInner(initialInner);
-      return () => { if (innerUnsub) innerUnsub(); outerUnsub(); };
-    }, { initial: initialInner.get(), equals: Object.is });
-  };
+const sinks = this._sinks;
+this._sinks = null;   // null field first — any re-subscribe sees clean state
+this._stop();         // cleanup before notifying
+if (sinks) for (const sink of sinks) sink(END);
+```
+
+### Effect as closure, not class
+
+`effect` is a terminal sink — it produces nothing, has no public API beyond `dispose()`, no subclassing. A pure closure is faster (V8 accesses closure variables faster than class properties, no hidden class overhead):
+
+```ts
+export function effect(deps, fn) {
+  let dirtyDeps = 0;
+  let disposed = false;
+  let cleanup: (() => void) | undefined;
+  // all state in closure-local variables
+  return () => { /* dispose */ };
 }
 ```
 
-**Error handling** — uses `error()` and `complete()` actions:
+### Avoid Set for dirty tracking when ≤ 31 deps
+
+`Set.has()` + `Set.add()` + `Set.delete()` have per-call overhead. A bitmask integer uses `|=`, `&=`, and `===` — single CPU instructions. Always prefer bitmask for derived/effect dirty tracking.
+
+---
+
+## 12. Inspector & Debugging
+
+### What the inspector tracks now
+
+The `Inspector` singleton holds all observability metadata outside of store objects (stores stay lean). It uses `WeakMap` keyed on the store instance so metadata is GC'd with the store.
 
 ```ts
-function retry<A>(n: number): StoreOperator<A, A> {
-  return (input) => producer<A>(({ emit, complete, error }) => {
-    let retriesLeft = n;
-    let talkback: ((t: number) => void) | null = null;
-    function connect() {
-      input.source(START, (type, data) => {
-        if (type === START) talkback = data;
-        if (type === 1) emit(data);
-        if (type === END) {
-          talkback = null;
-          if (data !== undefined && retriesLeft > 0) { retriesLeft--; connect(); }
-          else if (data !== undefined) error(data);
-          else complete();
-        }
-      });
-    }
-    connect();
-    return () => { if (talkback) talkback(END); };
-  }, { initial: input.get(), equals: Object.is });
-}
+Inspector.register(store, { name: "myStore", kind: "state" });
+Inspector.getName(store);    // "myStore"
+Inspector.getKind(store);    // "state"
+Inspector.inspect(store);    // { name, kind, value }
+Inspector.graph();           // Map<name, StoreInfo> of all live stores
+Inspector.trace(store, cb);  // subscribe to value changes for debugging
 ```
 
-**Value reset on teardown** — `resetOnTeardown: true` resets `get()` to `initial` (or `undefined`) when all sinks disconnect:
+All three store-producing primitives (producer, operator, derived) call `Inspector.register()` in their constructor. `state` inherits registration via `ProducerImpl`. Extras that create inner producers/operators pass `_skipInspect: true` to avoid double-registration.
+
+### Enabling/disabling
+
+- **Auto:** enabled in development (`process.env.NODE_ENV !== "production"`), disabled in production
+- **Manual:** `Inspector.enabled = true/false`
+- **Cost when disabled:** `register()` and `getName()` are no-ops. `getKind()` always reads (used by graph() which is dev-only anyway).
+
+### Naming stores for debugging
+
+Pass `name` in options to any core primitive:
 
 ```ts
-function delay<A>(ms: number): StoreOperator<A, A | undefined> {
-  return (input) => producer<A>(({ emit }) => {
-    const timers = new Set<ReturnType<typeof setTimeout>>();
-    const unsub = subscribe(input, (v) => {
-      const id = setTimeout(() => { timers.delete(id); emit(v); }, ms);
-      timers.add(id);
-    });
-    return () => { for (const id of timers) clearTimeout(id); timers.clear(); unsub(); };
-  }, { resetOnTeardown: true });
-}
+const count = state(0, { name: "count" });
+const doubled = derived([count], () => count.get() * 2, { name: "doubled" });
 ```
 
-**Custom getter** — `getter` overrides `get()` to return a value different from the last emission:
+### `Inspector.trace()` for value change debugging
+
+`trace()` subscribes to a store's callbag source and reports value changes. Useful for tracing which stores are actually updating in a chain. Note: `trace()` only sees DATA (type 1), not DIRTY/RESOLVED signals.
+
+### Proposed: signal flow tracing (not yet implemented)
+
+To support the "See through it" promise — making the graph fully observable without guessing — the inspector should be extended with:
+
+**1. Event log** — a circular buffer of recent events across all registered stores:
 
 ```ts
-function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
-  return (input) => {
-    let latestInput: A = input.get();
-    return producer<A>(({ emit }) => {
-      latestInput = input.get();
-      const inputUnsub = subscribe(input, (v) => { latestInput = v; });
-      const notifierUnsub = subscribe(notifier, () => { emit(latestInput); });
-      return () => { inputUnsub(); notifierUnsub(); };
-    }, { initial: latestInput, equals: Object.is, getter: () => latestInput });
-  };
+Inspector.events: Array<{
+  ts: number;          // performance.now() timestamp
+  store: string;       // name or "store_N"
+  kind: string;        // "producer" | "derived" | "operator"
+  type: "DIRTY" | "RESOLVED" | "DATA" | "END" | "ERROR";
+  value?: unknown;     // for DATA events only
+}>
+Inspector.startRecording(maxEvents?: number): void;
+Inspector.stopRecording(): void;
+Inspector.dumpEvents(): string;   // formatted table for copy-paste into bug reports
+```
+
+**2. Dependency edges** — register which stores depend on which, enabling graph visualization:
+
+```ts
+Inspector.registerEdge(parent: Store<unknown>, child: Store<unknown>): void;
+Inspector.getEdges(): Map<string, string[]>;  // parent name → child names
+// Used by derived/operator in _connectUpstream()
+```
+
+**3. Signal hooks** — low-level hooks called by the primitives on every signal, enabling custom devtools:
+
+```ts
+Inspector.onEmit?: (store: Store<unknown>, value: unknown) => void;
+Inspector.onSignal?: (store: Store<unknown>, signal: Symbol) => void;
+Inspector.onEnd?: (store: Store<unknown>, error: unknown) => void;
+```
+
+**4. `Inspector.dump()`** — structured snapshot for AI-assisted debugging:
+
+```ts
+Inspector.dump(): {
+  graph: Record<string, { kind: string; value: unknown; deps: string[] }>;
+  recentEvents: typeof Inspector.events;
 }
+// Paste Inspector.dump() into the chat to give the AI full graph context.
 ```
 
-These are cycle boundaries. Each `emit` starts a new DIRTY+value cycle. This matches RxJS behavior — time-based and dynamic-subscription operators are natural glitch boundaries.
+**Implementation notes:**
+- All hooks check `Inspector.enabled` before doing anything — zero cost in production.
+- `registerEdge()` is called in `operator._connectUpstream()` and `derived._connectUpstream()` when connecting to deps. `WeakMap<Store, WeakRef<Store>[]>` keeps edges GC-friendly.
+- The event log is a fixed-size circular buffer (default 1000 events) allocated once at `startRecording()` — no per-event allocation.
+- Hooks in primitives: `if (Inspector.onEmit) Inspector.onEmit(this, value)` — the `if` is branch-predicted away when hooks are null.
 
----
+### AI-readable debug output (current)
 
-## Impact on existing modules
+`Inspector.graph()` returns a `Map<string, StoreInfo>` that is serializable. To dump the full reactive graph state:
 
-### pipe / pipeRaw
-
-`pipe()` chains operators. Each operator is a tier 1 Operator node. Type 3 signals flow through the chain via transparent forwarding.
-
-`pipeRaw()` fuses transforms into a single derived store. Works as before — the fused derived handles DIRTY tracking for its single upstream dep.
-
-### Extra modules
-
-| Category | Examples | Tier | Implementation |
-|----------|----------|------|----------------|
-| Simple passthrough | take, skip, tap, distinctUntilChanged, pairwise | 1 | Operator — forward type 3, transform type 1 |
-| Stateful transform | map, filter, scan | 1 | Operator — forward type 3, transform type 1 |
-| Multi-source | combine, merge | 1 | Operator with multiple deps — dirty tracking like derived |
-| Event sources | interval, fromEvent, fromPromise, fromObs | 1 | Producer (autoDirty: true) |
-| Time-based | debounce, throttle, delay, sample, bufferTime, timeout | 2 | Producer (autoDirty: true) — timer-based cycle boundaries |
-| Dynamic subscription | switchMap, flat, concatMap, exhaustMap | 2 | Producer (autoDirty: true, initial + equals) — manages inner subscriptions |
-| Error handling | rescue, retry | 2 | Producer (autoDirty: true, initial + equals + error) — manages subscription lifecycle |
-| Simple sinks | forEach, subscribe | - | Callbag sink — type 1 only, no state participation |
-
-### What's eliminated
-
-- `enqueueEffect()` — effects run inline when deps resolve
-- `pendingValueEmitters[]` — no phase 2 queue; values emit directly after DIRTY
-- `emittingValues` flag — not needed
-- `flushing` flag — not needed
-- `DIRTY` sentinel on type 1 — moved to type 3
-- `pending` flag in subscribe — not needed; DATA is always a real value
-
-### What's simplified
-
-- `batch()` — just `batchDepth` + `deferredEmissions[]` (2 pieces of global state, down from 5)
-- `subscribe` — pure callbag sink, no DIRTY awareness
-- Extra operators — no two-phase rewrite needed; forward type 3, transform type 1
-
----
-
-## Comparison with established libraries
-
-| Aspect | v1 | v2 | **v3 (target)** | Preact Signals | SolidJS |
-|--------|----|----|-----------------|----------------|---------|
-| Data transport | Dual: DIRTY via callbag, values via get() | Single channel: DIRTY + values on type 1 | **Separated: values on type 1, signals on type 3** | Dual: flags via notify, values via refresh | Dual: flags via notify, values via updateIfNecessary |
-| State graph | Same as data graph | Same as data graph | **Same callbag wiring, different message type** | Separate observer lists | Separate subscriber lists |
-| Derived caching | No cache | Cached, updated on value arrival | **Cached, updated on value arrival** | Cached, lazy recompute | Cached, lazy recompute |
-| Diamond solution | Deferred pull | Dep counting on single channel | **Dep counting via type 3, values on type 1** | Recursive depth-first refresh | Height-based topological sort |
-| Memoization | Pull-phase only | Push-phase (emit unchanged) | **Push-phase via RESOLVED (skip entire subtree)** | Push-phase (version check) | Push-phase (equality check) |
-| Effect scheduling | Global enqueueEffect | Global enqueueEffect | **Inline — runs when deps resolve via callbag** | Deferred queue | Deferred queue |
-| Batch | Defers effects | Defers effects + values | **Defers type 1 emissions only** | Defers effects | Defers effects |
-| Callbag compat | Partial (DIRTY on type 1) | Incompatible (DIRTY on type 1) | **Compatible (type 1 is pure values)** | N/A | N/A |
-| Global state | depth + pending[] | batchDepth + 3 queues + 2 flags | **batchDepth + deferredEmissions[]** | Multiple queues | Multiple queues |
-
----
-
-## File structure (projected)
-
-```
-src/
-  types.ts        -- Store, WritableStore, ProducerStore, StoreOperator, Actions, Signal
-  protocol.ts     -- Signal constants (DIRTY, RESOLVED), callbag type constants, batch()
-  inspector.ts    -- Global singleton with WeakMaps, enabled flag
-  producer.ts     -- producer() factory (general source, autoDirty option)
-  state.ts        -- state() factory (sugar over producer with equality-checked set)
-  operator.ts     -- operator() factory (general transform, actions API)
-  derived.ts      -- derived() factory (sugar over operator with dirty tracking + cache)
-  effect.ts       -- effect() factory (stateful sink, dirty tracking, inline execution)
-  subscribe.ts    -- subscribe() (simple callbag sink, moves to extra/)
-  pipe.ts         -- pipe() + pipeRaw(), SKIP
-  index.ts        -- Public exports
+```ts
+const snapshot = Object.fromEntries(
+  [...Inspector.graph()].map(([k, v]) => [k, { kind: v.kind, value: v.value }])
+);
+console.log(JSON.stringify(snapshot, null, 2));
 ```
 
----
-
-## Implementation plan
-
-### Batch 1: Core primitives
-
-Foundation layer. Everything else depends on this. No extras touched yet.
-
-**Files to create:**
-
-| File | What | Notes |
-|------|------|-------|
-| `src/protocol.ts` | Rewrite | Signal constants (DIRTY, RESOLVED), callbag types (START, DATA, END, STATE), `batch()` with `batchDepth` + `deferredEmissions[]`. Remove `enqueueEffect`, `pushChange`, `pendingValueEmitters`, `emittingValues`, `flushing`. Keep `deferStart`/`beginDeferredStart`/`endDeferredStart` (connection batching is orthogonal). |
-| `src/types.ts` | Rewrite | `Actions<T>` (emit, signal, complete, disconnect), `Signal` type, `ProducerStore<T>`, updated `Store<T>`, `WritableStore<T>`, `StoreOperator<A,B>`. Remove `StreamProducer`, `StreamStore`. |
-| `src/operator.ts` | New | `operator(deps, init, opts?)` — general transform. Manages upstream connections (lazy on first sink), downstream sinks, cached value for `get()`. Calls handler with `(depIndex, type, data)` for upstream events. |
-| `src/producer.ts` | New | `producer(fn?, opts?)` — general source. autoDirty option (default true). Lazy start on first sink. Exposes `emit()` externally. Replaces `stream.ts`. |
-| `src/state.ts` | Rewrite | Thin wrapper over `producer` — `set()` = `emit()`, `update()` = sugar. Producer's `equals` option (defaulting to `Object.is`) handles dedup. |
-| `src/derived.ts` | Rewrite | Sugar over `operator` — multi-dep dirty tracking (Set\<depIndex\>), caching, `equals` memoization via RESOLVED. `get()` returns cache when settled, recomputes when pending or unconnected. |
-| `src/effect.ts` | Rewrite | Stateful sink. Type 3 dirty tracking across deps. Runs `fn()` inline when all dirty deps resolve. No `enqueueEffect`. Eager connection on creation. |
-| `src/subscribe.ts` | Simplify | Pure callbag sink — just receives type 1 DATA, runs callback. No DIRTY tracking, no pending flag. Prepare to move to `extra/` in batch 2. |
-| `src/pipe.ts` | Update | `pipe()` unchanged (chains operators). `pipeRaw()` updated to use new `derived()` internals. |
-| `src/index.ts` | Update | Export `producer` instead of `stream`. Export new signal constants. |
-
-**Steps:**
-
-1. **protocol.ts** — New signal constants + simplified batch. This unblocks everything.
-2. **types.ts** — New type definitions (Actions, Signal, ProducerStore).
-3. **operator.ts** — Core transform primitive. Test with a manual handler before building derived on top.
-4. **producer.ts** — Core source primitive. Test emit, signal, complete, autoDirty, lazy start.
-5. **derived.ts** — Rewrite on top of operator. Verify diamond resolution, RESOLVED propagation, `equals` memoization.
-6. **state.ts** — Rewrite as sugar over producer. Verify equality-checked set.
-7. **effect.ts** — Rewrite with type 3 dirty tracking, inline execution.
-8. **subscribe.ts** — Simplify to pure callbag sink.
-9. **pipe.ts** — Update pipeRaw to use new derived internals.
-10. **index.ts** — Update exports.
-
-**Tests (update existing + new):**
-
-| Test file | What to update |
-|-----------|---------------|
-| `basics.test.ts` | Core primitives: state, derived, effect, subscribe, batch. Replace `stream` with `producer`. |
-| `two-phase.test.ts` | Rename to `type3-signals.test.ts`. Verify type 3 DIRTY/RESOLVED flow instead of type 1 DIRTY. Verify diamond resolution. Verify inline effect execution. |
-| `signals.test.ts` | Signals compat: state set/get, derived caching, equals memoization. |
-| `callbag.test.ts` | Verify type 1 is pure values. Verify type 3 forwarding convention. Test external callbag operator interop. |
-
-**Definition of done for batch 1:**
-- All core tests pass
-- Diamond resolution works via type 3 DIRTY + dep-identity tracking
-- RESOLVED skips subtree computation
-- `batch()` defers only type 1 emissions
-- Effects run inline (no `enqueueEffect`)
-- `subscribe` has no DIRTY awareness
-- No global state besides `batchDepth` + `deferredEmissions[]`
+For tracing signal flow through the graph, use `Inspector.trace()` on each store and log with timestamps. This gives a sequential timeline of which store changed when and with what value.
 
 ---
 
-### Batch 2: Tier 1 extras
+## 13. Summary: Decision Tree for New Extras
 
-Passthrough operators, stateful transforms, multi-source operators, and event sources. All tier 1 — they participate in type 3 signaling and are glitch-free in diamond topologies.
+```
+Need to implement a new extra?
 
-**Passthrough operators (rewrite as Operator):**
+1. Does it transform/filter values synchronously with static deps?
+   YES → operator()
+       → Forward ALL STATE signals downstream (no exceptions for unknown signals)
+       → Single-dep: forward every DIRTY
+       → Multi-dep: forward DIRTY only on first dirty dep (bitmask)
+       → Suppress with RESOLVED (not silence) when rejecting DATA
+       → Verify: DATA without prior DIRTY handled by bitmask rule (§5, §7)
 
-| Extra | Key behavior | Type 3 handling |
-|-------|-------------|-----------------|
-| `take(n)` | Forward first n values, then disconnect + complete | Forward signals while count < n |
-| `skip(n)` | Suppress first n values | Forward signals when count >= n, send RESOLVED when suppressing |
-| `tap(fn)` | Side-effect on each value, no transform | Forward all signals and values unchanged |
-| `distinctUntilChanged(eq?)` | Suppress consecutive duplicates | Forward DIRTY, send RESOLVED when duplicate detected on type 1 |
-| `pairwise()` | Emit [prev, current] pairs | Forward signals, emit pair on type 1 after first value |
-| `startWith(value)` | Prepend initial value | Forward signals, initial value set via `opts.initial` |
-| `takeUntil(notifier)` | Forward until notifier emits | Multi-dep operator: dep 0 = source, dep 1 = notifier. Disconnect + complete on notifier type 1 |
-| `remember()` | Cache last value (replay to new sinks) | Forward signals, cache on type 1. (May be redundant since Operator already caches for `get()`) |
+2. Does it involve timers, promises, observables, or inner subscriptions?
+   YES → producer() with autoDirty: true
+       → Set initial: input.get() to avoid duplicate on first connect
+       → Set equals: Object.is for dedup
+       → Handle the sync inner completion race with innerEnded flag
+       → return () => { /* clean up everything */ }
 
-**Stateful transforms (rewrite as Operator):**
+3. Does it fit neither? Is the pattern shared by multiple operators?
+   YES → Add an option to producer() or operator() first
+   NO  → Raw callbag as last resort (retry, concatMap inner detection)
 
-| Extra | Key behavior | Type 3 handling |
-|-------|-------------|-----------------|
-| `map(fn)` | Transform each value | Forward signals, transform on type 1 |
-| `filter(pred)` | Conditionally forward | Forward DIRTY, emit or RESOLVED on type 1 based on predicate |
-| `scan(fn, seed)` | Accumulate values | Forward signals, accumulate and emit on type 1 |
-
-Note: `map`, `filter`, `scan` currently live in `pipe.ts` as `StoreOperator` wrappers around `derived()`. Rewrite as standalone Operators in `extra/`, keep `pipe.ts` wrappers that delegate to them.
-
-**Multi-source operators (rewrite as Operator with multi-dep):**
-
-| Extra | Key behavior | Type 3 handling |
-|-------|-------------|-----------------|
-| `combine(...sources)` | Emit tuple when any source changes | Dirty tracking like derived — count dirty deps, wait for all, emit tuple |
-| `merge(...sources)` | Emit from whichever source fires | Forward signals from each dep independently, emit each value |
-| `concat(...sources)` | Sequential: subscribe to next source when current completes | Single active dep at a time, forward its signals |
-
-**Event sources (rewrite as Producer):**
-
-| Extra | Implementation | autoDirty |
-|-------|---------------|-----------|
-| `interval(ms)` | `producer` + `setInterval` | true (default) |
-| `fromEvent(target, event)` | `producer` + `addEventListener` | true |
-| `fromPromise(promise)` | `producer` + `.then()` + `complete()` | true |
-| `fromObs(observable)` | `producer` + `observable.subscribe()` | true |
-| `fromIter(iterable)` | `producer` + iterate on start | true |
-
-**Other tier 1:**
-
-| Extra | Implementation | Notes |
-|-------|---------------|-------|
-| `subject()` | `producer` with exposed `next()` / `complete()` | Multicast source. `next()` = `emit()`. |
-| `share(source)` | Operator or refcount wrapper | Share upstream subscription across multiple sinks |
-| `buffer(notifier)` | Operator with 2 deps | Buffer source values, emit array on notifier. Dep 0 = source, dep 1 = notifier |
-| `forEach(source, fn)` | Pure callbag sink | Like subscribe but no prev tracking. Move subscribe here too. |
-
-**Steps:**
-
-1. Rewrite passthrough operators: take, skip, tap, distinctUntilChanged, pairwise, startWith, takeUntil, remember
-2. Rewrite stateful transforms: map, filter, scan (in `extra/`, update `pipe.ts` to delegate)
-3. Rewrite multi-source: combine, merge, concat
-4. Rewrite event sources: interval, fromEvent, fromPromise, fromObs, fromIter
-5. Rewrite subject as producer wrapper
-6. Rewrite share, buffer
-7. Move subscribe + forEach to `extra/`
-8. Update `extra/index.ts` exports
-
-**Tests (update existing + new):**
-
-| Test file | What to update |
-|-----------|---------------|
-| `extras-tier1.test.ts` | All tier 1 extras: verify type 3 forwarding, value transformation, completion |
-| New: `extras-diamond.test.ts` | Diamond topology tests for each tier 1 operator: verify exactly-once computation downstream |
-| New: `extras-resolved.test.ts` | RESOLVED propagation: filter suppression, distinctUntilChanged, equals — verify subtree skipping |
-
-**Definition of done for batch 2:**
-- All tier 1 extras rewritten as Operator or Producer
-- Each passthrough operator forwards type 3 signals
-- Diamond resolution works through tier 1 operator chains
-- RESOLVED propagation works (filter, distinctUntilChanged)
-- subscribe and forEach live in `extra/`
-- No DIRTY handling on type 1 in any tier 1 extra
-
----
-
-### Batch 3: Tier 2 extras ✅ DONE
-
-Time-based operators, dynamic subscription operators, and error handling. All tier 2 — they are cycle boundaries built as Producers.
-
-All 12 tier 2 operators use `producer()` directly with `autoDirty: true` (the default). Key patterns:
-
-- **Time-based** (debounce, throttle, delay, bufferTime, timeout, sample): `subscribe` to source + timer logic. `equals: Object.is` for dedup where appropriate, `resetOnTeardown` for delay, `getter` for sample.
-- **Dynamic subscription** (switchMap, flat, concatMap, exhaustMap): `initial: innerStore.get()` + `equals: Object.is` prevents spurious initial emission during deferred start. concatMap/exhaustMap use raw callbag for inner END detection (queuing/ignoring semantics).
-- **Error handling** (rescue, retry): `initial: input.get()` + `equals: Object.is` + `error()` action for END with error data. Raw callbag for inner END detection.
-
-**Producer options that enabled this:**
-
-| Option | Used by | Purpose |
-|--------|---------|---------|
-| `equals` | All 12 | Emit guard — prevents duplicate emissions |
-| `initial` | switchMap, flat, concatMap, exhaustMap, rescue, retry, timeout, bufferTime, sample | Sets baseline value before producer starts |
-| `error()` | timeout, rescue, retry | Sends `sink(END, error)` to downstream |
-| `resetOnTeardown` | delay | Resets `get()` to `undefined` when all sinks disconnect |
-| `getter` | sample | Custom `get()` returns latest input value, not last emitted |
-
-**Tests:**
-
-| Test file | Status |
-|-----------|--------|
-| `extras-tier2.test.ts` | ✅ 38 tests |
-| `extras-tier2-operators.test.ts` | ✅ 57 tests |
-| `extras-cycle-boundary.test.ts` | ✅ 12 tests |
-
----
-
-### Batch 4: Validation and cleanup
-
-Final validation, performance verification, and documentation.
-
-**Steps:**
-
-1. **Inspector update** — Update inspector to understand new primitive kinds (producer, operator). Verify graph traversal works with type 3 signals.
-2. **Callbag interop test** — Write tests using raw external callbag operators in a pipe chain. Verify type 1 values flow correctly and type 3 signals forward via the transparent convention.
-3. **Benchmarks** — Run existing benchmarks against v2 baseline. Verify no regression. Measure improvement from eliminated global queues and inline effect execution.
-4. **Delete dead code** — Remove old `stream.ts`. Remove `pushChange`, `enqueueEffect`, `pendingValueEmitters`, `emittingValues`, `flushing` from protocol. Remove old DIRTY-on-type-1 handling from any remaining files.
-5. **Update CLAUDE.md** — Update architecture section to reflect v3 primitives, type 3 control channel, tier model, and new file structure.
-6. **Update docs/** — Archive `architecture-v2.md`. Promote `architecture-v3.md` to `architecture.md`. Update `extras.md`, `optimizations.md`, and `examples-plan.md` for new APIs.
-
-**Tests:**
-
-| Test file | What to update |
-|-----------|---------------|
-| `inspector.test.ts` | New primitive kinds, graph traversal |
-| `optimizations.test.ts` | pipeRaw with new derived, SKIP sentinel |
-| New: `interop.test.ts` | External callbag operator compatibility |
-| All test files | Final pass — ensure no references to old APIs (pushChange, enqueueEffect, stream) |
-
-**Definition of done for batch 4:**
-- Zero references to removed APIs in src/ or tests/
-- All test suites green
-- Benchmarks show no regression (ideally improvement from reduced global coordination)
-- CLAUDE.md and docs/ fully updated
-- `architecture-v3.md` promoted to `architecture.md`
+For all extras:
+  - Verify cleanup: trace every exit path, confirm all resources released
+  - Verify error forwarding: upstream error → error(data), not complete()
+  - Verify completion forwarding: upstream complete → complete()
+  - Verify RESOLVED: every suppressed DATA must emit RESOLVED downstream
+  - Verify reconnect: local state resets on reconnect (init re-runs for operator, fn re-runs for producer)
+  - Match RxJS semantics exactly unless listed in §10 divergences table
+```
