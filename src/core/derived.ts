@@ -60,7 +60,8 @@ export class DerivedImpl<T> {
 
 		this.source = this.source.bind(this);
 
-		Inspector.register(this as any, { kind: "derived", ...opts });
+		Inspector.register(this as any, { kind: "derived", ...opts, deps });
+		for (const dep of deps) Inspector.registerEdge(dep, this as any);
 
 		// v4.1: Fully lazy — no computation or connection at construction.
 		// _cachedValue remains undefined until first get()/source().

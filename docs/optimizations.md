@@ -224,27 +224,31 @@ These are not yet implemented but represent concrete opportunities for improveme
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
-### 2. Memory footprint reduction
+---
 
-**Status:** Partial. **Impact:** Medium (currently ~6x gap vs Preact).
+<details>
+<summary><strong>## Not implemented optimizations (click to expand)</strong></summary>
 
-The ~719 bytes/store cost breaks down across output slot model, handler closures, bound methods, and Inspector registration. Remaining opportunities:
+### ~~1. Memory footprint reduction~~
 
-- **Lazy method binding:** Not implemented. V8 hidden class transitions from getter→own-property may offset the savings (~48 bytes per unused bound method). Needs benchmarking.
-- **WeakRef-free Inspector:** Not implemented. `FinalizationRegistry` alone can't support `graph()` iteration — WeakRef is the correct tool for allowing GC while enabling enumeration.
+**Not implementing.** The ~6x gap vs Preact (~719 vs ~122 bytes/store) is structural — output slot model, handler closures, bound methods, and callbag protocol overhead. The remaining sub-items don't justify their complexity:
 
-### 3. Diamond pattern optimization
+- **~~Lazy method binding:~~** V8 hidden class transitions from getter→own-property (via `defineProperty` on first access) cause inline cache invalidation. All bound methods (`source`, `set`, `emit`, `signal`, `complete`, `error`) are legitimately detached in callbag interop and destructuring patterns. Savings (~40-50 bytes/instance) don't offset the hidden class pollution and first-access latency.
+- **~~WeakRef-free Inspector:~~** `FinalizationRegistry` alone cannot support `graph()` iteration — it only fires callbacks on GC, it cannot query "what's alive". The only alternative (strong refs + registry cleanup) is more complex with no meaningful memory reduction. Inspector is disabled in production anyway, so the ~60-80 bytes/store WeakRef cost only applies in dev.
 
-**Status:** Partial. **Impact:** Medium (1.4x gap vs Preact).
+### ~~2. Diamond pattern optimization~~
 
-The diamond benchmark (7.2M vs 10M ops/sec) is the main throughput gap. Lazy STANDALONE means intermediate derived nodes maintain active output slots after first access. Remaining opportunities:
+**Not implementing.** The 1.4x gap vs Preact (7.2M vs 10M ops/sec) is inherent to the two-phase push protocol and STANDALONE connections. The remaining sub-items provide negligible gains:
 
-- **Output slot bypass for single-subscriber chains:** Not implemented. When A -> B -> C and B has exactly one subscriber (C), B's output slot dispatch could be replaced with a direct function call to C's handler, eliminating the mode check and Set lookup.
-- **Topological sort for batch drain:** Not implemented. When multiple nodes settle in a batch, drain in topological order (sources first) to avoid redundant intermediate recomputes.
+- **~~Output slot bypass for single-subscriber chains:~~** The current SINGLE mode already IS the bypass — `_dispatch` checks a `P_MULTI` bitflag (~1-2 CPU cycles) then calls the function directly. V8's JIT monomorphizes this. Adding runtime slot morphing for subscriber add/remove would introduce race condition complexity for immeasurable gains (<5%).
+- **~~Topological sort for batch drain:~~** The dirty-bitmask already handles diamond resolution correctly — multi-dep derived nodes wait for ALL deps to resolve before recomputing regardless of drain order. FIFO and topological produce the same result (no redundant recomputes). Topological sort would add O(n log n) + graph building overhead that exceeds any theoretical benefit.
 
-### ~~4. Handler closure fusion for single-dep chains~~
+### ~~3. Handler closure fusion for single-dep chains~~
 
-**Removed.** `pipeRaw()` already fuses transforms into a single store, and benchmarks show `pipe` vs `pipeRaw` throughput is nearly identical (18M vs 18M ops/sec). The ~100-150 bytes/node memory saving doesn't justify the engine complexity when users can opt into `pipeRaw` for memory-sensitive paths.
+**Not implementing.** `pipeRaw()` already fuses transforms into a single store, and benchmarks show `pipe` vs `pipeRaw` throughput is nearly identical (18M vs 18M ops/sec). The ~100-150 bytes/node memory saving doesn't justify the engine complexity when users can opt into `pipeRaw` for memory-sensitive paths.
+
+</details>
+
 
 ---
 
@@ -272,6 +276,6 @@ The diamond benchmark (7.2M vs 10M ops/sec) is the main throughput gap. Lazy STA
 | State write fast path | Built-in | Inlined `set()` — 9.8M→47M ops/sec (now 1.3x faster than Preact) | State-heavy apps |
 | `derived.from()` | Built-in | Identity transform, skips `fn()` on recompute | Passthrough, dedup, observation |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |
-| Memory footprint reduction | Partial | Lazy binding and WeakRef-free pending | Memory-sensitive apps |
-| Diamond pattern optimization | Partial | Output bypass and topo sort pending | Diamond-heavy graphs |
-| ~~Handler closure fusion~~ | Removed | Superseded by `pipeRaw()` | — |
+| ~~Memory footprint reduction~~ | Not implementing | ~6x gap is structural; lazy binding and WeakRef-free don't justify complexity | — |
+| ~~Diamond pattern optimization~~ | Not implementing | 1.4x gap is inherent; output bypass and topo sort provide negligible gains | — |
+| ~~Handler closure fusion~~ | Not implementing | Superseded by `pipeRaw()` | — |

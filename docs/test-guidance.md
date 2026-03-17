@@ -148,6 +148,96 @@ expect(cCount).toBe(0); // c did not run
 
 ---
 
+## Inspector Debugging Tools
+
+Inspector provides static methods that work as callbag sinks — zero intrusion into production primitives. Use these in tests and debugging sessions instead of writing ad-hoc raw callbag observation code.
+
+### `Inspector.observe(store)` — protocol-level observation
+
+The primary test utility. Replaces ad-hoc `observeRaw()` helpers and raw `store.source(START, ...)` patterns. Returns a live observation object that grows as the store emits.
+
+```ts
+const s = state(0);
+const obs = Inspector.observe(s);
+
+s.set(1);
+s.set(2);
+
+obs.values       // [1, 2] — DATA payloads only
+obs.signals      // [DIRTY, DIRTY] — STATE payloads
+obs.events       // full protocol order: [{ type: "signal", data: DIRTY }, { type: "data", data: 1 }, ...]
+obs.dirtyCount   // 2
+obs.resolvedCount // 0
+obs.ended        // false
+obs.endError     // undefined
+obs.name         // store name from Inspector registration
+obs.dispose()    // unsubscribe
+```
+
+**Use for:** checking emitted values, verifying END/error propagation, counting DIRTY/RESOLVED signals, verifying protocol event ordering.
+
+### `Inspector.tap(store, name?)` — graph visualization wrapper
+
+Creates a transparent passthrough node visible in the graph. Delegates `get()` and `source()` to the original store. Zero overhead.
+
+```ts
+const a = state(1, { name: "a" });
+const tapped = Inspector.tap(a, "debug_a");
+// tapped.get() delegates to a.get()
+// subscribers through tapped connect directly to a
+// Inspector.snapshot() shows "debug_a" as a distinct node with edge from "a"
+```
+
+**Use for:** inserting named observation points in the graph during debugging without modifying production code.
+
+### `Inspector.spy(store, opts?)` — observe + console logging
+
+Same as `observe()` but also logs every event to console. For interactive debugging sessions.
+
+```ts
+const obs = Inspector.spy(myStore, { name: "debug" });
+// Console output: [debug] STATE: DIRTY, [debug] DATA: 42, etc.
+obs.values  // same as observe()
+obs.dispose()
+```
+
+### `Inspector.snapshot()` — JSON-serializable graph
+
+Returns `{ nodes, edges }` — the full graph as JSON. Designed for AI consumption.
+
+```ts
+const snap = Inspector.snapshot();
+// snap.nodes: [{ name, kind, value, status }, ...]
+// snap.edges: [{ from, to }, ...]
+JSON.stringify(snap) // works
+```
+
+### `Inspector.dumpGraph()` — pretty-print for console/CLI
+
+```ts
+console.log(Inspector.dumpGraph());
+// Store Graph (3 nodes):
+//   count (state) = 42  [SETTLED]
+//   doubled (derived) = 84  [SETTLED]
+//   label (derived) = "value=84"  [SETTLED]
+```
+
+### When to use which tool
+
+| Use case | Best tool |
+|---|---|
+| **"Did it recompute once?"** | Inline counter in `fn()` |
+| **"What values were emitted?"** | `Inspector.observe(store).values` |
+| **"Was DIRTY sent before DATA?"** | `Inspector.observe(store).events` |
+| **"Did RESOLVED skip downstream?"** | `Inspector.observe(store).resolvedCount` |
+| **"Did it complete/error?"** | `Inspector.observe(store).ended` / `.endError` |
+| **"What's the full graph state?"** | `Inspector.snapshot()` or `Inspector.dumpGraph()` |
+| **"Trace one store's value changes"** | `Inspector.trace(store, cb)` |
+| **"Insert a debug point in the graph"** | `Inspector.tap(store, name)` |
+| **"Log events live to console"** | `Inspector.spy(store)` |
+
+---
+
 ## Error Forwarding Testing Pattern
 
 Always verify that errors propagate as errors (not completions):
@@ -157,13 +247,10 @@ const source = producer<number>(({ error }) => {
   setTimeout(() => error(new Error("fail")), 0);
 });
 
-let receivedError: unknown;
-const sink = (type: number, data?: any) => {
-  if (type === END && data !== undefined) receivedError = data;
-};
-source.source(START, sink);
+const obs = Inspector.observe(source);
 // after async...
-expect(receivedError).toBeInstanceOf(Error);
+expect(obs.ended).toBe(true);
+expect(obs.endError).toBeInstanceOf(Error);
 ```
 
 ---
@@ -315,20 +402,17 @@ b.source(START, (type: number, data: any) => {
 
 ### Raw callbag sink wrapper
 
-Verify that raw sinks (plain functions) work correctly when connected to the graph:
+Prefer `Inspector.observe()` over raw callbag sinks for test assertions. Use raw sinks only when testing protocol-level behavior that `observe()` can't capture (e.g., talkback mechanics):
 
 ```ts
-// Raw callbag sink receives only type 0, 1, 2 — never type 3
+// Inspector.observe() captures DATA, STATE, and END — covers most test needs
 const a = state(1)
-const received: Array<[number, any]> = []
-
-a.source(START, (type: number, data: any) => {
-  received.push([type, data])
-})
+const obs = Inspector.observe(a)
 
 a.set(2)
-// Should receive [START, talkback], [DATA, 2]
-// Should NOT receive any STATE signals (wrapper filters them)
+obs.values    // [2]
+obs.signals   // [DIRTY]
+obs.ended     // false
 ```
 
 ### init() timing: construction vs connection

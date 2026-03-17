@@ -2,7 +2,8 @@
 // Inspector tests — observability without per-store overhead
 // ---------------------------------------------------------------------------
 
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { subscribe } from "../../extra/subscribe";
 import { derived, Inspector, operator, producer, state } from "../../index";
 
 beforeEach(() => {
@@ -146,38 +147,213 @@ describe("Inspector", () => {
 		expect(info.value).toBe(2);
 	});
 
-	it("v4: signal hooks fire correctly", () => {
-		const emitted: Array<[string, unknown]> = [];
-		Inspector.onEmit = (store, value) => {
-			const name = Inspector.getName(store) ?? "unknown";
-			emitted.push([name, value]);
-		};
+	// -----------------------------------------------------------------------
+	// Auto-registered edges
+	// -----------------------------------------------------------------------
 
+	it("derived auto-registers edges with parent stores", () => {
 		const a = state(1, { name: "a" });
-		a.source(0, () => {});
-		a.set(42);
+		const b = state(2, { name: "b" });
+		const _sum = derived([a, b], () => a.get() + b.get(), { name: "sum" });
 
-		// onEmit is a hook slot — primitives need to call it explicitly
-		// For now, verify the hook is callable (integration comes in Phase 9)
-		expect(typeof Inspector.onEmit).toBe("function");
-
-		Inspector.onEmit = null;
+		const edges = Inspector.getEdges();
+		expect(edges.get("a")).toContain("sum");
+		expect(edges.get("b")).toContain("sum");
 	});
 
-	it("v4: registerEdge tracks dependencies", () => {
+	it("operator auto-registers edges with parent stores", () => {
+		const a = state(0, { name: "a" });
+		const _op = operator<number>(
+			[a],
+			({ emit, signal }) => {
+				return (_dep, type, data) => {
+					if (type === 1) emit(data);
+					else if (type === 3) signal(data);
+				};
+			},
+			{ name: "myOp" },
+		);
+
+		const edges = Inspector.getEdges();
+		expect(edges.get("a")).toContain("myOp");
+	});
+
+	it("registerEdge does not duplicate existing edges", () => {
 		const a = state(1, { name: "a" });
 		const b = derived([a], () => a.get() * 2, { name: "b" });
+		// auto-registered already, calling again should not duplicate
 		Inspector.registerEdge(a, b);
 
 		const edges = Inspector.getEdges();
 		expect(edges.get("a")).toEqual(["b"]);
 	});
 
-	it("v4: _reset() clears hooks and edges", () => {
-		Inspector.onEmit = () => {};
+	// -----------------------------------------------------------------------
+	// dumpGraph()
+	// -----------------------------------------------------------------------
+
+	it("dumpGraph() returns a human-readable graph string", () => {
+		const a = state(1, { name: "a" });
+		const b = state(2, { name: "b" });
+		const _sum = derived([a, b], () => a.get() + b.get(), { name: "sum" });
+
+		const dump = Inspector.dumpGraph();
+		expect(dump).toContain("Store Graph (3 nodes):");
+		expect(dump).toContain("a (state)");
+		expect(dump).toContain("b (state)");
+		expect(dump).toContain("sum (derived)");
+		expect(dump).toContain("[SETTLED]");
+	});
+
+	it("dumpGraph() shows edge info", () => {
+		const a = state(1, { name: "a" });
+		const _d = derived([a], () => a.get() * 2, { name: "doubled" });
+
+		const dump = Inspector.dumpGraph();
+		// "a" has children ["doubled"], shown in the dump
+		expect(dump).toContain("a (state)");
+		expect(dump).toContain("doubled (derived)");
+	});
+
+	// -----------------------------------------------------------------------
+	// tap() — transparent passthrough wrapper
+	// -----------------------------------------------------------------------
+
+	it("tap() creates a distinct graph node that delegates to the original", () => {
+		const a = state(42, { name: "a" });
+		const tapped = Inspector.tap(a, "tapped_a");
+
+		// Delegates get()
+		expect(tapped.get()).toBe(42);
+
+		// Appears as a separate node in the graph
+		const g = Inspector.graph();
+		expect(g.has("a")).toBe(true);
+		expect(g.has("tapped_a")).toBe(true);
+		expect(g.get("tapped_a")?.kind).toBe("tap");
+
+		// Edge registered from a → tapped_a
+		const edges = Inspector.getEdges();
+		expect(edges.get("a")).toContain("tapped_a");
+
+		// Can subscribe through tap
+		const values: number[] = [];
+		subscribe(tapped, (v) => values.push(v));
+		a.set(99);
+		expect(values).toEqual([99]);
+	});
+
+	it("tap() auto-generates name when none provided", () => {
+		const a = state(0, { name: "src" });
+		const tapped = Inspector.tap(a);
+
+		expect(Inspector.getName(tapped)).toBe("tap(src)");
+	});
+
+	// -----------------------------------------------------------------------
+	// spy() — observe with console logging
+	// -----------------------------------------------------------------------
+
+	it("spy() returns observe-like result and logs to console", () => {
+		const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+
+		const a = state(0, { name: "a" });
+		const result = Inspector.spy(a, { name: "myspy" });
+
+		a.set(10);
+		a.set(20);
+
+		expect(result.values).toEqual([10, 20]);
+		expect(result.dirtyCount).toBe(2);
+		expect(result.name).toBe("myspy");
+
+		// Console was called
+		expect(consoleSpy).toHaveBeenCalledWith("[myspy] STATE:", expect.anything());
+		expect(consoleSpy).toHaveBeenCalledWith("[myspy] DATA:", 10);
+		expect(consoleSpy).toHaveBeenCalledWith("[myspy] DATA:", 20);
+
+		result.dispose();
+		consoleSpy.mockRestore();
+	});
+
+	// -----------------------------------------------------------------------
+	// snapshot() — JSON-serializable graph
+	// -----------------------------------------------------------------------
+
+	it("snapshot() returns JSON-serializable graph data", () => {
+		const a = state(1, { name: "a" });
+		const _b = derived([a], () => a.get() * 2, { name: "b" });
+
+		const snap = Inspector.snapshot();
+
+		expect(snap.nodes).toContainEqual({
+			name: "a",
+			kind: "state",
+			value: 1,
+			status: "DISCONNECTED",
+		});
+		expect(snap.nodes).toContainEqual({
+			name: "b",
+			kind: "derived",
+			value: 2,
+			status: "SETTLED",
+		});
+
+		expect(snap.edges).toContainEqual({ from: "a", to: "b" });
+
+		// Verify it's actually JSON-serializable
+		const json = JSON.stringify(snap);
+		expect(JSON.parse(json)).toEqual(snap);
+	});
+
+	// -----------------------------------------------------------------------
+	// Full debugging scenario (no hooks)
+	// -----------------------------------------------------------------------
+
+	it("full debugging scenario: graph + observe + trace", () => {
+		// Build a small reactive graph
+		const count = state(0, { name: "count" });
+		const doubled = derived([count], () => count.get() * 2, { name: "doubled" });
+
+		// Use observe() to capture protocol events
+		const obs = Inspector.observe(doubled);
+
+		// Trigger updates
+		count.set(5);
+		count.set(10);
+
+		// Verify observe captured the flow
+		expect(obs.values).toEqual([10, 20]);
+		expect(obs.dirtyCount).toBe(2);
+
+		// Verify graph snapshot
+		const g = Inspector.graph();
+		expect(g.get("count")?.value).toBe(10);
+		expect(g.get("doubled")?.value).toBe(20);
+
+		// Verify edges
+		const edges = Inspector.getEdges();
+		expect(edges.get("count")).toContain("doubled");
+
+		// Verify dumpGraph works
+		const dump = Inspector.dumpGraph();
+		expect(dump).toContain("Store Graph (2 nodes):");
+
+		// Verify snapshot is JSON-serializable
+		const snap = Inspector.snapshot();
+		expect(snap.nodes.length).toBe(2);
+		expect(snap.edges).toContainEqual({ from: "count", to: "doubled" });
+
+		obs.dispose();
+	});
+
+	// -----------------------------------------------------------------------
+	// _reset()
+	// -----------------------------------------------------------------------
+
+	it("_reset() clears edges", () => {
 		Inspector.registerEdge(state(1, { name: "x" }), state(2, { name: "y" }));
 		Inspector._reset();
-		expect(Inspector.onEmit).toBeNull();
 		expect(Inspector.getEdges().size).toBe(0);
 	});
 });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRTY, END, START, STATE } from "../../core/protocol";
+import { DIRTY } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -31,37 +31,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 });
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
-
-/** Observe raw callbag events (DATA + END + STATE) */
-function observeRaw<T>(store: { source: (type: number, payload?: any) => void }) {
-	const data: T[] = [];
-	let ended = false;
-	let endError: unknown;
-	const signals: unknown[] = [];
-	store.source(START, (type: number, d: any) => {
-		if (type === START) return;
-		if (type === 1) data.push(d);
-		if (type === STATE) signals.push(d);
-		if (type === END) {
-			ended = true;
-			endError = d;
-		}
-	});
-	return {
-		data,
-		signals,
-		get ended() {
-			return ended;
-		},
-		get endError() {
-			return endError;
-		},
-	};
-}
 
 /** Create a producer that can be errored/completed externally */
 function errorableProducer<T>(initial: T) {
@@ -95,7 +64,7 @@ describe("merge: error propagation", () => {
 		const a = errorableProducer(1);
 		const b = state(10);
 		const m = merge(a.store, b);
-		const obs = observeRaw(m);
+		const obs = Inspector.observe(m);
 		subscribe(m, () => {});
 
 		a.error("boom");
@@ -108,7 +77,7 @@ describe("merge: error propagation", () => {
 		const a = errorableProducer(1);
 		const b = errorableProducer(2);
 		const m = merge(a.store, b.store);
-		const obs = observeRaw(m);
+		const obs = Inspector.observe(m);
 		subscribe(m, () => {});
 
 		a.complete();
@@ -144,7 +113,7 @@ describe("tier-2: inner error forwarding", () => {
 			outer,
 			switchMap((v) => (v === 2 ? throwError("inner-err") : state(v * 10))),
 		);
-		const obs = observeRaw(sm);
+		const obs = Inspector.observe(sm);
 		subscribe(sm, () => {});
 
 		outer.set(2);
@@ -161,7 +130,7 @@ describe("tier-2: inner error forwarding", () => {
 			outer,
 			concatMap((v) => throwError<number>(`err-${v}`)),
 		);
-		const obs = observeRaw(cm);
+		const obs = Inspector.observe(cm);
 		subscribe(cm, () => {});
 
 		// Initial inner = throwError("err-1") → error propagates immediately
@@ -176,7 +145,7 @@ describe("tier-2: inner error forwarding", () => {
 			outer,
 			exhaustMap((v) => throwError<number>(`err-${v}`)),
 		);
-		const obs = observeRaw(em);
+		const obs = Inspector.observe(em);
 		subscribe(em, () => {});
 
 		// Initial inner = throwError("err-1") → error propagates
@@ -189,7 +158,7 @@ describe("tier-2: inner error forwarding", () => {
 		const inner2 = errorableProducer(20);
 		const outer = state<typeof inner1 | typeof inner2.store>(inner1);
 		const f = pipe(outer, flat<number>());
-		const obs = observeRaw(f);
+		const obs = Inspector.observe(f);
 		subscribe(f, () => {});
 
 		outer.set(inner2.store);
@@ -208,9 +177,9 @@ describe("take(0)", () => {
 	it("take(0) completes immediately without emitting", () => {
 		const s = state(1);
 		const t = pipe(s, take(0));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBeUndefined();
 	});
@@ -218,7 +187,7 @@ describe("take(0)", () => {
 	it("take(0) should not forward STATE signals", () => {
 		const s = state(1);
 		const t = pipe(s, take(0));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 
 		s.set(2);
 		// take(0) correctly blocks STATE (count < n = 0 < 0 = false)
@@ -229,11 +198,11 @@ describe("take(0)", () => {
 	it("take(1) works correctly — completes after one value", () => {
 		const s = state(1);
 		const t = pipe(s, take(1));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.set(2);
-		expect(obs.data).toContain(2);
+		expect(obs.values).toContain(2);
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBeUndefined();
 	});
@@ -364,7 +333,7 @@ describe("tier-2: completion forwarding", () => {
 	it("debounce forwards upstream completion", () => {
 		const s = errorableProducer(1);
 		const d = pipe(s.store, debounce(100));
-		const obs = observeRaw(d);
+		const obs = Inspector.observe(d);
 		subscribe(d, () => {});
 
 		s.complete();
@@ -376,7 +345,7 @@ describe("tier-2: completion forwarding", () => {
 	it("throttle forwards upstream completion", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, throttle(100));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.complete();
@@ -392,7 +361,7 @@ describe("tier-2: completion forwarding", () => {
 			outer.store,
 			switchMap(() => inner.store),
 		);
-		const obs = observeRaw(sm);
+		const obs = Inspector.observe(sm);
 		subscribe(sm, () => {});
 
 		// Outer completes — but inner is still active
@@ -422,7 +391,7 @@ describe("tier-2: completion forwarding", () => {
 	it("debounce forwards upstream error (cancels pending)", () => {
 		const s = errorableProducer(0);
 		const d = pipe(s.store, debounce(100));
-		const obs = observeRaw(d);
+		const obs = Inspector.observe(d);
 		const values: number[] = [];
 		subscribe(d, (v) => values.push(v));
 
@@ -438,7 +407,7 @@ describe("tier-2: completion forwarding", () => {
 	it("throttle forwards upstream error", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, throttle(100));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.error("fail");
@@ -630,21 +599,12 @@ describe("combine: error from any source", () => {
 		const b = errorableProducer(2);
 		const c = combine(a, b.store);
 
-		// Use single raw observer (no subscribe) to ensure we get the END
-		let ended = false;
-		let endErr: unknown;
-		c.source(START, (type: number, d: any) => {
-			if (type === START) return;
-			if (type === END) {
-				ended = true;
-				endErr = d;
-			}
-		});
+		const obs = Inspector.observe(c);
 
 		b.error("combine-err");
 
-		expect(ended).toBe(true);
-		expect(endErr).toBe("combine-err");
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBe("combine-err");
 	});
 });
 
@@ -686,13 +646,13 @@ describe("diamond through merge", () => {
 		);
 		const m = merge(b, c);
 
-		const obs = observeRaw(m);
+		const obs = Inspector.observe(m);
 		a.set(2);
 
 		// One DIRTY (from first dep that dirties), two DATAs
 		const dirtyCount = obs.signals.filter((s) => s === DIRTY).length;
 		expect(dirtyCount).toBe(1);
-		expect(obs.data.length).toBe(2);
+		expect(obs.values.length).toBe(2);
 	});
 });
 
@@ -727,13 +687,13 @@ describe("take + filter interaction", () => {
 			filter((v: number) => v % 2 === 0),
 			take(1),
 		);
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.set(1); // odd, filtered
 		s.set(2); // even, passes → take completes
 
-		expect(obs.data).toContain(2);
+		expect(obs.values).toContain(2);
 		expect(obs.ended).toBe(true);
 	});
 });
@@ -773,34 +733,20 @@ describe("skip: upstream completion/error", () => {
 	it("forwards completion from upstream during skip phase", () => {
 		const s = errorableProducer(0);
 		const sk = pipe(s.store, skip(100));
-
-		let ended = false;
-		sk.source(START, (type: number, _d: any) => {
-			if (type === START) return;
-			if (type === END) ended = true;
-		});
+		const obs = Inspector.observe(sk);
 
 		s.complete();
-		expect(ended).toBe(true);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("forwards error from upstream during skip phase", () => {
 		const s = errorableProducer(0);
 		const sk = pipe(s.store, skip(100));
-
-		let ended = false;
-		let endErr: unknown;
-		sk.source(START, (type: number, d: any) => {
-			if (type === START) return;
-			if (type === END) {
-				ended = true;
-				endErr = d;
-			}
-		});
+		const obs = Inspector.observe(sk);
 
 		s.error("oops");
-		expect(ended).toBe(true);
-		expect(endErr).toBe("oops");
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBe("oops");
 	});
 });
 
@@ -812,20 +758,11 @@ describe("take: error forwarding", () => {
 	it("take forwards error from upstream", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, take(5));
-
-		let ended = false;
-		let endErr: unknown;
-		t.source(START, (type: number, d: any) => {
-			if (type === START) return;
-			if (type === END) {
-				ended = true;
-				endErr = d;
-			}
-		});
+		const obs = Inspector.observe(t);
 
 		s.error("take-err");
-		expect(ended).toBe(true);
-		expect(endErr).toBe("take-err");
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBe("take-err");
 	});
 });
 
@@ -841,9 +778,9 @@ describe("completed store rejects new subscriptions with END", () => {
 
 		s.set(1); // take(1) completes
 
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		expect(obs.ended).toBe(true);
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 	});
 
 	it("producer: subscribing after completion receives immediate END", () => {
@@ -851,7 +788,7 @@ describe("completed store rejects new subscriptions with END", () => {
 		subscribe(s.store, () => {});
 		s.complete();
 
-		const obs = observeRaw(s.store);
+		const obs = Inspector.observe(s.store);
 		expect(obs.ended).toBe(true);
 	});
 });
@@ -1004,15 +941,15 @@ describe("filter + distinctUntilChanged equivalence", () => {
 			s,
 			filter(() => true),
 		);
-		const obs = observeRaw(f);
+		const obs = Inspector.observe(f);
 
 		s.set(1); // same value but state deduplicates...
 		// state uses Object.is, so set(1) when value is already 1 is a no-op
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 
 		s.set(2);
 		s.set(3);
-		expect(obs.data).toEqual([2, 3]);
+		expect(obs.values).toEqual([2, 3]);
 	});
 });
 
@@ -1023,20 +960,11 @@ describe("map: error forwarding", () => {
 			s.store,
 			map((v: number) => v * 2),
 		);
-
-		let ended = false;
-		let endErr: unknown;
-		m.source(START, (type: number, d: any) => {
-			if (type === START) return;
-			if (type === END) {
-				ended = true;
-				endErr = d;
-			}
-		});
+		const obs = Inspector.observe(m);
 
 		s.error("map-err");
-		expect(ended).toBe(true);
-		expect(endErr).toBe("map-err");
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBe("map-err");
 	});
 });
 
@@ -1052,21 +980,21 @@ describe("concat: error forwarding", () => {
 		const a = errorableProducer(1);
 		const b = state(2);
 		const c = concat(a.store, b);
-		const obs = observeRaw(c);
+		const obs = Inspector.observe(c);
 
 		a.error("concat-err");
 
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBe("concat-err");
 		// Should NOT have subscribed to b
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 	});
 
 	it("completes after all sources complete cleanly", () => {
 		const a = errorableProducer(1);
 		const b = errorableProducer(2);
 		const c = concat(a.store, b.store);
-		const obs = observeRaw(c);
+		const obs = Inspector.observe(c);
 		const values: unknown[] = [];
 		subscribe(c, (v) => values.push(v));
 
@@ -1083,7 +1011,7 @@ describe("concat: error forwarding", () => {
 		const a = errorableProducer(1);
 		const b = errorableProducer(2);
 		const c = concat(a.store, b.store);
-		const obs = observeRaw(c);
+		const obs = Inspector.observe(c);
 		subscribe(c, () => {});
 
 		a.complete(); // moves to b
@@ -1105,7 +1033,7 @@ describe("bufferTime: error/completion forwarding", () => {
 	it("forwards upstream error and cancels timer", () => {
 		const s = errorableProducer(0);
 		const bt = pipe(s.store, bufferTime(1000));
-		const obs = observeRaw(bt);
+		const obs = Inspector.observe(bt);
 		subscribe(bt, () => {});
 
 		s.emit(1);
@@ -1115,14 +1043,14 @@ describe("bufferTime: error/completion forwarding", () => {
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBe("buf-err");
 		// Buffer was NOT flushed on error
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 	});
 
 	it("flushes remaining buffer on upstream completion", () => {
 		const s = errorableProducer(0);
 		const bt = pipe(s.store, bufferTime(1000));
 		const values: unknown[] = [];
-		const obs = observeRaw(bt);
+		const obs = Inspector.observe(bt);
 		subscribe(bt, (v) => values.push(v));
 
 		s.emit(1);
@@ -1138,14 +1066,14 @@ describe("bufferTime: error/completion forwarding", () => {
 	it("completes immediately if buffer is empty on upstream completion", () => {
 		const s = errorableProducer(0);
 		const bt = pipe(s.store, bufferTime(1000));
-		const obs = observeRaw(bt);
+		const obs = Inspector.observe(bt);
 		subscribe(bt, () => {});
 
 		s.complete();
 
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBeUndefined();
-		expect(obs.data).toEqual([]);
+		expect(obs.values).toEqual([]);
 	});
 });
 
@@ -1160,7 +1088,7 @@ describe("delay: error/completion forwarding", () => {
 	it("forwards upstream error and cancels pending timers", () => {
 		const s = errorableProducer(0);
 		const d = pipe(s.store, delay(100));
-		const obs = observeRaw(d);
+		const obs = Inspector.observe(d);
 		const values: unknown[] = [];
 		subscribe(d, (v) => values.push(v));
 
@@ -1178,7 +1106,7 @@ describe("delay: error/completion forwarding", () => {
 	it("completes after all pending delayed values are flushed", () => {
 		const s = errorableProducer(0);
 		const d = pipe(s.store, delay(100));
-		const obs = observeRaw(d);
+		const obs = Inspector.observe(d);
 		const values: unknown[] = [];
 		subscribe(d, (v) => values.push(v));
 
@@ -1200,7 +1128,7 @@ describe("delay: error/completion forwarding", () => {
 	it("completes immediately if no pending timers on upstream completion", () => {
 		const s = errorableProducer(0);
 		const d = pipe(s.store, delay(100));
-		const obs = observeRaw(d);
+		const obs = Inspector.observe(d);
 		subscribe(d, () => {});
 
 		s.complete();
@@ -1220,7 +1148,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 	it("forwards upstream completion and clears timeout timer", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, timeout(500));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.complete();
@@ -1236,7 +1164,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 	it("forwards upstream error and clears timeout timer", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, timeout(500));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		s.error("upstream-err");
@@ -1248,7 +1176,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 	it("still fires TimeoutError when source is too slow", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, timeout(100));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		vi.advanceTimersByTime(101);
@@ -1260,7 +1188,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 	it("resets timer on each emission", () => {
 		const s = errorableProducer(1);
 		const t = pipe(s.store, timeout(100));
-		const obs = observeRaw(t);
+		const obs = Inspector.observe(t);
 		subscribe(t, () => {});
 
 		vi.advanceTimersByTime(80);
@@ -1288,7 +1216,7 @@ describe("sample: notifier error/completion forwarding", () => {
 		const input = state(1);
 		const notifier = errorableProducer(0);
 		const s = pipe(input, sample(notifier.store));
-		const obs = observeRaw(s);
+		const obs = Inspector.observe(s);
 		subscribe(s, () => {});
 
 		notifier.error("notifier-err");
@@ -1301,7 +1229,7 @@ describe("sample: notifier error/completion forwarding", () => {
 		const input = state(1);
 		const notifier = errorableProducer(0);
 		const s = pipe(input, sample(notifier.store));
-		const obs = observeRaw(s);
+		const obs = Inspector.observe(s);
 		subscribe(s, () => {});
 
 		notifier.complete();
@@ -1314,7 +1242,7 @@ describe("sample: notifier error/completion forwarding", () => {
 		const input = errorableProducer(1);
 		const notifier = state(0);
 		const s = pipe(input.store, sample(notifier));
-		const obs = observeRaw(s);
+		const obs = Inspector.observe(s);
 		subscribe(s, () => {});
 
 		input.error("input-err");

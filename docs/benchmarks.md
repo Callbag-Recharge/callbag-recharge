@@ -122,6 +122,15 @@ These benchmarks compare the optimization APIs against their unoptimized equival
 
 Disabling the Inspector skips `WeakRef` creation and `WeakMap` registration. Set `Inspector.enabled = false` in production. **~6x faster** store creation with Inspector disabled.
 
+### Inspector hooks overhead (emit/status/end)
+
+| Variant | ops/sec | time (100K ops) |
+|---|---|---|
+| No hooks (default) | **23M** | 4.3ms |
+| With hooks set | 18M | 5.6ms |
+
+Signal hooks (`onEmit`, `onSignal`, `onStatus`, `onEnd`) are wired into all primitives (state, producer, derived, operator). When no hooks are set (the default), a single module-level boolean check (`_inspectorHasHooks`) gates all hook call sites — **zero function calls, zero property lookups**. Setting hooks via `Inspector.setHooks()` adds ~20% overhead to emit/recompute paths. Hooks are designed for dev/debug; clear them with `Inspector.clearHooks()` for production.
+
 ### batch() — 10 set() calls with effect
 
 | Variant | ops/sec | time (10K ops) |

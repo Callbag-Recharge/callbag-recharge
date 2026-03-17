@@ -4,6 +4,7 @@
 
 export { derived } from "./core/derived";
 export { effect } from "./core/effect";
+export type { ObserveResult } from "./core/inspector";
 // Observability
 export { Inspector } from "./core/inspector";
 // General-purpose transform primitive

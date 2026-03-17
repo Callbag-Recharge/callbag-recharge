@@ -37,7 +37,7 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 - **Producer as universal base:** All sources are built on `producer()`. State is a thin wrapper. Tier 2 extras use producer options (`initial`, `equals`, `resetOnTeardown`, `getter`, `error()`) to avoid manual implementations.
 - **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
 - **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking.
-- **Inspector:** Opt-in observability via WeakMaps. `inspect()` returns `{ name, kind, value, status }`. Signal hooks (`onEmit`, `onSignal`, `onStatus`, `onEnd`) fire when non-null. `registerEdge()` tracks dependency graph.
+- **Inspector:** Static class for opt-in observability via WeakMaps. Zero intrusion into primitives — no hooks in hot paths. Read-only metadata: `inspect()`, `graph()`, `getEdges()`, `dumpGraph()`, `snapshot()`. Callbag sinks: `observe()` (protocol-level test utility), `spy()` (observe + console logging), `trace()` (value change callback). Graph wrapper: `tap()` (transparent passthrough node for visualization). See `docs/test-guidance.md` for usage patterns.
 
 ### Extra modules (src/extra/)
 

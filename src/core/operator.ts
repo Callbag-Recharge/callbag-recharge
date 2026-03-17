@@ -65,7 +65,8 @@ export class OperatorImpl<B> {
 
 		this.source = this.source.bind(this);
 
-		Inspector.register(this as any, { kind: opts?.kind ?? "operator", ...opts });
+		Inspector.register(this as any, { kind: opts?.kind ?? "operator", ...opts, deps });
+		for (const dep of deps) Inspector.registerEdge(dep, this as any);
 	}
 
 	/**

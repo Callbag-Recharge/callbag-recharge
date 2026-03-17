@@ -14,6 +14,7 @@
  */
 
 import { Bitmask } from "./bitmask";
+import { Inspector } from "./inspector";
 import {
 	beginDeferredStart,
 	DATA,
@@ -26,7 +27,11 @@ import {
 } from "./protocol";
 import type { Store } from "./types";
 
-export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void)): () => void {
+export function effect(
+	deps: Store<unknown>[],
+	fn: () => undefined | (() => void),
+	opts?: { name?: string },
+): () => void {
 	let cleanup: (() => void) | undefined;
 	const talkbacks: Array<(type: number) => void> = [];
 	let disposed = false;
@@ -96,7 +101,7 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 
 	endDeferredStart();
 
-	return () => {
+	const dispose = () => {
 		if (disposed) return;
 		disposed = true;
 		if (cleanup) cleanup();
@@ -104,4 +109,9 @@ export function effect(deps: Store<unknown>[], fn: () => undefined | (() => void
 		for (const tb of talkbacks) tb(END);
 		talkbacks.length = 0;
 	};
+
+	Inspector.register(dispose, { kind: "effect", ...opts, deps });
+	for (const dep of deps) Inspector.registerEdge(dep, dispose);
+
+	return dispose;
 }

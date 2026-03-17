@@ -487,15 +487,15 @@ describe("Inspector", () => {
 		expect(Inspector.getKind(s)).toBe("state");
 	});
 
-	it("graph() with unnamed stores uses store_N fallback keys", () => {
+	it("graph() with unnamed stores uses kind_N fallback keys", () => {
 		state(1); // unnamed
 		state(2, { name: "named" });
 		state(3); // unnamed
 
 		const g = Inspector.graph();
 		expect(g.has("named")).toBe(true);
-		// Unnamed stores get store_0, store_1, etc.
-		const keys = [...g.keys()].filter((k) => k.startsWith("store_"));
+		// Unnamed stores get state_N keys based on kind
+		const keys = [...g.keys()].filter((k) => k.startsWith("state_"));
 		expect(keys.length).toBe(2);
 	});
 
