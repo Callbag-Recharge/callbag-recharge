@@ -194,12 +194,43 @@ effect([alerts], txns => telegram.send(format(txns)));
 | Step | What | Status |
 |---|---|---|
 | 1 | reactiveMap | **Done** |
-| 2 | reactiveLog | Pending |
-| 3 | reactiveIndex | Pending |
-| 4 | Refactor collection to use reactiveIndex | Pending |
-| 5 | NodeV0 (store.snapshot() / state.from()) | Pending |
-| 6 | pubsub | Pending |
-| 7 | fromCron + taskState | Pending |
+| 2 | reactiveLog | **Done** |
+| 3 | reactiveIndex | **Done** |
+| 4 | Refactor collection to use reactiveIndex | **Done** |
+| 5 | NodeV0 (store.snapshot() / state.from()) | **Done** |
+| 6 | pubsub | **Done** |
+| 7 | fromCron + taskState | **Done** |
+
+## OPTIMIZATION PASS (March 17, 2026)
+
+Applied three optimizations after benchmark comparison with Preact Signals:
+
+### 1. Integer `_status` packed into `_flags` (core)
+Replaced string `_status` property with 3-bit integer in `_flags` bits 7-9 across ProducerImpl, StateImpl, DerivedImpl, OperatorImpl. String exposed via getter for backward compat. **Diamond pattern gap improved ~6.8x → 3.8x.**
+
+### 2. Bounded reactiveLog circular buffer
+Replaced O(n) `splice(0, overflow)` with real circular buffer (fixed array + head/write index). **Gap improved ~10.8x → 2.54x.**
+
+### 3. Version-gated collection stores
+Replaced `state<MemoryNode[]>` with version counter + lazy `derived()` materialization. Simplified node ID generation (removed `Date.now()`). **Collection gap improved ~41.6x → 29.4x.**
+
+### Level 3 Benchmark Results (post-optimization, Vitest/tinybench)
+
+| Benchmark | vs Native/Baseline | Notes |
+|---|---|---|
+| reactiveMap vs Map (set+get) | 1.56x | Good — 64% of native speed |
+| reactiveMap.update vs Map RMW | 2.00x | Acceptable — reactive overhead |
+| reactiveMap select vs Map.get | 1.76x | Good |
+| reactiveLog.append vs array push | 2.51x | Good — includes version+event overhead |
+| **bounded reactiveLog vs ring buffer** | **2.54x** | Fixed from 10.8x via circular buffer |
+| reactiveIndex vs hand-rolled | 1.26x | Excellent |
+| reactiveIndex.select vs Map.get | 1.01x | Effectively native speed |
+| **collection x50 + byTag** | **29.4x** | Bottleneck: per-node reactive stores + reactiveScored (19.6x) |
+| reactiveScored evict+reinsert | 19.6x | Primary collection bottleneck |
+| lru vs naive array+Set | 1.78x | |
+| fifo vs array queue | 1.02x | Effectively native speed |
+
+**Key insight:** Level 3 data structures (reactiveMap, reactiveLog, reactiveIndex) are all within 1-2.5x of native — excellent. The remaining gap is in `collection` which stacks multiple reactive primitives per node. The `reactiveScored` eviction policy (heap-backed, reactive subscription per node) is the dominant cost. For use cases not needing reactive eviction, raw reactiveIndex + reactiveMap are near-native.
 
 ## FILES CHANGED
 

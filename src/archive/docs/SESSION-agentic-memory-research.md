@@ -254,6 +254,34 @@ callbag protocol makes sources and sinks interchangeable:
 
 6. **Job queues and Kafka are NOT needed** for agent memory. callbag primitives replace in-process message passing entirely. External queues are only for cross-machine durability.
 
+## OPTIMIZATION UPDATE (March 17, 2026)
+
+### Benchmark Reality Check
+
+After migrating to Vitest/tinybench (statistical sampling, more realistic than tight for-loops), Level 3 data structures benchmarked well:
+
+| Data Structure | vs Native | Assessment |
+|---|---|---|
+| reactiveMap (set+get) | 1.56x | Excellent — 64% native with full reactivity |
+| reactiveLog (append) | 2.51x | Good — includes reactive version + event overhead |
+| reactiveLog (bounded) | 2.54x | Good — fixed from 10.8x via circular buffer |
+| reactiveIndex (select read) | 1.01x | Native speed — zero overhead on reads |
+| **collection (50 adds + tag read)** | **29.4x** | Bottleneck — per-node reactive stores + eviction |
+| reactiveScored (evict+reinsert) | 19.6x | Primary collection bottleneck |
+
+### Optimizations Applied
+
+1. **Integer `_status` in `_flags`** — core hot-path: string → integer bitwise ops
+2. **Circular buffer for bounded reactiveLog** — O(1) append replacing O(n) splice
+3. **Version-gated collection stores** — lazy derived materialization replacing eager state arrays
+4. **Simplified node ID** — removed Date.now() from memoryNode ID generation
+
+### Impact on Agentic Memory Use Case
+
+The Level 3 data primitives (reactiveMap, reactiveLog, reactiveIndex) are **validated as near-native** — suitable for the "10ns read" target from the original research. The `collection` primitive (which wraps memoryNode + reactiveIndex + reactiveScored) is slower due to stacking multiple reactive layers per node.
+
+**Recommendation for collection-heavy workloads:** If sub-microsecond collection operations are needed, consider a lightweight collection variant that skips reactive eviction (reactiveScored) and uses simple FIFO or manual eviction. The current collection design prioritizes reactive score tracking (push-based decay + importance scoring) over raw throughput — this is the right default for agentic memory where scores drive retrieval quality, but a "slim" variant could serve high-throughput scenarios.
+
 ## FILES CHANGED
 
 - This file created: `src/archive/docs/SESSION-agentic-memory-research.md`

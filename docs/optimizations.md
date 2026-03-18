@@ -212,31 +212,43 @@ Operator action closures (`emit`, `signal`, `seed`) check a closure-local `compl
 
 **Measured results:** State write (no subscribers) improved from 9.8M to 47M ops/sec — from 3.5x slower than Preact to 1.3x faster. See [benchmarks](./benchmarks.md#state-write-no-subscribers).
 
+### 16. Integer `_status` packed into `_flags` bits 7-9
+
+Replaced string `_status` property ("DIRTY", "SETTLED", "RESOLVED", etc.) with 3-bit integer packed into `_flags` bits 7-9. Six `NodeStatus` values map to integers 0-5. All status writes on the hot path are now register-only bitwise operations instead of heap pointer writes.
+
+```ts
+// Before (string write — heap pointer, ~3-5ns):
+this._status = "DIRTY";
+
+// After (integer bitwise — register-only, ~0.5-1ns):
+this._flags = (this._flags & ~STATUS_MASK) | _S_DIRTY;
+```
+
+Applied to `ProducerImpl`, `StateImpl`, `DerivedImpl`, and `OperatorImpl`. String `_status` exposed via `get _status()` getter calling `decodeStatus()` for Inspector/test backward compat. The hot path (signal dispatch) never calls the getter.
+
+Protocol additions in `src/core/protocol.ts`: `S_DISCONNECTED=0` through `S_ERRORED=5`, `STATUS_SHIFT=7`, `STATUS_MASK=0b111<<7`, `decodeStatus(flags)`.
+
+**Measured impact:** Diamond pattern improved from ~6.8x to ~3.8x gap vs Preact. State write (no subs) improved from ~1.7x to ~1.2x gap.
+
+### 17. Bounded reactiveLog circular buffer
+
+Replaced O(n) `_entries.splice(0, overflow)` with a real circular buffer for bounded mode. Uses a fixed-size array with `_head` (oldest entry index) and `_count` fields. Append overwrites `_entries[_head]` and advances the head pointer — O(1) instead of O(n).
+
+**Measured impact:** bounded reactiveLog vs ring buffer improved from **~10.8x → 2.54x** gap (4.3x improvement). The remaining 2.54x gap is the reactive overhead (version counter bump + event emission per append).
+
+### 18. Version-gated collection stores
+
+Replaced `state<MemoryNode[]>` (which allocated a new array on every add/remove) with a version counter + lazy `derived()` materialization (same pattern as reactiveMap). `_nodesStore` is now `derived([_version], () => Array.from(_nodes.values()))` — only allocates when observed. `_sizeStore` is `derived([_version], () => _nodes.size)` — no array allocation. Also simplified node ID generation by removing `Date.now()` call.
+
+**Measured impact:** collection x50 + byTag improved from **~41.6x → 29.4x** gap. Remaining gap is dominated by per-node overhead: each `memoryNode` creates 3 reactive stores + 1 derived, and collection creates per-node tag-tracking effects + reactive eviction policy. The `reactiveScored` evict+reinsert benchmark shows a 19.6x gap — this is the primary remaining bottleneck.
+
 ---
 
 ## Potential optimizations
 
 These are not yet implemented but represent concrete opportunities for improvement. Ordered by estimated impact on the Vitest/tinybench comparative benchmarks (where Preact currently leads on most scenarios).
 
-### 1. Pack `_status` into `_flags` as integer bits
-
-**Status:** Not implemented. **Impact:** High (hot path — every signal write). **Scenarios:** All.
-
-Every signal dispatch writes `this._status = "DIRTY"` / `"SETTLED"` / `"RESOLVED"` — a string property write. V8 stores strings as heap pointers; integer comparisons and assignments are register-only. Pack status into 3 bits of `_flags` (8 possible states covers all 6 `NodeStatus` values). Replace all `_status` reads/writes with bitwise ops.
-
-```ts
-// Before (string write, heap pointer):
-this._status = "DIRTY";
-
-// After (integer bitwise, register-only):
-this._flags = (this._flags & ~STATUS_MASK) | STATUS_DIRTY;
-```
-
-Expose `_status` as a getter for Inspector compatibility. The hot path (signal dispatch) never calls the getter — it uses the flags directly.
-
-**Why this matters now:** The Vitest bench numbers show Recharge losing on effect re-run (~2.7x), operator (~1.7x), and producer+subscriber (~1.8x). All of these hit `_status` writes on every signal. Two writes per set (DIRTY + SETTLED) × subscribers × depth = significant overhead that Preact avoids entirely (it uses integer bitfields for everything).
-
-### 2. Skip DIRTY dispatch in unbatched single-subscriber paths
+### 1. Skip DIRTY dispatch in unbatched single-subscriber paths
 
 **Status:** Not implemented. **Impact:** High (cuts dispatch calls in half for common case). **Scenarios:** State write, effect re-run, producer, operator, fan-out.
 
@@ -248,7 +260,7 @@ When not batching, `state.set()` dispatches DIRTY then immediately dispatches DA
 
 **Estimated gain:** ~30-40% on effect re-run, ~20% on simple state→derived→subscriber chains. Won't help diamonds (multi-dep nodes need DIRTY counting).
 
-### 3. Reduce bound method count in ProducerImpl
+### 2. Reduce bound method count in ProducerImpl
 
 **Status:** Not implemented. **Impact:** Medium (construction cost + memory). **Scenarios:** Store creation, memory per store.
 
@@ -262,7 +274,7 @@ In practice, only `source` and `emit` are commonly detached (callbag interop, de
 
 **Estimated gain:** ~25% faster store creation, ~30 bytes/store saved (3 fewer bound methods × ~16 bytes each).
 
-### 4. Inline `Object.is` in state.set() equality check
+### 3. Inline `Object.is` in state.set() equality check
 
 **Status:** Not implemented. **Impact:** Medium (state write hot path). **Scenarios:** State write (no subscribers), state write (with subscribers).
 
@@ -280,13 +292,13 @@ if (this._value !== undefined && Object.is(this._value, value)) return;
 
 **Estimated gain:** ~15-20% on state write (no subscribers). The equality check is the dominant cost when `_output === null`.
 
-### 5. Compile-time Inspector removal
+### 4. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization).
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
-### 6. Array-backed output slot for fan-out
+### 5. Array-backed output slot for fan-out
 
 **Status:** Not implemented. **Impact:** Medium for fan-out specifically. **Scenarios:** Fan-out (10 subscribers).
 
@@ -296,7 +308,7 @@ The MULTI output slot uses `Set<any>`. Set iteration allocates an iterator objec
 
 **Estimated gain:** ~30-40% on fan-out benchmarks. Negligible for 1-2 subscribers (stays in SINGLE mode).
 
-### 7. Elide STANDALONE-to-SINGLE transition overhead in derived.source()
+### 6. Elide STANDALONE-to-SINGLE transition overhead in derived.source()
 
 **Status:** Not implemented. **Impact:** Low-medium. **Scenarios:** Diamond, derived after dep change.
 
@@ -357,7 +369,9 @@ When a derived node transitions from STANDALONE to SINGLE (first external subscr
 | Effect pure closure (not class) | Built-in | ~20-30% faster re-run vs class | Effects |
 | State write fast path | Built-in | Inlined `set()` — 9.8M→47M ops/sec (now 1.3x faster than Preact) | State-heavy apps |
 | `derived.from()` | Built-in | Identity transform, skips `fn()` on recompute | Passthrough, dedup, observation |
-| Integer `_status` in `_flags` | Potential | Eliminates string writes on every signal dispatch | All hot paths |
+| Integer `_status` in `_flags` | Built-in | Eliminates string writes on every signal dispatch; diamond ~6.8x→3.8x | All hot paths |
+| Bounded reactiveLog circular buffer | Built-in | O(1) append instead of O(n) splice; gap ~10.8x→2.54x | Bounded logs |
+| Version-gated collection stores | Built-in | Lazy materialization; collection gap ~41.6x→29.4x | Collections with reactive views |
 | Skip DIRTY in unbatched single-dep | Potential | ~30-40% on effect re-run, ~20% on simple chains | Unbatched single-dep paths |
 | Reduce bound methods (6→3) | Potential | ~25% faster store creation, ~30 bytes/store | Store-heavy apps |
 | Inline `Object.is` in state.set() | Potential | ~15-20% on state write (no subscribers) | State-heavy apps |

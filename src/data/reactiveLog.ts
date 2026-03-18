@@ -5,21 +5,9 @@
 // sequence number. Supports bounded size (circular buffer semantics — oldest
 // entries are trimmed when maxSize is exceeded).
 //
-// Reactive API:
-//   - lengthStore: reactive count of entries
-//   - entries(n?): reactive store of the last N entries (default: all)
-//   - events: keyspace notification store (append/trim/clear)
-//   - latest: reactive store of the most recent entry
-//
-// Non-reactive API:
-//   - append(value): add entry, returns sequence number
-//   - appendMany(values): batch append
-//   - get(seq): point read by sequence number — O(1)
-//   - slice(from?, to?): range read by sequence number
-//   - toArray(): snapshot of all entries
-//   - length: current count
-//   - clear(): remove all entries
-//   - destroy(): tear down all stores
+// v2: Real circular buffer for bounded mode. O(1) append instead of O(n)
+// splice. Uses a fixed-size array + head/write index for bounded mode;
+// unbounded mode still uses plain push.
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
@@ -46,9 +34,13 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 	const counter = ++logCounter;
 	const nodeId = opts?.id ?? `rlog-${counter}`;
 	const maxSize = opts?.maxSize ?? 0; // 0 = unlimited
+	const bounded = maxSize > 0;
 
-	// Storage — circular buffer via array + head pointer
-	const _entries: LogEntry<V>[] = [];
+	// --- Unbounded storage (plain array) ---
+	// --- Bounded storage (circular buffer) ---
+	let _entries: LogEntry<V>[] = [];
+	let _head = 0; // index of oldest entry in circular buffer (bounded only)
+	let _count = 0; // number of entries currently in buffer (bounded only)
 	let _seq = 0; // next sequence number (monotonically increasing)
 	let _headSeq = 1; // sequence number of the oldest entry still in the log
 
@@ -68,17 +60,21 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 
 	// ---- Internal helpers ----
 
-	function _seqToIndex(seq: number): number | null {
-		if (seq < _headSeq || seq > _seq) return null;
-		// Because we splice from front when trimming, index = seq - _headSeq
-		return seq - _headSeq;
+	/** Materialize current entries as an ordered array (for reactive views) */
+	function _toArray(): LogEntry<V>[] {
+		if (!bounded) return _entries.slice();
+		if (_count === 0) return [];
+		const result = new Array<LogEntry<V>>(_count);
+		for (let i = 0; i < _count; i++) {
+			result[i] = _entries[(_head + i) % maxSize];
+		}
+		return result;
 	}
 
-	function _trim(): void {
-		if (maxSize <= 0 || _entries.length <= maxSize) return;
-		const overflow = _entries.length - maxSize;
-		_entries.splice(0, overflow);
-		_headSeq = _seq - _entries.length + 1;
+	function _getByIndex(logicalIndex: number): LogEntry<V> | undefined {
+		if (!bounded) return _entries[logicalIndex];
+		if (logicalIndex < 0 || logicalIndex >= _count) return undefined;
+		return _entries[(_head + logicalIndex) % maxSize];
 	}
 
 	// ---- Public API ----
@@ -94,8 +90,24 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 		append(value: V): number {
 			if (destroyed) return -1;
 			const seq = ++_seq;
-			_entries.push({ seq, value });
-			_trim();
+			const entry: LogEntry<V> = { seq, value };
+
+			if (bounded) {
+				if (_count < maxSize) {
+					// Buffer not full yet — just append
+					_entries[(_head + _count) % maxSize] = entry;
+					_count++;
+				} else {
+					// Buffer full — overwrite oldest
+					_entries[_head] = entry;
+					_head = (_head + 1) % maxSize;
+				}
+				_headSeq = _seq - _count + 1;
+			} else {
+				_entries.push(entry);
+				_headSeq = _entries.length > 0 ? _entries[0].seq : 1;
+			}
+
 			_version.update((v) => v + 1);
 			_events.set({ type: "append", seq, value });
 			return seq;
@@ -113,30 +125,49 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 		},
 
 		get(seq: number): LogEntry<V> | undefined {
-			const idx = _seqToIndex(seq);
-			if (idx === null) return undefined;
+			if (bounded) {
+				if (seq < _headSeq || seq > _seq || _count === 0) return undefined;
+				return _getByIndex(seq - _headSeq);
+			}
+			const idx = seq - _headSeq;
+			if (idx < 0 || idx >= _entries.length) return undefined;
 			return _entries[idx];
 		},
 
 		slice(from?: number, to?: number): LogEntry<V>[] {
 			const fromSeq = from ?? _headSeq;
 			const toSeq = to ?? _seq;
-			const startIdx = _seqToIndex(Math.max(fromSeq, _headSeq));
-			const endIdx = _seqToIndex(Math.min(toSeq, _seq));
-			if (startIdx === null || endIdx === null) return [];
-			return _entries.slice(startIdx, endIdx + 1);
+			const currentLength = bounded ? _count : _entries.length;
+			if (currentLength === 0) return [];
+
+			const clampedFrom = Math.max(fromSeq, _headSeq);
+			const clampedTo = Math.min(toSeq, _seq);
+			if (clampedFrom > clampedTo) return [];
+
+			const startIdx = clampedFrom - _headSeq;
+			const endIdx = clampedTo - _headSeq;
+
+			if (!bounded) {
+				return _entries.slice(startIdx, endIdx + 1);
+			}
+
+			const result: LogEntry<V>[] = [];
+			for (let i = startIdx; i <= endIdx; i++) {
+				result.push(_entries[(_head + i) % maxSize]);
+			}
+			return result;
 		},
 
 		toArray(): LogEntry<V>[] {
-			return _entries.slice();
+			return _toArray();
 		},
 
 		get length() {
-			return _entries.length;
+			return bounded ? _count : _entries.length;
 		},
 
 		get headSeq() {
-			return _entries.length > 0 ? _headSeq : 0;
+			return (bounded ? _count : _entries.length) > 0 ? _headSeq : 0;
 		},
 
 		get tailSeq() {
@@ -144,9 +175,15 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 		},
 
 		clear(): void {
-			if (_entries.length === 0) return;
+			const currentLength = bounded ? _count : _entries.length;
+			if (currentLength === 0) return;
 			batch(() => {
-				_entries.length = 0;
+				if (bounded) {
+					_count = 0;
+					_head = 0;
+				} else {
+					_entries.length = 0;
+				}
 				_headSeq = _seq + 1;
 				_version.update((v) => v + 1);
 				_events.set({ type: "clear" });
@@ -155,13 +192,18 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 
 		// --- Reactive ---
 
-		lengthStore: derived([_version], () => _entries.length, {
+		lengthStore: derived([_version], () => (bounded ? _count : _entries.length), {
 			name: `${nodeId}:length`,
 		}) as Store<number>,
 
 		latest: derived(
 			[_version],
-			() => (_entries.length > 0 ? _entries[_entries.length - 1] : undefined),
+			() => {
+				const len = bounded ? _count : _entries.length;
+				if (len === 0) return undefined;
+				if (bounded) return _entries[(_head + _count - 1) % maxSize];
+				return _entries[_entries.length - 1];
+			},
 			{ name: `${nodeId}:latest` },
 		) as Store<LogEntry<V> | undefined>,
 
@@ -171,8 +213,9 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 			cached = derived(
 				[_version],
 				() => {
-					if (n === undefined || n >= _entries.length) return _entries.slice();
-					return _entries.slice(-n);
+					const all = _toArray();
+					if (n === undefined || n >= all.length) return all;
+					return all.slice(-n);
 				},
 				{ name: `${nodeId}:tail${n ?? ""}` },
 			);
@@ -189,8 +232,8 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 				type: "reactiveLog",
 				id: nodeId,
 				version: _version.get(),
-				entries: _entries.map((e) => ({ seq: e.seq, value: e.value })),
-				headSeq: _entries.length > 0 ? _headSeq : 0,
+				entries: _toArray().map((e) => ({ seq: e.seq, value: e.value })),
+				headSeq: (bounded ? _count : _entries.length) > 0 ? _headSeq : 0,
 				tailSeq: _seq,
 			};
 		},
@@ -201,6 +244,7 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 			if (destroyed) return;
 			destroyed = true;
 			_entries.length = 0;
+			_count = 0;
 			teardown(_version);
 			teardown(_events);
 		},

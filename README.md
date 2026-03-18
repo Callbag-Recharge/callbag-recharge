@@ -1,11 +1,13 @@
 # callbag-recharge
 
-**State that flows.** Reactive state management for TypeScript, built on the [callbag protocol](https://github.com/callbag/callbag).
+**State that flows.** Reactive state management for TypeScript — from simple atoms to streaming pipelines, in one library.
 
-- **~3.7 KB** gzipped core ESM, zero dependencies
-- **Glitch-free** diamond updates via two-phase push
-- **~376 bytes per store** — plain objects, no wrapper overhead
-- **Full TypeScript** from the ground up
+- **5 primitives** — `state`, `derived`, `effect`, `producer`, `operator`
+- **60+ operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
+- **Glitch-free** — two-phase push resolves diamonds correctly, every time
+- **Inspectable** — every node in the graph is observable via `Inspector` — names, edges, phases, values
+- **Framework-agnostic** — no providers, no wrappers, works anywhere JS runs
+- **~3.7 KB** gzipped core, zero dependencies
 
 ```ts
 import { state, derived, effect } from 'callbag-recharge'
@@ -24,25 +26,28 @@ count.set(5)
 
 ## When to use
 
-- **Simple state management** — like Zustand/Jotai but framework-agnostic, no providers
+- **Simple state management** — like Zustand/Jotai but framework-agnostic, no providers, no ceremony
 - **Streaming data** — LLM chunks, WebSocket, SSE flowing into state via `producer` or `fromAsyncIter`
-- **Cancellable async** — `switchMap` auto-cancels previous operations
-- **Derived/computed values** — always consistent, diamond-safe, cached
+- **Cancellable async** — `switchMap` auto-cancels the previous operation when a new one starts
+- **Derived values you can trust** — diamond-safe, cached, always consistent
 - **Agentic workflows** — session state, tool call lifecycle, multi-agent coordination
-- **Event pipelines** — 60+ tree-shakeable operators for transform, buffer, window, error handling
+- **Event pipelines** — transform, buffer, window, throttle, retry — compose with `pipe`
+- **Reactive data structures** — `reactiveMap`, `reactiveLog`, `reactiveIndex` with near-native read performance
 
 ---
 
 ## Why callbag-recharge?
 
-Signals gave us ergonomic reactive state. Callbag gave us zero-overhead streams. This library combines both — signals-style ergonomics with callbag's protocol underneath — and adds something neither has: **every node in the reactive graph is inspectable**.
+Most state managers stop at atoms and computed values. Most streaming libraries don't have state. This library is both — signals-style `.get()/.set()` ergonomics with callbag's streaming protocol underneath.
 
-| Feature | RxJS | Signals | Callbag | callbag-recharge |
-|---|---|---|---|---|
-| Inspect intermediate values | No | Derivations only | No | **Every step** |
-| Two-phase push (glitch-free) | N/A | Yes | No | **Yes** |
-| Bundle size | ~30 KB | ~3-5 KB | ~1-2 KB | **~3.7 KB** (core, gzip) |
-| Memory per node | Heavy | Medium | Minimal | **~376 bytes** |
+**What you get that others don't — all in one library:**
+
+- **Glitch-free diamond resolution** — when A → B, A → C, B+C → D, D computes exactly once with consistent values. Jotai, Nanostores, and vanilla signals all glitch here.
+- **Streaming operators as first-class citizens** — `switchMap`, `debounce`, `throttle`, `scan`, `retry`, `bufferTime` — not an afterthought, not a separate library.
+- **Inspectable graph** — every store has a name, a kind, dependency edges, and a status. `Inspector.graph()` shows the full picture. No other state manager gives you this without runtime cost in production.
+- **Effects with dirty tracking** — `effect()` knows which deps changed and waits for all to resolve before running. Smarter than `useEffect`, `autorun`, or `watch`.
+- **Completion and error semantics** — stores can complete and error, just like streams. `retry`, `rescue`, `repeat` handle recovery. No ad-hoc try/catch.
+- **Built-in batching** — `batch()` defers value propagation until all writes finish. No torn reads mid-update.
 
 ---
 
@@ -128,11 +133,36 @@ Import only what you need from `callbag-recharge/extra`.
 1. **Stores are plain objects** — `{ get, set?, source }`, no classes, no property descriptors
 2. **Two-phase push** — DIRTY propagates on type 3, then values flow on type 1; glitch-free diamonds without pull
 3. **Explicit deps** — `derived` and `effect` declare dependencies upfront; callbag protocol is the sole connection mechanism
-4. **Cached derived stores** — STANDALONE mode: eagerly connects to deps, `get()` always returns cached value
+4. **Cached derived stores** — lazy STANDALONE mode: no computation until first `get()` or `source()`; then cached
 5. **`undefined` means empty** — no special symbols, no `.ready` flag
 6. **Observability is external** — Inspector singleton with WeakMaps, zero per-store cost
 
 See [docs/architecture.md](./docs/architecture.md) for the full design and implementation details.
+
+---
+
+## Reactive data structures
+
+Built on the core primitives, these provide reactive wrappers around common data structures with near-native read performance.
+
+```ts
+import { reactiveMap, reactiveLog, reactiveIndex } from 'callbag-recharge/data'
+
+// Reactive Map — .get()/.set() with observable changes
+const users = reactiveMap<string, User>()
+users.set('alice', { name: 'Alice' })
+const alice = users.select('alice') // Store<User | undefined> — reactive, cached
+
+// Reactive Log — append-only with bounded mode (circular buffer)
+const log = reactiveLog<string>({ maxSize: 1000 })
+log.append('event happened')
+const recent = log.slice(-10) // Store<string[]> — reactive
+
+// Reactive Index — dual-key lookup, 1.01x native Map.get speed on reads
+const index = reactiveIndex<string, string, Item>()
+index.set('pk', 'sk', item)
+const found = index.select('pk', 'sk') // Store<Item | undefined>
+```
 
 ---
 
@@ -155,8 +185,8 @@ store.source(0, (type, data) => {
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — layers, design principles, how each primitive works
-- [Benchmarks](./docs/benchmarks.md) — Vitest + tinybench (`npm run bench`, `bench:core`, `bench:compare`, `bench:data`)
-- [Optimizations](./docs/optimizations.md) — techniques to close performance gaps
+- [Extras](./docs/extras.md) — 60+ operators, sources, and sinks
+- [Benchmarks](./docs/benchmarks.md) — Vitest + tinybench (`npm run bench`)
 
 ---
 

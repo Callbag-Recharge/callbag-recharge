@@ -22,6 +22,33 @@ export type NodeStatus =
 	| "COMPLETED"
 	| "ERRORED";
 
+// ---------------------------------------------------------------------------
+// Integer status constants — pack into _flags for hot-path performance.
+// 3 bits (7-9) encode 6 statuses. Use STATUS_MASK to read/write.
+// ---------------------------------------------------------------------------
+export const S_DISCONNECTED = 0;
+export const S_DIRTY = 1;
+export const S_SETTLED = 2;
+export const S_RESOLVED = 3;
+export const S_COMPLETED = 4;
+export const S_ERRORED = 5;
+export const STATUS_SHIFT = 7;
+export const STATUS_MASK = 0b111 << STATUS_SHIFT; // bits 7-9
+
+const STATUS_STRINGS: NodeStatus[] = [
+	"DISCONNECTED",
+	"DIRTY",
+	"SETTLED",
+	"RESOLVED",
+	"COMPLETED",
+	"ERRORED",
+];
+
+/** Decode integer status bits back to string (for Inspector / tests) */
+export function decodeStatus(flags: number): NodeStatus {
+	return STATUS_STRINGS[(flags & STATUS_MASK) >>> STATUS_SHIFT];
+}
+
 /** Callbag signal types */
 export const START = 0;
 export const DATA = 1;

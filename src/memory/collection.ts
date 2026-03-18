@@ -56,19 +56,21 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 				)
 			: null;
 
-	// Reactive stores
-	const _nodesStore = state<MemoryNodeInterface<T>[]>([], {
+	// Version-gated reactive stores — bump version on structural change,
+	// derived stores materialize lazily from the version (like reactiveMap).
+	// Avoids Array.from() allocation on every add/remove.
+	const _version = state<number>(0, { name: `collection-${id}:ver` });
+	const _nodesStore = derived([_version], () => Array.from(_nodes.values()), {
 		name: `collection-${id}:nodes`,
-		equals: () => false, // Always emit on mutation (array identity changes)
-	});
-	const _sizeStore = derived([_nodesStore], () => _nodesStore.get().length, {
+	}) as Store<MemoryNodeInterface<T>[]>;
+	const _sizeStore = derived([_version], () => _nodes.size, {
 		name: `collection-${id}:size`,
 	});
 
 	let destroyed = false;
 
-	function _syncNodesStore(): void {
-		_nodesStore.set(Array.from(_nodes.values()));
+	function _bumpVersion(): void {
+		_version.update((v) => v + 1);
 	}
 
 	function _trackTags(node: MemoryNodeInterface<T>): void {
@@ -112,7 +114,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			_trackTags(node);
 			_evictionPolicy?.insert(node.id);
 			_evictIfNeeded();
-			_syncNodesStore();
+			_bumpVersion();
 			return node;
 		},
 
@@ -124,7 +126,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			_evictionPolicy?.delete(nodeId);
 			node.destroy();
 			_nodes.delete(nodeId);
-			_syncNodesStore();
+			_bumpVersion();
 			return true;
 		},
 
@@ -179,7 +181,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			batch(() => {
 				for (const node of _nodes.values()) node.destroy();
 				_nodes.clear();
-				teardown(_nodesStore);
+				teardown(_version);
 			});
 		},
 	};

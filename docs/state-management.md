@@ -180,6 +180,7 @@ Combine the best patterns from each library:
 4. **Effects with dirty tracking** — smarter than any competitor's effect system
 5. **Inspector** — opt-in observability without runtime cost in production
 6. **Callbag protocol** — interoperable with the callbag ecosystem
+7. **Level 3 data structures** — reactiveMap (1.56x native), reactiveLog (2.5x native), reactiveIndex (1.01x native for reads) — near-native reactive data structures that no competitor offers
 
 ---
 
@@ -626,6 +627,19 @@ To start the flywheel:
 - Not another RxJS — we have first-class state with `.get()/.set()`, not just streams
 - Not React-only — framework-agnostic, works anywhere JS runs
 - Not adding abstraction — 5 primitives, 4 layers, no ceremony
+
+### Performance reality (March 2026 benchmarks)
+
+**Core primitives vs Preact Signals (Vitest/tinybench):** Preact wins on most micro-benchmarks (1.2-3.8x faster) due to its lazy pull model vs our eager two-phase push. We win on cached derived reads (1.1x) and match on state reads. The gap is architectural — push gives us real-time effects and predictable timing that pull cannot.
+
+**Level 3 data structures vs native:** This is where we shine and no competitor can follow.
+- reactiveMap: 1.56x native Map (64% throughput with full reactivity)
+- reactiveLog: 2.5x native array push (bounded: 2.5x ring buffer)
+- reactiveIndex: 1.01x native Map.get for reads (effectively free reactivity)
+- reactiveIndex: 1.26x hand-rolled double map for writes
+- fifo queue: 1.02x native array queue
+
+**The strategic play:** Don't compete on micro-benchmarks against Preact's simpler model. Compete on capabilities: streaming operators, completion semantics, Inspector, Level 3 reactive data structures. No other state manager has near-native reactive maps, logs, and indexes.
 
 ### The bet
 

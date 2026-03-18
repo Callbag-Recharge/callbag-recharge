@@ -12,15 +12,27 @@
  * type 3 before each type 1 DATA. equals option guards emit();
  * resetOnTeardown resets value on stop.
  *
+ * v5: _status packed into _flags bits 7-9 for hot-path performance.
+ * String status exposed via getter for Inspector/test backward compat.
+ *
  * Class-based for V8 hidden class optimization and prototype method sharing.
  * Boolean fields packed into _flags bitmask to reduce hidden class size.
  */
 
 import { Inspector } from "./inspector";
-import type { NodeStatus, Signal } from "./protocol";
+import type { Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
+	STATUS_MASK,
+	STATUS_SHIFT,
+	S_COMPLETED,
+	S_DIRTY,
+	S_DISCONNECTED,
+	S_ERRORED,
+	S_RESOLVED,
+	S_SETTLED,
+	decodeStatus,
 	deferEmission,
 	deferStart,
 	END,
@@ -43,7 +55,7 @@ export type ProducerOpts<T> = SourceOptions<T> & {
 	_skipInspect?: boolean;
 };
 
-// Flag bits for _flags bitmask
+// Flag bits for _flags bitmask (bits 0-6)
 const P_STARTED = 1;
 const P_MULTI = 64;
 
@@ -54,11 +66,23 @@ const P_RESET = 8;
 const P_RESUB = 16;
 export const P_PENDING = 32;
 
+// Status bits (bits 7-9) — exported for StateImpl fast path
+export const _STATUS_MASK = STATUS_MASK;
+export const _S_DIRTY = S_DIRTY << STATUS_SHIFT;
+export const _S_SETTLED = S_SETTLED << STATUS_SHIFT;
+export const _S_DISCONNECTED = S_DISCONNECTED << STATUS_SHIFT;
+export const _S_COMPLETED = S_COMPLETED << STATUS_SHIFT;
+export const _S_ERRORED = S_ERRORED << STATUS_SHIFT;
+export const _S_RESOLVED = S_RESOLVED << STATUS_SHIFT;
+
 export class ProducerImpl<T> {
 	_value: T | undefined;
 	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
-	_status: NodeStatus = "DISCONNECTED";
 	_flags: number;
+
+	get _status() {
+		return decodeStatus(this._flags);
+	}
 	_cleanup: (() => void) | undefined;
 	_fn: ProducerFn<T> | undefined;
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
@@ -76,6 +100,7 @@ export class ProducerImpl<T> {
 		if (opts?.autoDirty !== false) flags |= P_AUTO_DIRTY;
 		if (opts?.resetOnTeardown) flags |= P_RESET;
 		if (opts?.resubscribable) flags |= P_RESUB;
+		// S_DISCONNECTED = 0, so no need to set status bits
 		this._flags = flags;
 
 		// Bind public API methods so they work when detached (callbag interop,
@@ -117,46 +142,39 @@ export class ProducerImpl<T> {
 		this._value = value;
 		if (!this._output) return;
 		if (isBatching()) {
-			// Coalesce: send DIRTY and register deferred DATA only once per batch cycle.
-			// Subsequent emit() calls just update _value; the deferred closure
-			// reads it at drain time, so only the latest value is emitted.
 			if (!(this._flags & P_PENDING)) {
 				this._flags |= P_PENDING;
 				if (this._flags & P_AUTO_DIRTY) {
-					this._status = "DIRTY";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);
 				}
 				deferEmission(() => {
 					this._flags &= ~P_PENDING;
-					this._status = "SETTLED";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_SETTLED;
 					this._dispatch(DATA, this._value);
 				});
 			}
 		} else {
 			if (this._flags & P_AUTO_DIRTY) {
-				this._status = "DIRTY";
+				this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 				this._dispatch(STATE, DIRTY);
 			}
-			this._status = "SETTLED";
+			this._flags = (this._flags & ~_STATUS_MASK) | _S_SETTLED;
 			this._dispatch(DATA, this._value);
 		}
 	}
 
 	signal(s: Signal): void {
 		if (this._flags & P_COMPLETED || !this._output) return;
-		if (s === DIRTY) this._status = "DIRTY";
-		else if (s === RESOLVED) this._status = "RESOLVED";
+		if (s === DIRTY) this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
+		else if (s === RESOLVED) this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 		// Unknown signals: dispatch without _status change (v4 forward-compat)
 		this._dispatch(STATE, s);
 	}
 
 	complete(): void {
 		if (this._flags & P_COMPLETED) return;
-		this._flags |= P_COMPLETED;
-		this._status = "COMPLETED";
-		// Move output reference to local, null field before notify — prevents
-		// reentrancy issues when a sink re-subscribes during END (e.g. retry
-		// with resubscribable). No snapshot array allocation needed.
+		this._flags = (this._flags | P_COMPLETED) & ~_STATUS_MASK | _S_COMPLETED;
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
@@ -173,8 +191,7 @@ export class ProducerImpl<T> {
 
 	error(e: unknown): void {
 		if (this._flags & P_COMPLETED) return;
-		this._flags |= P_COMPLETED;
-		this._status = "ERRORED";
+		this._flags = (this._flags | P_COMPLETED) & ~_STATUS_MASK | _S_ERRORED;
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
@@ -192,7 +209,6 @@ export class ProducerImpl<T> {
 	_start(): void {
 		if (this._flags & P_STARTED || !this._fn) return;
 		this._flags |= P_STARTED;
-		// Pass this directly — emit/signal/complete/error are bound in constructor
 		const result = this._fn(this as any);
 		this._cleanup = typeof result === "function" ? result : undefined;
 	}
@@ -203,10 +219,8 @@ export class ProducerImpl<T> {
 		if (this._cleanup) this._cleanup();
 		this._cleanup = undefined;
 		if (this._flags & P_RESET) this._value = this._initial;
-		// Defensive: ensure status reflects disconnected state.
-		// Callers (talkback END) already set this, but _stop() should be
-		// self-contained for safety. Skip if terminal (COMPLETED/ERRORED).
-		if (!(this._flags & P_COMPLETED)) this._status = "DISCONNECTED";
+		if (!(this._flags & P_COMPLETED))
+			this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 	}
 
 	source(type: number, payload?: any): void {
@@ -214,15 +228,13 @@ export class ProducerImpl<T> {
 			const sink = payload;
 			if (this._flags & P_COMPLETED) {
 				if (this._flags & P_RESUB && this._output === null) {
-					this._flags &= ~P_COMPLETED;
-					this._status = "DISCONNECTED";
+					this._flags = (this._flags & ~(P_COMPLETED | _STATUS_MASK)) | _S_DISCONNECTED;
 				} else {
 					sink(START, (_t: number) => {});
 					sink(END);
 					return;
 				}
 			}
-			// Output slot transitions: null → SINGLE, SINGLE → MULTI
 			if (this._output === null) {
 				this._output = sink;
 			} else if (!(this._flags & P_MULTI)) {
@@ -242,20 +254,17 @@ export class ProducerImpl<T> {
 						const set = this._output as Set<any>;
 						set.delete(sink);
 						if (set.size === 1) {
-							// MULTI → SINGLE
 							this._output = set.values().next().value;
 							this._flags &= ~P_MULTI;
 						} else if (set.size === 0) {
-							// MULTI → null
 							this._output = null;
 							this._flags &= ~P_MULTI;
-							this._status = "DISCONNECTED";
+							this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 							this._stop();
 						}
 					} else if (this._output === sink) {
-						// SINGLE → null
 						this._output = null;
-						this._status = "DISCONNECTED";
+						this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 						this._stop();
 					}
 				}

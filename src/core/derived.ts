@@ -2,15 +2,8 @@
  * Computed store with dirty tracking and caching. Recomputes fn() when
  * all dirty deps have resolved, emitting the new value on type 1 DATA.
  *
- * v4: Output slot model replaces _sinks Set. _status tracks node lifecycle.
- * Single-dep nodes skip bitmask (P0 optimization). get() always returns
- * cached value (populated at construction and kept current by STANDALONE
- * connection).
- *
- * v4.1: Lazy STANDALONE — deps connection deferred until first get() or
- * source() call. Stores that are never read or subscribed skip STANDALONE
- * overhead entirely. Identity mode (derived.from) skips fn() on recompute,
- * forwarding upstream DATA directly.
+ * v5: _status packed into _flags bits 7-9 for hot-path performance.
+ * String status exposed via getter for Inspector/test backward compat.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
  * Boolean fields packed into _flags bitmask to reduce hidden class size.
@@ -18,20 +11,28 @@
 
 import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
-import type { NodeStatus } from "./protocol";
 import {
-	beginDeferredStart,
 	DATA,
 	DIRTY,
 	END,
-	endDeferredStart,
 	RESOLVED,
 	START,
 	STATE,
+	STATUS_MASK,
+	STATUS_SHIFT,
+	S_COMPLETED,
+	S_DIRTY,
+	S_DISCONNECTED,
+	S_ERRORED,
+	S_RESOLVED,
+	S_SETTLED,
+	beginDeferredStart,
+	decodeStatus,
+	endDeferredStart,
 } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
-// Flag bits for _flags bitmask
+// Flag bits for _flags bitmask (bits 0-6)
 const D_HAS_CACHED = 1;
 const D_CONNECTED = 2;
 const D_ANY_DATA = 4;
@@ -40,9 +41,17 @@ const D_STANDALONE = 16;
 const D_MULTI = 32;
 const D_IDENTITY = 64;
 
+// Pre-shifted status constants for hot-path writes
+const _S_DISCONNECTED = S_DISCONNECTED << STATUS_SHIFT;
+const _S_DIRTY = S_DIRTY << STATUS_SHIFT;
+const _S_SETTLED = S_SETTLED << STATUS_SHIFT;
+const _S_RESOLVED = S_RESOLVED << STATUS_SHIFT;
+const _S_COMPLETED = S_COMPLETED << STATUS_SHIFT;
+const _S_ERRORED = S_ERRORED << STATUS_SHIFT;
+const _STATUS_MASK = STATUS_MASK;
+
 export class DerivedImpl<T> {
 	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
-	_status: NodeStatus;
 	_upstreamTalkbacks: Array<(type: number) => void> = [];
 	_cachedValue: T | undefined;
 	_flags: number;
@@ -51,11 +60,16 @@ export class DerivedImpl<T> {
 	_deps: Store<unknown>[];
 	_fn: () => T;
 
+	get _status() {
+		return decodeStatus(this._flags);
+	}
+
 	constructor(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>, identity?: boolean) {
 		this._deps = deps;
 		this._fn = fn;
 		this._eqFn = opts?.equals;
 		this._flags = identity ? D_IDENTITY : 0;
+		// S_DISCONNECTED = 0, so no need to set status bits
 		this._dirtyDeps = new Bitmask(deps.length);
 
 		this.source = this.source.bind(this);
@@ -64,16 +78,8 @@ export class DerivedImpl<T> {
 		for (const dep of deps) Inspector.registerEdge(dep, this as any);
 
 		// v4.1: Fully lazy — no computation or connection at construction.
-		// _cachedValue remains undefined until first get()/source().
-		// This means derived stores that are never accessed incur zero overhead
-		// beyond the object allocation itself.
-		this._status = "DISCONNECTED";
 	}
 
-	/**
-	 * Dispatch a signal to all current subscribers via the output slot.
-	 * See ProducerImpl._dispatch for safety invariant documentation.
-	 */
 	_dispatch(type: number, data?: any): void {
 		const output = this._output;
 		if (!output) return;
@@ -87,40 +93,30 @@ export class DerivedImpl<T> {
 	_recompute(): void {
 		const result = this._fn();
 		if (this._eqFn && this._flags & D_HAS_CACHED && this._eqFn(this._cachedValue as T, result)) {
-			// Value unchanged — send RESOLVED (subtree skipping)
-			this._status = "RESOLVED";
+			this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 			this._dispatch(STATE, RESOLVED);
 			return;
 		}
 		this._cachedValue = result;
-		this._flags |= D_HAS_CACHED;
-		this._status = "SETTLED";
+		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
 		this._dispatch(DATA, this._cachedValue);
 	}
 
-	/** Identity-mode recompute: forward upstream data directly, skip fn() */
 	_recomputeIdentity(data: T): void {
 		if (this._eqFn && this._flags & D_HAS_CACHED && this._eqFn(this._cachedValue as T, data)) {
-			this._status = "RESOLVED";
+			this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 			this._dispatch(STATE, RESOLVED);
 			return;
 		}
 		this._cachedValue = data;
-		this._flags |= D_HAS_CACHED;
-		this._status = "SETTLED";
+		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
 		this._dispatch(DATA, data);
 	}
 
-	/**
-	 * Lazy STANDALONE connection — deferred from constructor to first use.
-	 * Computes _cachedValue and subscribes to deps.
-	 */
 	_lazyConnect(): void {
 		if (this._flags & (D_CONNECTED | D_COMPLETED)) return;
-		// Compute value from current dep state, then subscribe for future updates
 		this._cachedValue = this._fn();
-		this._flags |= D_HAS_CACHED;
-		this._status = "SETTLED";
+		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
 		beginDeferredStart();
 		this._connectUpstream();
 		if (!(this._flags & D_COMPLETED)) {
@@ -155,16 +151,15 @@ export class DerivedImpl<T> {
 			if (type === STATE) {
 				if (data === DIRTY) {
 					dirty = true;
-					this._status = "DIRTY";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);
 				} else if (data === RESOLVED) {
 					if (dirty) {
 						dirty = false;
-						this._status = "RESOLVED";
+						this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 						this._dispatch(STATE, RESOLVED);
 					}
 				} else {
-					// Unknown STATE signal — forward unchanged (§6)
 					this._dispatch(STATE, data);
 				}
 			} else if (type === DATA) {
@@ -172,8 +167,7 @@ export class DerivedImpl<T> {
 					dirty = false;
 					this._recompute();
 				} else {
-					// DATA without prior DIRTY (raw callbag compat)
-					this._status = "DIRTY";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);
 					this._recompute();
 				}
@@ -183,7 +177,6 @@ export class DerivedImpl<T> {
 		});
 	}
 
-	/** Single-dep identity mode: forward upstream DATA directly, skip fn() */
 	_connectSingleDepIdentity(): void {
 		let dirty = false;
 		this._deps[0].source(START, (type: number, data: any) => {
@@ -196,12 +189,12 @@ export class DerivedImpl<T> {
 			if (type === STATE) {
 				if (data === DIRTY) {
 					dirty = true;
-					this._status = "DIRTY";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);
 				} else if (data === RESOLVED) {
 					if (dirty) {
 						dirty = false;
-						this._status = "RESOLVED";
+						this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 						this._dispatch(STATE, RESOLVED);
 					}
 				} else {
@@ -212,7 +205,7 @@ export class DerivedImpl<T> {
 					dirty = false;
 					this._recomputeIdentity(data);
 				} else {
-					this._status = "DIRTY";
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);
 					this._recomputeIdentity(data);
 				}
@@ -240,7 +233,7 @@ export class DerivedImpl<T> {
 						this._dirtyDeps.set(depIndex);
 						if (wasEmpty) {
 							this._flags &= ~D_ANY_DATA;
-							this._status = "DIRTY";
+							this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 							this._dispatch(STATE, DIRTY);
 						}
 					} else if (data === RESOLVED) {
@@ -250,14 +243,12 @@ export class DerivedImpl<T> {
 								if (this._flags & D_ANY_DATA) {
 									this._recompute();
 								} else {
-									// All deps resolved without value change — skip fn()
-									this._status = "RESOLVED";
+									this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 									this._dispatch(STATE, RESOLVED);
 								}
 							}
 						}
 					} else {
-						// Unknown STATE signal — forward unchanged (§6)
 						this._dispatch(STATE, data);
 					}
 				} else if (type === DATA) {
@@ -268,9 +259,8 @@ export class DerivedImpl<T> {
 							this._recompute();
 						}
 					} else {
-						// DATA without prior DIRTY: raw callbag compat
 						if (this._dirtyDeps.empty()) {
-							this._status = "DIRTY";
+							this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 							this._dispatch(STATE, DIRTY);
 							this._recompute();
 						} else {
@@ -284,10 +274,11 @@ export class DerivedImpl<T> {
 		}
 	}
 
-	/** Handle upstream END (completion or error) */
 	_handleEnd(errorData: any): void {
 		this._flags |= D_COMPLETED;
-		this._status = errorData !== undefined ? "ERRORED" : "COMPLETED";
+		this._flags =
+			(this._flags & ~_STATUS_MASK) |
+			(errorData !== undefined ? _S_ERRORED : _S_COMPLETED);
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._flags &= ~(D_CONNECTED | D_STANDALONE);
@@ -317,7 +308,6 @@ export class DerivedImpl<T> {
 	}
 
 	get(): T {
-		// Lazy STANDALONE: connect on first get()
 		if (!(this._flags & (D_CONNECTED | D_COMPLETED))) {
 			this._lazyConnect();
 			if (this._flags & D_CONNECTED) {
@@ -330,14 +320,12 @@ export class DerivedImpl<T> {
 	source(type: number, payload?: any): void {
 		if (type === START) {
 			const sink = payload;
-			// Already completed — late subscriber gets END immediately
 			if (this._flags & D_COMPLETED) {
 				sink(START, (_t: number) => {});
 				sink(END);
 				return;
 			}
 
-			// Lazy connection on first subscription
 			if (!(this._flags & D_CONNECTED)) {
 				this._lazyConnect();
 				if (this._flags & D_COMPLETED) {
@@ -345,19 +333,14 @@ export class DerivedImpl<T> {
 					sink(END);
 					return;
 				}
-				// D_CONNECTED is set, D_STANDALONE is NOT (we have a subscriber)
 			}
 
-			// Output slot transitions: STANDALONE/null → SINGLE, SINGLE → MULTI
 			if (this._flags & D_STANDALONE) {
-				// STANDALONE → SINGLE: external subscriber takes over
 				this._output = sink;
 				this._flags &= ~D_STANDALONE;
 			} else if (this._output === null) {
-				// null → SINGLE (lazy connect path — _output is null after connect)
 				this._output = sink;
 			} else if (!(this._flags & D_MULTI)) {
-				// SINGLE → MULTI
 				const set = new Set<any>();
 				set.add(this._output);
 				set.add(sink);
@@ -367,7 +350,6 @@ export class DerivedImpl<T> {
 				(this._output as Set<any>).add(sink);
 			}
 
-			// Send START with talkback — talkback(DATA) returns current cached value
 			sink(START, (t: number) => {
 				if (t === DATA) sink(DATA, this._cachedValue);
 				if (t === END) {
@@ -376,24 +358,18 @@ export class DerivedImpl<T> {
 						const set = this._output as Set<any>;
 						set.delete(sink);
 						if (set.size === 1) {
-							// MULTI → SINGLE
 							this._output = set.values().next().value;
 							this._flags &= ~D_MULTI;
 						} else if (set.size === 0) {
-							// MULTI → STANDALONE
 							this._output = null;
 							this._flags |= D_STANDALONE;
 						}
 					} else if (this._output === sink) {
-						// SINGLE → STANDALONE
 						this._output = null;
 						this._flags |= D_STANDALONE;
 					}
-					// Deps stay connected (STANDALONE mode)
 				}
 			});
-
-			// No upstream connection needed — already connected (STANDALONE or lazy)
 		}
 	}
 }
@@ -403,7 +379,6 @@ export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOpti
 }
 
 export namespace derived {
-	/** Identity-mode derived: forwards dep value directly, no compute fn on updates. */
 	export function from<T>(dep: Store<T>, opts?: StoreOptions<T>): Store<T> {
 		return new DerivedImpl<T>([dep as Store<unknown>], () => dep.get() as any, opts, true) as any;
 	}

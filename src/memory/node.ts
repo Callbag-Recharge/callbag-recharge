@@ -27,7 +27,7 @@ import type {
 let nodeCounter = 0;
 
 function generateId(): string {
-	return `mem-${++nodeCounter}-${Date.now().toString(36)}`;
+	return `mem-${++nodeCounter}`;
 }
 
 export function memoryNode<T>(initialContent: T, opts?: MemoryNodeOptions): MemoryNodeInterface<T> {
