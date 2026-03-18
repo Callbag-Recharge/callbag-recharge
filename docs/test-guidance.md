@@ -67,6 +67,11 @@ src/__tests__/
 │   ├── reactiveIndex.test.ts         — add/remove/update, reactive select/keys/size, lifecycle
 │   ├── pubsub.test.ts                — publish/subscribe, multi-topic, reactive effects, destroy
 │   └── nodeV0.test.ts                — id/version/snapshot for all data structures
+├── orchestrate/   ← Level 3E scheduling primitive tests
+│   ├── cron.test.ts                  — cron parser validation, field parsing, matching
+│   ├── dag.test.ts                   — acyclicity validation, topological sort, cycle detection
+│   ├── fromCron.test.ts              — cron source emission, timing, cleanup, fake timers
+│   └── taskState.test.ts             — run tracking, status transitions, snapshot, lifecycle
 └── integrations/
     └── interop.test.ts                 — external callbag operator compatibility
 ```

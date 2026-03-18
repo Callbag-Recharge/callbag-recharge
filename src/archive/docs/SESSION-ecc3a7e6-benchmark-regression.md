@@ -154,7 +154,8 @@ The team used a systematic approach:
 
 **Step 1: Confirm regression with full benchmark suite**
 ```bash
-npx tsx bench
+npm run bench:core
+# (Historically: `npx tsx bench` against root bench.ts.)
 # Collected numbers, confirmed 4-8% slower across the board
 ```
 

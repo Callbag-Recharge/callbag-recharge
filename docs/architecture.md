@@ -66,6 +66,12 @@ src/
 │   ├── node.ts      ← memoryNode: content + meta + reactive score
 │   ├── collection.ts← collection: bounded container with decay-scored eviction
 │   └── decay.ts     ← scoring: recency decay, importance, frequency
+├── orchestrate/     ← Level 3E scheduling — import from core + data
+│   ├── cron.ts      ← minimal cron expression parser + matcher (internal)
+│   ├── dag.ts       ← acyclicity validation + Inspector graph registration
+│   ├── fromCron.ts  ← producer that emits on a cron schedule
+│   ├── taskState.ts ← reactive task execution tracker (status, duration, error)
+│   └── types.ts     ← TaskState, TaskMeta, TaskStatus types
 └── index.ts         ← public API barrel
 ```
 
@@ -75,6 +81,7 @@ src/
 - `utils/` never imports from `extra/`, `data/`, or `memory/` (except `reactiveEviction.ts` which imports `core/effect`)
 - `data/` imports from `core/` and `utils/` only
 - `memory/` imports from `core/`, `utils/`, and `data/`
+- `orchestrate/` imports from `core/` and `data/` only
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
 ---
@@ -824,4 +831,84 @@ The `tagIndex` property is exposed on the `Collection` interface, enabling react
 const col = collection<string>();
 col.add("doc", { id: "d1", tags: ["important"] });
 col.tagIndex.select("important").get(); // Set{"d1"}
+```
+
+---
+
+## 23. Orchestrate — Scheduling Primitives (Level 3E)
+
+`src/orchestrate/` provides lightweight scheduling primitives that compose with existing core primitives to build DAG-based task pipelines (think "Airflow in TypeScript"). No new scheduling engine — `derived()` + `effect()` with explicit deps IS the DAG executor (diamond resolution guarantees correct ordering).
+
+### fromCron (`orchestrate/fromCron.ts`)
+
+Tier 2 source (producer-based) that emits a `Date` on each cron schedule match. Uses standard 5-field cron expressions (`minute hour day-of-month month day-of-week`).
+
+```ts
+import { fromCron } from 'callbag-recharge/orchestrate'
+
+const daily = fromCron('0 9 * * *');        // 9am daily
+const everyFive = fromCron('*/5 * * * *');  // every 5 minutes
+const weekdays = fromCron('0 9 * * 1-5');   // 9am Mon-Fri
+```
+
+**Implementation:** Checks every `tickMs` (default 60s) via `setInterval`. Tracks last-fired minute key to prevent double-fires. Lazy start (callbag protocol) — no timers until first subscriber.
+
+**Cron parser:** Built-in zero-dependency parser (`orchestrate/cron.ts`) supporting `*`, numbers, ranges (`1-5`), lists (`1,3,5`), and steps (`*/5`, `1-10/2`). Validates at construction time. Does not support named months/days or non-standard extensions (`L`, `W`, `#`).
+
+**Timezone:** Uses `new Date()` (local time). For timezone-aware scheduling, compose with your preferred date library (e.g., luxon, date-fns-tz) using `producer()` directly.
+
+### taskState (`orchestrate/taskState.ts`)
+
+Reactive task execution tracker built on `state()`. Wraps any sync/async function with automatic status, duration, and error tracking.
+
+```ts
+import { taskState } from 'callbag-recharge/orchestrate'
+
+const task = taskState<Result>({ id: 'fetch-bank' });
+await task.run(() => plaid.sync());
+
+task.get().status   // 'success'
+task.get().duration // ms
+task.get().runCount // 1
+```
+
+**TaskMeta shape:**
+```ts
+{ status: 'idle' | 'running' | 'success' | 'error',
+  result?: T, error?: unknown,
+  lastRun?: number, duration?: number, runCount: number }
+```
+
+**Reactive:** Built on `state({ equals: () => false })` — every transition emits. Compose with `effect()` to react to status changes.
+
+**NodeV0:** Implements `id` + `version` + `snapshot()`. Version increments on run completion or reset. `taskState.from(snapshot)` restores from serialized state (running tasks are marked as errored on restore).
+
+### dag (`orchestrate/dag.ts`)
+
+Optional sugar for declaring task DAGs. Validates acyclicity via Kahn's algorithm (topological sort) and registers edges with Inspector for graph visualization. Does NOT create new nodes — it validates and annotates existing ones.
+
+```ts
+import { dag } from 'callbag-recharge/orchestrate'
+
+const { order, size } = dag([
+  { store: daily, name: 'cron' },
+  { store: fetchBank, deps: [daily], name: 'fetch-bank' },
+  { store: fetchCards, deps: [daily], name: 'fetch-cards' },
+  { store: aggregate, deps: [fetchBank, fetchCards], name: 'aggregate' },
+]);
+// Throws if a cycle is detected
+// order = topologically sorted stores (deps before dependents)
+```
+
+### Composing the Airflow pattern
+
+The DAG is not new code — `derived()` and `effect()` with explicit deps provide the execution graph with diamond resolution:
+
+```ts
+const daily = fromCron('0 9 * * *');
+const fetchBank = pipe(daily, exhaustMap(() => fromPromise(plaid.sync())), retry(3));
+const fetchCards = pipe(daily, exhaustMap(() => fromPromise(stripe.charges())), retry(3));
+const aggregate = derived([fetchBank, fetchCards], (bank, cards) => merge(bank, cards));
+const alerts = pipe(aggregate, filter(txns => txns.some(t => t.amount > 500)));
+effect([alerts], txns => telegram.send(format(txns)));
 ```

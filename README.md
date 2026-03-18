@@ -155,7 +155,7 @@ store.source(0, (type, data) => {
 ## Documentation
 
 - [Architecture](./docs/architecture.md) — layers, design principles, how each primitive works
-- [Benchmarks](./docs/benchmarks.md) — head-to-head comparison vs Preact Signals and raw Callbag
+- [Benchmarks](./docs/benchmarks.md) — Vitest + tinybench (`npm run bench`, `bench:core`, `bench:compare`, `bench:data`)
 - [Optimizations](./docs/optimizations.md) — techniques to close performance gaps
 
 ---

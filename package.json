@@ -47,6 +47,26 @@
 				"default": "./dist/memory/index.cjs"
 			}
 		},
+		"./data": {
+			"import": {
+				"types": "./dist/data/index.d.ts",
+				"default": "./dist/data/index.js"
+			},
+			"require": {
+				"types": "./dist/data/index.d.cts",
+				"default": "./dist/data/index.cjs"
+			}
+		},
+		"./orchestrate": {
+			"import": {
+				"types": "./dist/orchestrate/index.d.ts",
+				"default": "./dist/orchestrate/index.js"
+			},
+			"require": {
+				"types": "./dist/orchestrate/index.d.cts",
+				"default": "./dist/orchestrate/index.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",
@@ -65,6 +85,10 @@
 		"build": "tsup",
 		"test": "vitest run",
 		"test:watch": "vitest",
+		"bench": "vitest bench",
+		"bench:core": "vitest bench src/__bench__/core.bench.ts",
+		"bench:compare": "vitest bench src/__bench__/compare.bench.ts",
+		"bench:data": "vitest bench src/__bench__/data-algorithms.bench.ts",
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",

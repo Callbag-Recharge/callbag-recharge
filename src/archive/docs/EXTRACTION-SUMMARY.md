@@ -91,6 +91,7 @@ Re-ran benchmarks and found 5–8% regression. Investigation uncovered three des
 - Benchmarks as design validation tools
 - 3 rejected alternatives
 - Key insight: regressions indicate contract violations, not just performance
+- *(2026-03: regression confirmation step now `npm run bench:core`; was `npx tsx bench`.)*
 
 ### 6. SESSION-8693d636-v4-output-slot.md (301 lines)
 **Date:** March 16, 2026
@@ -150,6 +151,7 @@ Comprehensive benchmark suite comparing Recharge to Preact Signals, SolidJS, RxJ
 - Future optimization opportunities identified but not pursued
 - 4 rejected alternatives
 - Key insight: performance is table stakes, but correctness is non-negotiable
+- *(2026-03: `bench.ts` → Vitest `src/__bench__/core.bench.ts` / `compare.bench.ts`; `npm run bench`.)*
 
 ### 9. DESIGN-ARCHIVE-INDEX.md (178 lines)
 

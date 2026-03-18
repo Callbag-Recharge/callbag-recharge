@@ -55,6 +55,7 @@ export default defineConfig({
 		"src/utils/index.ts",
 		"src/data/index.ts",
 		"src/memory/index.ts",
+		"src/orchestrate/index.ts",
 	],
 	format: ["esm", "cjs"],
 	dts: true,

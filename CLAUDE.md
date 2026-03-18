@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lint:** `npm run lint` (biome check)
 - **Lint fix:** `npm run lint:fix`
 - **Format:** `npm run format`
+- **Benchmarks:** `npm run bench` (Vitest + tinybench). Focused: `bench:core`, `bench:compare`, `bench:data`
 
 ## Architecture
 

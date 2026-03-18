@@ -110,6 +110,37 @@ Many of the original `callbag-*` repos (e.g., `callbag-take-until`, `callbag-deb
 
 ---
 
+## Orchestrate (`src/orchestrate/`) — Level 3E Scheduling
+
+Lightweight scheduling primitives that compose with core to build DAG-based task pipelines. Import from `callbag-recharge/orchestrate`.
+
+### Sources
+
+| Module | Description |
+|--------|-------------|
+| `fromCron(expr, opts?)` | Tier 2 source that emits a `Date` on each cron schedule match. 5-field standard cron. Built-in parser (no external deps). |
+
+### Task tracking
+
+| Module | Description |
+|--------|-------------|
+| `taskState<T>(opts?)` | Reactive task execution tracker. `run(fn)` wraps sync/async with auto status/duration/error tracking. NodeV0 serializable. |
+
+### DAG validation
+
+| Module | Description |
+|--------|-------------|
+| `dag(nodes)` | Validates acyclicity (Kahn's algorithm), registers edges with Inspector. Returns topological order. |
+
+### Utilities (exported for advanced use)
+
+| Module | Description |
+|--------|-------------|
+| `parseCron(expr)` | Parse a 5-field cron expression into a `CronSchedule` object |
+| `matchesCron(schedule, date)` | Check if a `Date` matches a parsed cron schedule |
+
+---
+
 ## Roadmap: Patterns (`src/patterns/`)
 
 Patterns are composed recipes using primitives + extras. Each solves a specific problem in ~20-50 lines. Higher-level than extras, still generic and reusable.

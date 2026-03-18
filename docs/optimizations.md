@@ -216,18 +216,98 @@ Operator action closures (`emit`, `signal`, `seed`) check a closure-local `compl
 
 ## Potential optimizations
 
-These are not yet implemented but represent concrete opportunities for improvement.
+These are not yet implemented but represent concrete opportunities for improvement. Ordered by estimated impact on the Vitest/tinybench comparative benchmarks (where Preact currently leads on most scenarios).
 
-### 1. Compile-time Inspector removal
+### 1. Pack `_status` into `_flags` as integer bits
+
+**Status:** Not implemented. **Impact:** High (hot path — every signal write). **Scenarios:** All.
+
+Every signal dispatch writes `this._status = "DIRTY"` / `"SETTLED"` / `"RESOLVED"` — a string property write. V8 stores strings as heap pointers; integer comparisons and assignments are register-only. Pack status into 3 bits of `_flags` (8 possible states covers all 6 `NodeStatus` values). Replace all `_status` reads/writes with bitwise ops.
+
+```ts
+// Before (string write, heap pointer):
+this._status = "DIRTY";
+
+// After (integer bitwise, register-only):
+this._flags = (this._flags & ~STATUS_MASK) | STATUS_DIRTY;
+```
+
+Expose `_status` as a getter for Inspector compatibility. The hot path (signal dispatch) never calls the getter — it uses the flags directly.
+
+**Why this matters now:** The Vitest bench numbers show Recharge losing on effect re-run (~2.7x), operator (~1.7x), and producer+subscriber (~1.8x). All of these hit `_status` writes on every signal. Two writes per set (DIRTY + SETTLED) × subscribers × depth = significant overhead that Preact avoids entirely (it uses integer bitfields for everything).
+
+### 2. Skip DIRTY dispatch in unbatched single-subscriber paths
+
+**Status:** Not implemented. **Impact:** High (cuts dispatch calls in half for common case). **Scenarios:** State write, effect re-run, producer, operator, fan-out.
+
+When not batching, `state.set()` dispatches DIRTY then immediately dispatches DATA — two function calls through the output slot per subscriber. The DIRTY signal exists to support batching (defer DATA while graph prepares) and diamond resolution (count dirty deps before recomputing). In the unbatched, single-dep case, DIRTY is pure overhead — DATA follows synchronously.
+
+**Approach:** Add a fast path in `state.set()` (and `producer.emit()`): when `!isBatching()` and the downstream is a known single-dep node, skip the DIRTY dispatch and send DATA directly. The downstream handler would need to handle "DATA without prior DIRTY" (which it already does for raw callbag compat, §9 in architecture.md).
+
+**Tradeoff:** Effects with single deps already handle this via the raw-callbag compat path. The question is whether intermediate derived/operator nodes can safely skip the DIRTY→DATA dance. For single-dep derived, the answer is yes — `_connectSingleDep` already has a `dirty` flag that handles both paths. The optimization would be: don't dispatch DIRTY from the source, let the DATA handler do the work.
+
+**Estimated gain:** ~30-40% on effect re-run, ~20% on simple state→derived→subscriber chains. Won't help diamonds (multi-dep nodes need DIRTY counting).
+
+### 3. Reduce bound method count in ProducerImpl
+
+**Status:** Not implemented. **Impact:** Medium (construction cost + memory). **Scenarios:** Store creation, memory per store.
+
+ProducerImpl constructor binds 5 methods: `source`, `emit`, `signal`, `complete`, `error`. StateImpl adds `set`. That's 6 function allocations per state() creation (~48 bytes per store on V8).
+
+In practice, only `source` and `emit` are commonly detached (callbag interop, destructuring). `signal`, `complete`, and `error` are rarely used detached — they're called internally or via `actions` in producer `fn`. Bind only `source` eagerly; make `emit` lazy-bound on first access or use `.call()` at the few internal sites.
+
+**Approach A (conservative):** Bind only `source` + `emit` + `set` (3 instead of 6). Document that `signal`/`complete`/`error` must be called on the instance.
+
+**Approach B (aggressive):** Bind only `source`. Internal `_start()` already passes `this` as actions. External users who destructure `{ emit }` from a producer are rare — they can use `prod.emit.bind(prod)`.
+
+**Estimated gain:** ~25% faster store creation, ~30 bytes/store saved (3 fewer bound methods × ~16 bytes each).
+
+### 4. Inline `Object.is` in state.set() equality check
+
+**Status:** Not implemented. **Impact:** Medium (state write hot path). **Scenarios:** State write (no subscribers), state write (with subscribers).
+
+`state.set()` calls `this._eqFn!(this._value, value)` — an indirect function call through a stored reference. For the default case (99% of state stores), this is `Object.is`. V8 cannot inline through an indirect call.
+
+```ts
+// Before (indirect call, ~3-5ns):
+if (this._value !== undefined && this._eqFn!(this._value as T, value)) return;
+
+// After (direct call, ~1ns):
+if (this._value !== undefined && Object.is(this._value, value)) return;
+```
+
+**Approach:** Add a `P_DEFAULT_EQ` flag to `_flags` (set when `equals` is `Object.is`). Fast path uses `Object.is` directly; custom equality falls through to `_eqFn`.
+
+**Estimated gain:** ~15-20% on state write (no subscribers). The equality check is the dominant cost when `_output === null`.
+
+### 5. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization).
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
+### 6. Array-backed output slot for fan-out
+
+**Status:** Not implemented. **Impact:** Medium for fan-out specifically. **Scenarios:** Fan-out (10 subscribers).
+
+The MULTI output slot uses `Set<any>`. Set iteration allocates an iterator object on every dispatch. For fan-out (10+ subscribers), this is 10+ iterator allocations per set() call (DIRTY dispatch + DATA dispatch).
+
+**Approach:** Use an array instead of Set for MULTI mode. Array iteration with a `for` loop is ~2-3x faster than Set iteration. Add/remove use `indexOf` + splice (O(n) but subscriber count is typically small). The output slot transitions become: `null → fn → Array`.
+
+**Estimated gain:** ~30-40% on fan-out benchmarks. Negligible for 1-2 subscribers (stays in SINGLE mode).
+
+### 7. Elide STANDALONE-to-SINGLE transition overhead in derived.source()
+
+**Status:** Not implemented. **Impact:** Low-medium. **Scenarios:** Diamond, derived after dep change.
+
+When a derived node transitions from STANDALONE to SINGLE (first external subscriber), `source()` clears `D_STANDALONE` and sets `_output = sink`. But the STANDALONE → SINGLE transition also means the dep connections were already active and the cached value is already current. The talkback closure still checks all the flags on every unsubscribe.
+
+**Approach:** Simplify the talkback closure for the common case (SINGLE → STANDALONE revert). Avoid the flag dance when the output slot goes back to null — just null the output and set STANDALONE in one atomic step.
+
 ---
 
 <details>
-<summary><strong>## Not implemented optimizations (click to expand)</strong></summary>
+<summary><strong>## Not implementing (click to expand)</strong></summary>
 
 ### ~~1. Memory footprint reduction~~
 
@@ -236,12 +316,14 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 - **~~Lazy method binding:~~** V8 hidden class transitions from getter→own-property (via `defineProperty` on first access) cause inline cache invalidation. All bound methods (`source`, `set`, `emit`, `signal`, `complete`, `error`) are legitimately detached in callbag interop and destructuring patterns. Savings (~40-50 bytes/instance) don't offset the hidden class pollution and first-access latency.
 - **~~WeakRef-free Inspector:~~** `FinalizationRegistry` alone cannot support `graph()` iteration — it only fires callbacks on GC, it cannot query "what's alive". The only alternative (strong refs + registry cleanup) is more complex with no meaningful memory reduction. Inspector is disabled in production anyway, so the ~60-80 bytes/store WeakRef cost only applies in dev.
 
-### ~~2. Diamond pattern optimization~~
+### ~~2. Diamond pattern — topological sort / output bypass~~
 
-**Not implementing.** The 1.4x gap vs Preact (7.2M vs 10M ops/sec) is inherent to the two-phase push protocol and STANDALONE connections. The remaining sub-items provide negligible gains:
+**Not implementing.** The diamond gap vs Preact is inherent to the two-phase push protocol. Preact uses lazy pull — `computed` only recomputes when `.value` is accessed. Recharge uses eager push — DIRTY propagates immediately through all paths, then DATA follows. For a diamond A→B,C→D, Recharge sends 6 signals (DIRTY×3 + DATA×3); Preact marks one dirty flag and pulls on read. This is an architectural difference, not something fixable with micro-optimizations:
 
-- **~~Output slot bypass for single-subscriber chains:~~** The current SINGLE mode already IS the bypass — `_dispatch` checks a `P_MULTI` bitflag (~1-2 CPU cycles) then calls the function directly. V8's JIT monomorphizes this. Adding runtime slot morphing for subscriber add/remove would introduce race condition complexity for immeasurable gains (<5%).
-- **~~Topological sort for batch drain:~~** The dirty-bitmask already handles diamond resolution correctly — multi-dep derived nodes wait for ALL deps to resolve before recomputing regardless of drain order. FIFO and topological produce the same result (no redundant recomputes). Topological sort would add O(n log n) + graph building overhead that exceeds any theoretical benefit.
+- **~~Output slot bypass for single-subscriber chains:~~** The current SINGLE mode already IS the bypass — `_dispatch` checks a `P_MULTI` bitflag (~1-2 CPU cycles) then calls the function directly. V8's JIT monomorphizes this.
+- **~~Topological sort for batch drain:~~** The dirty-bitmask already handles diamond resolution correctly. FIFO and topological produce the same result (no redundant recomputes).
+
+**Note:** Optimizations #1 (integer status) and #2 (skip DIRTY) above will improve diamond throughput as side effects, but the fundamental gap comes from push-vs-pull architecture. Accept this tradeoff — push gives us real-time effects and predictable timing, which pull cannot.
 
 ### ~~3. Handler closure fusion for single-dep chains~~
 
@@ -275,7 +357,12 @@ A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that remove
 | Effect pure closure (not class) | Built-in | ~20-30% faster re-run vs class | Effects |
 | State write fast path | Built-in | Inlined `set()` — 9.8M→47M ops/sec (now 1.3x faster than Preact) | State-heavy apps |
 | `derived.from()` | Built-in | Identity transform, skips `fn()` on recompute | Passthrough, dedup, observation |
+| Integer `_status` in `_flags` | Potential | Eliminates string writes on every signal dispatch | All hot paths |
+| Skip DIRTY in unbatched single-dep | Potential | ~30-40% on effect re-run, ~20% on simple chains | Unbatched single-dep paths |
+| Reduce bound methods (6→3) | Potential | ~25% faster store creation, ~30 bytes/store | Store-heavy apps |
+| Inline `Object.is` in state.set() | Potential | ~15-20% on state write (no subscribers) | State-heavy apps |
 | Compile-time Inspector removal | Potential | Zero overhead + smaller bundle | Production builds |
+| Array-backed fan-out output slot | Potential | ~30-40% on fan-out | 3+ subscriber nodes |
 | ~~Memory footprint reduction~~ | Not implementing | ~6x gap is structural; lazy binding and WeakRef-free don't justify complexity | — |
-| ~~Diamond pattern optimization~~ | Not implementing | 1.4x gap is inherent; output bypass and topo sort provide negligible gains | — |
+| ~~Diamond pattern — topo sort / output bypass~~ | Not implementing | Gap is architectural (push vs pull); micro-opts won't close it | — |
 | ~~Handler closure fusion~~ | Not implementing | Superseded by `pipeRaw()` | — |

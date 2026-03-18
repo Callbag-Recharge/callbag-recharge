@@ -246,7 +246,19 @@ Worth every byte.
 
 - `docs/benchmarks.md` — Full benchmark suite and comparison to Preact/SolidJS
 - `docs/optimizations.md` — Updated with v4 actual measurements and scaling characteristics
-- `bench.ts` — Expanded to include diamond, many-subscriber, and many-dep benchmarks
+- `bench.ts` — Expanded to include diamond, many-subscriber, and many-dep benchmarks (superseded — see below)
 - `src/__tests__/core/performance.test.ts` — Added performance regression guards
+
+### Update (2026-03) — Vitest benchmarks
+
+The standalone `bench.ts` / `bench-compare.ts` harnesses are replaced by **Vitest bench** (tinybench):
+
+| Old | New |
+|-----|-----|
+| `bench.ts` | `src/__bench__/core.bench.ts` — run `npm run bench:core` |
+| `bench-compare.ts` | `src/__bench__/compare.bench.ts` — run `npm run bench:compare` |
+| — | `src/__bench__/data-algorithms.bench.ts` — `npm run bench:data` |
+
+Full suite: `npm run bench`. See [docs/benchmarks.md](../../../docs/benchmarks.md).
 
 ---END SESSION---

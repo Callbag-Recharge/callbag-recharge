@@ -61,7 +61,7 @@ verifiable.cid;                // computed on access, not on set()
 | 4 | Refactor `collection` to use `reactiveIndex` internally | Unifies scoring | 1 day |
 | 5 | NodeV0 (`store.snapshot()` / `state.from()`) | Serialization without breaking anything | 1-2 days |
 | 6 | `pubsub` | Thin, ~30 lines | half day |
-| 7 | `fromCron` + `taskState` | Enables personal airflow use case | 1 day |
+| 7 | `fromCron` + `taskState` + `dag` | Enables personal airflow use case | 1 day |
 
 ### Module Structure
 
@@ -103,9 +103,9 @@ callbag-recharge/
 ### Orchestration = Existing Primitives + Scheduling
 
 The DAG executor is NOT new code — `derived()` + `effect()` with explicit deps IS the DAG executor (diamond resolution). What's new:
-1. `fromCron(schedule)` — producer wrapping node-cron (~15 lines)
+1. `fromCron(schedule)` — producer with built-in zero-dependency cron parser
 2. `taskState()` — state store with run metadata (lastRun, status, error, duration)
-3. `dag(tasks)` — optional sugar for acyclicity validation + Inspector graph view
+3. `dag(tasks)` — optional sugar for acyclicity validation (Kahn's algorithm) + Inspector graph view
 
 ### The Airflow-in-TypeScript Example
 
