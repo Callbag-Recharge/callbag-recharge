@@ -1,11 +1,11 @@
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * No-op in callbag-recharge — stores are inherently shared (multicast).
- * Multiple subscribers connect to the same store instance.
- * Provided for API compatibility with callbag-basics.
+ * Identity operator for API compatibility — stores are already multicast (shared by reference).
  *
- * Stateless: returns input unchanged. No own state.
+ * @returns `StoreOperator<A, A>` — returns the input store unchanged.
+ *
+ * @category extra
  */
 export function share<A>(): StoreOperator<A, A> {
 	return (input: Store<A>) => input;

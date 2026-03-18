@@ -4,14 +4,15 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Time-windowed buffering. Accumulates upstream values and flushes
- * the buffer every `ms` milliseconds.
+ * Flushes accumulated values every `ms` milliseconds as an array (Tier 2).
  *
- * Stateful: maintains current buffer and last flushed array via producer.
- * get() returns the last flushed array (empty array before first flush).
+ * @param ms - Timer interval for flushes.
  *
- * v3: Tier 2 — each flush starts a new DIRTY+value cycle (autoDirty: true).
- * No equals — each flushed array is a new reference.
+ * @returns `StoreOperator<A, A[]>` — last flushed buffer from `get()`.
+ *
+ * @seeAlso [buffer](/api/buffer)
+ *
+ * @category extra
  */
 export function bufferTime<A>(ms: number): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {

@@ -5,14 +5,13 @@ import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Routes upstream values into sub-stores by key function.
- * Output is a store of Map<K, Store<V>> that updates whenever a new group
- * is created or any group receives a value.
+ * Partitions upstream into a reactive `Map` of per-key stores (Tier 2).
  *
- * Tier 2: each new group or value emission starts a new DIRTY+value cycle.
+ * @param keyFn - Group key for each value.
  *
- * Inner stores complete when the upstream completes. Upstream errors
- * propagate to all inner stores and the outer store.
+ * @returns `StoreOperator<A, Map<K, Store<A>>>`
+ *
+ * @category extra
  */
 export function groupBy<A, K>(keyFn: (value: A) => K): StoreOperator<A, Map<K, Store<A>>> {
 	return (input: Store<A>) => {

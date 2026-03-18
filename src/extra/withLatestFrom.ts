@@ -4,18 +4,13 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * When the source emits, grabs the current values from other stores
- * and passes all values through a combiner function.
+ * On primary source emission, combines with **latest** values from other deps via the trailing combiner (multi-dep Tier 1 hybrid).
  *
- * Tier 2 hybrid: all stores (source + others) are wired as deps, so they
- * participate in diamond resolution and stay connected. However, only
- * the primary source (dep 0) drives emissions — changes to "others" deps
- * alone produce RESOLVED (no re-emission).
+ * @param args - `...otherStores, (primary, ...others) => result` — primary is dep 0.
  *
- * This "primary + secondary deps" pattern ensures:
- * - No diamond glitch: bitmask waits for all deps to settle before computing
- * - No stale reads: others are real deps, always up-to-date
- * - Source-driven semantics: only source changes trigger output
+ * @returns `StoreOperator` — only primary DATA triggers output; other deps alone yield RESOLVED.
+ *
+ * @category extra
  */
 export function withLatestFrom<A, Others extends Store<unknown>[], R>(
 	...args: [

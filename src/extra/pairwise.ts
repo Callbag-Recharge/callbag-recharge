@@ -3,15 +3,11 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Emits [prev, curr] pairs on each upstream change. Requires 2 observed
- * values before emitting the first pair (matches rxjs pairwise semantics).
- * get() returns undefined until the second upstream change arrives.
+ * Emits `[previous, current]` for each upstream value after the first (Tier 1).
  *
- * Stateful: maintains own cached [prev, curr] pair. get() returns the
- * last emitted pair, or undefined before two upstream changes.
+ * @returns `StoreOperator<A, [A, A] | undefined>`
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards all type 3 STATE
- * signals; creates pair and emits on type 1 DATA (after first value is buffered).
+ * @category extra
  */
 export function pairwise<A>(): StoreOperator<A, [A, A] | undefined> {
 	return (input: Store<A>) => {

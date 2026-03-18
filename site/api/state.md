@@ -13,25 +13,25 @@ function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T>
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `initial` | `T` | The initial value of the store. |
-| `opts` | `StoreOptions<T>` | Optional configuration. |
+| `opts` | `StoreOptions&lt;T&gt;` | Optional configuration. |
 
 ### StoreOptions
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `name` | `string` | `undefined` | Debug name for Inspector. |
-| `equals` | `(a: T, b: T) => boolean` | `Object.is` | Equality function to prevent redundant emissions. |
+| `equals` | `(a: T, b: T) =&gt; boolean` | `Object.is` | Equality function to prevent redundant emissions. |
 
 ## Returns
 
-`WritableStore<T>` — a store with the following API:
+`WritableStore&lt;T&gt;` — a store with the following API:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `get()` | `() => T` | Returns the current value. |
-| `set(value)` | `(value: T) => void` | Sets a new value and notifies subscribers. |
-| `update(fn)` | `(fn: (current: T) => T) => void` | Updates the value using a function of the current value. |
-| `source` | callbag | The underlying callbag source for subscriptions. |
+| `get()` | `() =&gt; T` | Returns the current value. |
+| `set(value)` | `(value: T) =&gt; void` | Sets a new value and notifies subscribers. |
+| `update(fn)` | `(fn: (current: T) =&gt; T) =&gt; void` | Updates the value using a function of the current value. |
+| `source` | `callbag` | The underlying callbag source for subscriptions. |
 
 ## Basic Usage
 
@@ -83,9 +83,9 @@ const b = state(2);
 const sum = derived([a, b], () => a.get() + b.get());
 
 batch(() => {
-  a.set(10);
-  b.set(20);
-});
+    a.set(10);
+    b.set(20);
+  });
 // sum recomputes only once, after the batch completes
 sum.get(); // 30
 ```

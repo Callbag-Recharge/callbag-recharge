@@ -3,14 +3,14 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator, StoreOptions } from "../core/types";
 
 /**
- * Provides a fallback value when the upstream store is undefined.
- * Once upstream emits a non-undefined value, that value is used instead.
+ * Uses `initial` whenever upstream is `undefined`; once upstream is defined, passes it through (Tier 1).
  *
- * Stateful: maintains value via operator()'s cache. get() returns the
- * upstream value if non-undefined, otherwise the initial fallback.
+ * @param initial - Fallback value for `undefined` upstream.
+ * @param opts - Optional `StoreOptions`.
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards all type 3
- * STATE signals; on type 1 DATA applies fallback logic and emits.
+ * @returns `StoreOperator<A | undefined, A>`
+ *
+ * @category extra
  */
 export function startWith<A>(initial: A, opts?: StoreOptions): StoreOperator<A | undefined, A> {
 	return (input: Store<A | undefined>) => {

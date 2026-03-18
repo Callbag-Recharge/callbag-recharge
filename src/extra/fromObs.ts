@@ -10,15 +10,13 @@ interface Observable<T> {
 }
 
 /**
- * Creates a source from an Observable (or any object with a
- * `.subscribe({ next, error, complete })` method).
+ * Bridges a minimal Observable shape (`subscribe({ next, error, complete })`) into a store (Tier 2).
  *
- * Stateful: maintains last value via producer. get() returns the last
- * emitted value, or undefined before first emission.
+ * @param observable - Any object with that subscribe API (e.g. RxJS Observable).
  *
- * v3: Tier 2 Producer — event source, no upstream deps. Each next()
- * emission sends DIRTY on type 3 then value on type 1. Observable
- * error and complete are forwarded to downstream subscribers.
+ * @returns `ProducerStore<T>`
+ *
+ * @category extra
  */
 export function fromObs<T>(observable: Observable<T>): ProducerStore<T> {
 	return producer<T>(({ emit, complete, error }) => {

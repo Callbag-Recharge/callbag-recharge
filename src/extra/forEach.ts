@@ -2,12 +2,15 @@ import type { Store } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Subscribes to a store and calls `cb` for every value change.
- * Returns an unsubscribe function. Works as a curried sink: `forEach(cb)(store)`.
+ * Curried sink: `forEach(cb)(store)` runs `cb` on each DATA after subscribe; returns unsubscribe.
  *
- * Stateless: does not produce a store. Pure sink — delegates to subscribe().
+ * @param cb - Side effect per value.
  *
- * v3: receives type 1 DATA only via subscribe(). No DIRTY awareness.
+ * @returns Function taking `Store<T>` and returning `() => void` unsubscribe.
+ *
+ * @seeAlso [subscribe](/api/subscribe)
+ *
+ * @category extra
  */
 export function forEach<T>(cb: (value: T) => void): (store: Store<T>) => () => void {
 	return (store) => {

@@ -3,15 +3,11 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Emits only the final value from upstream when it completes.
- * If upstream completes without emitting, sends END with no DATA.
+ * Emits the last value **when upstream completes** (no emission until END).
  *
- * Stateful: buffers the most recent upstream value. get() returns undefined
- * until upstream completes, then the last value (frozen after completion).
+ * @returns `StoreOperator<A, A | undefined>` — Tier 1.
  *
- * v3: Tier 1 — uses operator() with single dep. Suppresses all STATE and
- * DATA during buffering. On upstream END, emits the buffered value (if any)
- * then completes.
+ * @category extra
  */
 export function last<A>(): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

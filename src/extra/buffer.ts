@@ -5,20 +5,17 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Accumulates upstream values into arrays. When the notifier emits,
- * the buffered array is flushed downstream and a new buffer starts.
+ * Collects upstream values into arrays, flushing each buffer when `notifier` emits (Tier 2).
  *
- * Stateful: maintains current buffer and last flushed array via producer.
- * get() returns the last flushed array (empty array before first flush).
+ * @param notifier - Any store whose emissions trigger a flush.
  *
- * v3: Tier 2 — each flush starts a new DIRTY+value cycle (autoDirty: true).
- * Notifier is subscribed via raw callbag for END detection.
+ * @returns `StoreOperator<A, A[]>` — `get()` returns last flushed array (empty before first flush).
  *
- * Error/completion semantics:
- * - Upstream error → forward error, discard buffer
- * - Upstream completion → flush remaining buffer (if any), then complete
- * - Notifier error → forward error, discard buffer
- * - Notifier completion → flush remaining buffer (if any), then complete
+ * @remarks **End:** Upstream or notifier completion flushes remaining items when applicable.
+ *
+ * @seeAlso [bufferCount](/api/bufferCount), [bufferTime](/api/bufferTime)
+ *
+ * @category extra
  */
 export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {

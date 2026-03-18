@@ -4,21 +4,6 @@ import { END, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import type { BackoffStrategy } from "../utils/backoff";
 
-/**
- * Re-subscribes to the input source on error (END with error).
- *
- * Overloads:
- *   retry(3)                           — instant retry, up to 3 times (backward-compatible)
- *   retry({ count: 5, delay: exp() })  — 5 retries with backoff delay
- *   retry({ delay: exp(), while: fn }) — unlimited retries with condition + backoff
- *
- * Stateful: maintains last value via producer. get() returns input's initial
- * value before first emission, then the latest value from the source.
- *
- * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
- * DIRTY+value cycle. No built-in dedup. Uses raw callbag for END
- * detection (error triggers reconnect, clean completion propagates).
- */
 export interface RetryOptions {
 	/** Maximum number of retries. Default: Infinity when delay is set. */
 	count?: number;
@@ -28,6 +13,22 @@ export interface RetryOptions {
 	while?: (error: unknown) => boolean;
 }
 
+/**
+ * Re-subscribes to the input store after errors, with optional count limit and backoff.
+ *
+ * @param config - Shorthand `number` (max retries) or `{ count, delay, while }`.
+ *
+ * @returns `StoreOperator<A, A>` — Tier 2; clean completion ends retries.
+ *
+ * @optionsType RetryOptions
+ * @option count | number | varies | Max retries; with `delay`, default is unbounded unless set.
+ * @option delay | BackoffStrategy | undefined | Milliseconds between attempts; `null` from strategy stops.
+ * @option while | (err) => boolean | undefined | Retry only when predicate holds.
+ *
+ * @seeAlso [rescue](/api/rescue), [repeat](/api/repeat)
+ *
+ * @category extra
+ */
 export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 	const opts: RetryOptions = typeof config === "number" ? { count: config } : config;
 

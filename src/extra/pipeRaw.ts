@@ -1,15 +1,3 @@
-/**
- * pipeRaw() fuses all transform functions into a single operator() store
- * for ~2x throughput. SKIP sentinel provides filter semantics in pipeRaw.
- *
- * Stateful: returns a store (backed by operator()).
- *
- * v3: Tier 1 — uses operator() with single dep. Forwards type 3 STATE
- * signals; on type 1 DATA applies all fns sequentially, emitting the
- * result or sending RESOLVED when SKIP is returned. Pull-based get()
- * when disconnected re-evaluates the pipeline.
- */
-
 import { operator } from "../core/operator";
 import { DATA, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
@@ -18,6 +6,7 @@ import type { Store } from "../core/types";
 // SKIP sentinel + pipeRaw — fused pipe with a single operator store
 // ---------------------------------------------------------------------------
 
+/** Returned from a `pipeRaw` step to skip emitting (filter). */
 export const SKIP: unique symbol = Symbol("SKIP");
 
 export function pipeRaw<A, B>(source: Store<A>, f1: (v: A) => B | typeof SKIP): Store<B>;
@@ -41,6 +30,19 @@ export function pipeRaw<A, B, C, D, E>(
 ): Store<E>;
 export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>): Store<unknown>;
 
+/**
+ * Fuses transform functions into **one** `operator()` node (~2× faster than chained `pipe`).
+ * Return `SKIP` from any step to suppress emission (filter semantics).
+ *
+ * @param source - Input store.
+ * @param fns - One or more transforms; use `SKIP` to drop.
+ *
+ * @returns `Store` — Tier 1 single-dep pipeline.
+ *
+ * @seeAlso [pipe](/api/pipe)
+ *
+ * @category extra
+ */
 export function pipeRaw(source: Store<unknown>, ...fns: Array<(v: any) => any>): Store<unknown> {
 	// Shared cache between handler (push) and getter (pull)
 	let cached: unknown;

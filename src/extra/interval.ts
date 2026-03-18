@@ -2,14 +2,13 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a push-based source that emits incrementing integers (0, 1, 2, ...)
- * every `ms` milliseconds.
+ * Emits increasing integers `0, 1, 2, …` every `ms` milliseconds (Tier 2 source).
  *
- * Stateful: maintains counter via producer. get() returns the last emitted
- * integer, or undefined before first tick.
+ * @param ms - Tick interval.
  *
- * v3: Tier 2 Producer — event source, no upstream deps. Each emit sends
- * DIRTY on type 3 before the value on type 1 (autoDirty: true).
+ * @returns `ProducerStore<number>`
+ *
+ * @category extra
  */
 export function interval(ms: number): ProducerStore<number> {
 	return producer<number>(({ emit }) => {

@@ -4,13 +4,13 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Collects all values from a finite source into an array.
- * Emits once — the collected array — when the source completes.
+ * Collects all upstream values into one array, emitted **once** on completion (Tier 2).
  *
- * Tier 2: emits the final array as a single DIRTY+value cycle on completion.
+ * @returns `StoreOperator<A, A[]>` — empty array if upstream completes without DATA.
  *
- * If the source errors, the error is forwarded and no value is emitted.
- * If the source completes without emitting, an empty array is emitted.
+ * @seeAlso [reduce](/api/reduce)
+ *
+ * @category extra
  */
 export function toArray<A>(): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {

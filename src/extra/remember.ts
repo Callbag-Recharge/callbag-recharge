@@ -3,16 +3,11 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Caches the last upstream value and replays it to new subscribers.
- * Cache is cleared when the last sink disconnects (teardown).
+ * Replays the last value to new subscribers; cache clears on last disconnect (`resetOnTeardown`) (Tier 1).
  *
- * Stateful: maintains cached value via operator()'s internal cache.
- * get() returns the last received value. New subscribers receive the
- * cached value immediately via talkback.
+ * @returns `StoreOperator<A, A | undefined>`
  *
- * v3: Tier 1 — uses operator() with single dep. seed() re-reads
- * input.get() on each (re)connect. resetOnTeardown clears cache.
- * Forwards all type 3 STATE signals; updates cache and emits on type 1 DATA.
+ * @category extra
  */
 export function remember<A>(): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

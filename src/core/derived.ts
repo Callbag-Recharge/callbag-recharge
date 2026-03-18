@@ -23,13 +23,13 @@ import {
 	END,
 	endDeferredStart,
 	RESOLVED,
-	SINGLE_DEP,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
+	SINGLE_DEP,
 	START,
 	STATE,
 	STATUS_MASK,
@@ -387,11 +387,67 @@ export class DerivedImpl<T> {
 	}
 }
 
+/**
+ * Creates a computed store from explicit dependencies with diamond-safe dirty tracking.
+ * Fully lazy: connects when subscribed; `get()` pull-computes when disconnected without wiring upstream.
+ *
+ * @param deps - Stores this derived reads from (order defines dep indices for operators).
+ * @param fn - Pure function returning the derived value; called when deps have settled.
+ * @param opts - Optional `name` and `equals` for push-phase memoization (RESOLVED).
+ *
+ * @returns `Store<T>` — read-only store: `get()`, `source()` for subscriptions.
+ *
+ * @optionsType StoreOptions
+ * @option name | string | undefined | Debug name for Inspector.
+ * @option equals | (a: T, b: T) => boolean | undefined | If equal after recompute, skips DATA (sends RESOLVED).
+ *
+ * @remarks **Diamond safety:** Waits for all dirty deps to resolve before one recompute.
+ * @remarks **Disconnect on unsub:** When all subscribers leave, disconnects from deps until next subscription.
+ *
+ * @example
+ * ```ts
+ * import { state, derived } from 'callbag-recharge';
+ *
+ * const a = state(1);
+ * const b = state(2);
+ * const sum = derived([a, b], () => a.get() + b.get());
+ * sum.get(); // 3
+ * ```
+ *
+ * @example Identity passthrough
+ * ```ts
+ * const x = state(1);
+ * const y = derived.from(x);
+ * y.get(); // 1
+ * ```
+ *
+ * @seeAlso [state](./state), [effect](./effect), [pipe](/api/pipe) — operators on stores
+ */
 export function derived<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
 	return new DerivedImpl<T>(deps, fn, opts) as any;
 }
 
 export namespace derived {
+	/**
+	 * Creates a single-dep derived that forwards the dependency’s value (identity mode).
+	 * Skips redundant `fn()` work on updates compared to `derived([dep], () => dep.get())`.
+	 *
+	 * @param dep - The upstream store to mirror.
+	 * @param opts - Optional `name` and `equals`.
+	 *
+	 * @returns `Store<T>` — same shape as `derived()`.
+	 *
+	 * @example
+	 * ```ts
+	 * import { state, derived } from 'callbag-recharge';
+	 *
+	 * const x = state(1);
+	 * const y = derived.from(x);
+	 * y.get(); // 1
+	 * ```
+	 *
+	 * @seeAlso [derived](/api/derived)
+	 */
 	export function from<T>(dep: Store<T>, opts?: StoreOptions<T>): Store<T> {
 		return new DerivedImpl<T>([dep as Store<unknown>], () => dep.get() as any, opts, true) as any;
 	}

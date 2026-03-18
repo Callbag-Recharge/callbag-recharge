@@ -13,6 +13,32 @@
 import { beginDeferredStart, END, endDeferredStart, START } from "./protocol";
 import type { Store } from "./types";
 
+/**
+ * Subscribes to a store’s DATA emissions with previous-value tracking. Returns an unsubscribe function.
+ * Does not invoke the callback for the current value at subscribe time (Rx-style); only subsequent changes.
+ *
+ * @param store - The `Store<T>` to listen to.
+ * @param cb - Called with `(nextValue, previousValue)` on each DATA after subscribe.
+ * @param opts - Optional `onEnd` when the stream completes or errors.
+ *
+ * @returns `() => void` — call to unsubscribe (sends END on talkback).
+ *
+ * @remarks **Deferred start:** Works with `beginDeferredStart` / `endDeferredStart` batching used internally.
+ *
+ * @example
+ * ```ts
+ * import { state, subscribe } from 'callbag-recharge';
+ *
+ * const n = state(0);
+ * const stop = subscribe(n, (v, prev) => {
+ *   // prev is undefined on first emission after subscribe
+ * });
+ * n.set(1);
+ * stop();
+ * ```
+ *
+ * @seeAlso [effect](./effect), [forEach](/api/forEach) — simpler value-only subscription
+ */
 export function subscribe<T>(
 	store: Store<T>,
 	cb: (value: T, prev: T | undefined) => void,

@@ -4,15 +4,15 @@ import { END, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Error recovery operator. When the input source errors, calls `fn` with
- * the error and subscribes to the returned fallback source.
+ * On upstream error, switches to a fallback store returned by `fn(error)` (Tier 2).
  *
- * Stateful: maintains last value via producer. get() returns input's initial
- * value before first emission, then the latest value from active source.
+ * @param fn - Maps the error to a replacement `Store<A>`.
  *
- * v3: Tier 2 — dynamic subscription operator. Each emit starts a new
- * DIRTY+value cycle. No built-in dedup. Uses raw callbag for END
- * detection (error vs clean completion).
+ * @returns `StoreOperator<A, A>` — follows primary until error, then the fallback stream.
+ *
+ * @seeAlso [retry](/api/retry)
+ *
+ * @category extra
  */
 export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A> {
 	return (input: Store<A>) => {

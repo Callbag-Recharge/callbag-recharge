@@ -2,12 +2,13 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a source that immediately errors with the given value.
+ * Fails immediately with `err` as the END error payload (Tier 2).
  *
- * Stateful: get() always returns undefined — no values are ever emitted.
+ * @param err - Error value to propagate.
  *
- * v3: Tier 2 Producer — sends END with error payload immediately on start.
- * Tests validate error-path teardown with no preceding DATA.
+ * @returns `ProducerStore<T>`
+ *
+ * @category extra
  */
 export function throwError<T = never>(err: unknown): ProducerStore<T> {
 	return producer<T>(({ error }) => {

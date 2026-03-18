@@ -4,16 +4,18 @@ import { beginDeferredStart, END, endDeferredStart, START } from "../core/protoc
 import type { Store } from "../core/types";
 
 /**
- * Emits from whichever source fires first, then unsubscribes from all others.
- * After the winner is determined, all subsequent values come from that source only.
+ * Mirrors the first source that emits a value; unsubscribes from the losers and follows the winner thereafter.
  *
- * Tier 2: each emit starts a new DIRTY+value cycle (autoDirty: true).
+ * @param sources - Competing `Store<T>` inputs (fair start via deferred wiring).
  *
- * If a source errors before any source emits, the error is forwarded.
- * If all sources complete without emitting, the race completes.
+ * @returns `Store<T | undefined>` — Tier 2.
  *
- * Uses deferStart batching to ensure all sources are wired before any emits,
- * preventing unfair advantage for earlier sources in the array.
+ * @remarks **Empty:** Completes immediately if `sources` is empty.
+ * @remarks **Errors:** If a source errors before any DATA, the error propagates.
+ *
+ * @seeAlso [merge](/api/merge)
+ *
+ * @category extra
  */
 export function race<T>(...sources: Store<T>[]): Store<T | undefined> {
 	const store = producer<T>(

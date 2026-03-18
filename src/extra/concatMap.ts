@@ -4,27 +4,25 @@ import { END, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
-/**
- * Maps each upstream value to an inner store via `fn`, subscribing sequentially.
- * New outer values are queued while an inner is active; the next queued value is
- * processed when the current inner completes (sends END).
- *
- * v5 (Option D3): Purely reactive — does NOT eagerly evaluate fn(outer.get()).
- * Inner subscription is only created when outer emits. get() returns `initial`
- * (if provided) or undefined before first inner emission.
- *
- * Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
- * each emit starts a new DIRTY+value cycle. No built-in dedup.
- * Forwards inner errors and upstream completion.
- *
- * `maxBuffer` limits queued outer values. When exceeded, oldest queued values
- * are dropped (backpressure). Default: no limit.
- */
 export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined>;
 export function concatMap<A, B>(
 	fn: (value: A) => Store<B>,
 	opts: { initial: B; maxBuffer?: number },
 ): StoreOperator<A, B>;
+/**
+ * Maps each outer value to an inner store and runs inners **sequentially** (queue while busy).
+ *
+ * @param fn - Inner store factory.
+ * @param opts - `{ initial: B }` narrows type; `maxBuffer` drops oldest queued outers when exceeded (default: unlimited).
+ *
+ * @returns `StoreOperator<A, B | undefined>` or `B` with `initial`.
+ *
+ * @remarks **Tier 2:** Reactive; no eager `fn(outer.get())`.
+ *
+ * @seeAlso [switchMap](/api/switchMap), [exhaustMap](/api/exhaustMap)
+ *
+ * @category extra
+ */
 export function concatMap<A, B>(
 	fn: (value: A) => Store<B>,
 	opts?: { initial?: B; maxBuffer?: number },

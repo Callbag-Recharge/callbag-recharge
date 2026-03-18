@@ -3,30 +3,23 @@ import { operator } from "../core/operator";
 import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator, StoreOptions } from "../core/types";
 
-/**
- * Input-level memoization for expensive derived computations.
- *
- * Two forms:
- *
- * **Factory form** — `cached([a, b], fn, opts?)`:
- * Like `derived()` but with input-level caching for disconnected `get()`.
- * When connected: push-based, diamond-safe via type 3 forwarding (built on
- * `operator()`). When disconnected: `get()` checks if dep values changed
- * (via `Object.is`) against a cached input snapshot. If unchanged, returns
- * cached output without calling `fn()`.
- *
- * **Pipe form** — `cached(eq?)`:
- * Output dedup + cached getter for disconnected reads. Equivalent to
- * `distinctUntilChanged` with a cached getter.
- */
-
 // Overloads
-export function cached<T>(
-	deps: Store<unknown>[],
-	fn: () => T,
-	opts?: StoreOptions<T>,
-): Store<T>;
+export function cached<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T>;
 export function cached<A>(eq?: (a: A, b: A) => boolean): StoreOperator<A, A>;
+/**
+ * **Factory:** `cached(deps, fn)` — like `derived` but skips `fn()` on disconnected `get()` when dep snapshots match.
+ * **Pipe:** `cached(eq?)` — output dedup + cached pull (similar to `distinctUntilChanged` + getter cache).
+ *
+ * @param depsOrEq - Deps array (factory form) or optional equality (pipe form).
+ * @param fn - Compute function (factory form only).
+ * @param opts - `StoreOptions` (factory form).
+ *
+ * @returns `Store<T>` or `StoreOperator<A, A>` depending on overload.
+ *
+ * @seeAlso [derived](/api/derived), [distinctUntilChanged](/api/distinctUntilChanged)
+ *
+ * @category extra
+ */
 export function cached(...args: any[]): any {
 	if (Array.isArray(args[0])) {
 		return cachedFactory(args[0], args[1], args[2]);
@@ -34,11 +27,7 @@ export function cached(...args: any[]): any {
 	return cachedPipe(args[0]);
 }
 
-function cachedFactory<T>(
-	deps: Store<unknown>[],
-	fn: () => T,
-	opts?: StoreOptions<T>,
-): Store<T> {
+function cachedFactory<T>(deps: Store<unknown>[], fn: () => T, opts?: StoreOptions<T>): Store<T> {
 	const eqFn = opts?.equals;
 	const lastInputs: unknown[] = new Array(deps.length);
 	let lastOutput: T | undefined;

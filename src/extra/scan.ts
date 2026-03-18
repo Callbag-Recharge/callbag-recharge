@@ -3,15 +3,35 @@ import { DATA, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator, StoreOptions } from "../core/types";
 
 /**
- * Accumulates upstream values through `reducer`, starting from `seed`.
+ * Accumulates upstream values with a reducer and seed, emitting the accumulator after each step.
+ * Returns a `StoreOperator` for use with `pipe()`.
  *
- * Stateful: maintains accumulated value via operator()'s cache. get()
- * returns the current accumulator.
+ * @param reducer - `(acc, value) => nextAcc` applied on each upstream DATA.
+ * @param seed - Initial accumulator; reset when the operator reconnects.
+ * @param opts - Optional `equals` to skip emissions when the accumulator is unchanged.
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards type 3
- * STATE signals; on type 1 DATA applies reducer and emits. Optional equals
- * enables push-phase memoization via RESOLVED. Pull-based get() when
- * disconnected advances the accumulator idempotently (dedup by input value).
+ * @returns `StoreOperator<A, B>` — stateful; `get()` fold-reads the current input when disconnected.
+ *
+ * @optionsType StoreOptions
+ * @option equals | (a: B, b: B) => boolean | undefined | Sends RESOLVED instead of duplicate DATA.
+ * @option name | string | undefined | Debug name for Inspector.
+ *
+ * @remarks **Tier 1:** Forwards STATE; participates in dirty/diamond semantics.
+ *
+ * @example
+ * ```ts
+ * import { state, pipe } from 'callbag-recharge';
+ * import { scan } from 'callbag-recharge/extra';
+ *
+ * const n = state(1);
+ * const sum = pipe(n, scan((acc, x) => acc + x, 0));
+ * n.set(2);
+ * sum.get(); // 3
+ * ```
+ *
+ * @seeAlso [pipe](/api/pipe), [reduce](/api/reduce) — final accumulated value
+ *
+ * @category extra
  */
 export function scan<A, B>(
 	reducer: (acc: B, value: A) => B,

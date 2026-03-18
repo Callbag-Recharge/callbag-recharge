@@ -10,6 +10,8 @@
 
 import { describe, expect, it } from "vitest";
 import { P_SKIP_DIRTY } from "../../core/producer";
+import type { Store } from "../../core/types";
+import { map } from "../../extra/map";
 import {
 	batch,
 	DATA,
@@ -24,8 +26,6 @@ import {
 	STATE,
 	state,
 } from "../../index";
-import { map } from "../../extra/map";
-import type { Store } from "../../core/types";
 
 describe("Skip DIRTY optimization", () => {
 	// -----------------------------------------------------------------------
@@ -370,10 +370,13 @@ describe("Skip DIRTY optimization", () => {
 	// -----------------------------------------------------------------------
 
 	it("P_SKIP_DIRTY cleared on producer complete()", () => {
-		const p = producer<number>(({ emit, complete }) => {
-			emit(1);
-			// Don't complete yet — we'll test resubscription
-		}, { resubscribable: true });
+		const p = producer<number>(
+			({ emit, complete }) => {
+				emit(1);
+				// Don't complete yet — we'll test resubscription
+			},
+			{ resubscribable: true },
+		);
 
 		const d = derived([p], () => p.get());
 		d.source(START, () => {});
@@ -385,9 +388,12 @@ describe("Skip DIRTY optimization", () => {
 	});
 
 	it("P_SKIP_DIRTY cleared on producer error()", () => {
-		const p = producer<number>(({ emit }) => {
-			emit(1);
-		}, { resubscribable: true });
+		const p = producer<number>(
+			({ emit }) => {
+				emit(1);
+			},
+			{ resubscribable: true },
+		);
 
 		const d = derived([p], () => p.get());
 		d.source(START, () => {});

@@ -4,17 +4,17 @@ import { beginDeferredStart, DATA, END, endDeferredStart, START, STATE } from ".
 import type { Store } from "../core/types";
 
 /**
- * Concatenates multiple sources sequentially. Subscribes to the next source
- * only after the current one completes.
+ * Plays sources one after another: the next source subscribes only after the previous completes.
  *
- * Stateful: maintains last emitted value via producer's internal cache.
- * get() returns the last value emitted by the currently active source.
+ * @param sources - Ordered list of `Store<T>`.
  *
- * v3: uses producer(autoDirty:false) — a Tier 2 boundary rather than Tier 1
- * operator(), because sequential subscription (one active dep at a time) does
- * not fit operator()'s static multi-dep model. Type 3 STATE signals from the
- * active source are forwarded manually; type 1 DATA is emitted directly
- * without auto-DIRTY (since DIRTY already arrived via type 3).
+ * @returns `Store<T | undefined>` — Tier 2; value is from whichever source is currently active.
+ *
+ * @remarks **STATE:** Forwards control signals from the active source only.
+ *
+ * @seeAlso [merge](/api/merge), [concatMap](/api/concatMap)
+ *
+ * @category extra
  */
 export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 	return producer<T | undefined>(

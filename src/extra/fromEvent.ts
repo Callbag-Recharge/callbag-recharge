@@ -2,13 +2,14 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a source from DOM events on the given target.
+ * DOM event source: each matching event becomes a DATA emission (Tier 2).
  *
- * Stateful: maintains last event via producer. get() returns the last
- * emitted event, or undefined before first event.
+ * @param target - `EventTarget` to listen on.
+ * @param eventName - Event type string.
  *
- * v3: Tier 2 Producer — event source, no upstream deps. Each emit sends
- * DIRTY on type 3 before the value on type 1 (autoDirty: true).
+ * @returns `ProducerStore<T>`
+ *
+ * @category extra
  */
 export function fromEvent<T extends Event = Event>(
 	target: EventTarget,

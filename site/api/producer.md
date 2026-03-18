@@ -1,134 +1,82 @@
 # producer()
 
-Creates a general-purpose push-based source with lifecycle management.
+Creates a general-purpose reactive source with `emit`, `signal`, `complete`, and `error`.
+The optional factory runs on first subscriber; its return value is cleanup on last disconnect.
 
 ## Signature
 
 ```ts
 function producer<T>(
-  fn?: ProducerFn<T>,
-  opts?: ProducerOpts<T>
-): ProducerStore<T>
-
-function producer<T>(
-  fn: ProducerFn<T> | undefined,
-  opts: ProducerOpts<T> & { initial: T }
+	fn: ProducerFn<T> | undefined,
+	opts: ProducerOpts<T> & { initial: T },
 ): ProducerStore<T> & Store<T>
-```
-
-### ProducerFn
-
-```ts
-type ProducerFn<T> = (actions: {
-  emit: (value: T) => void;
-  signal: (s: Signal) => void;
-  complete: () => void;
-  error: (e: unknown) => void;
-}) => (() => void) | undefined
+function producer<T>(fn?: ProducerFn<T>, opts?: ProducerOpts<T>): ProducerStore<T>
 ```
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `fn` | `ProducerFn<T>` | Optional factory function. Runs on first subscriber, return value is cleanup. |
-| `opts` | `ProducerOpts<T>` | Optional configuration. |
+| `fn` | `ProducerFn&lt;T&gt;` | Optional setup function receiving action callbacks; return teardown on disconnect. |
+| `opts` | `ProducerOpts&lt;T&gt;` | Optional configuration (initial value, equality, autoDirty, getter, etc.). |
 
 ### ProducerOpts
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
+| `initial` | `T` | `undefined` | Value before first emit; reset target when `resetOnTeardown`. |
+| `equals` | `(a: T, b: T) =&gt; boolean` | `undefined` | Skips emit when new value equals cached. |
+| `autoDirty` | `boolean` | `true` | Send DIRTY on STATE before each DATA emission. |
+| `getter` | `(cached) =&gt; T` | `undefined` | Pull-based recompute when disconnected. |
+| `resetOnTeardown` | `boolean` | `false` | Reset to `initial` when last sink disconnects. |
+| `resubscribable` | `boolean` | `false` | Allow new subscriptions after complete/error. |
 | `name` | `string` | `undefined` | Debug name for Inspector. |
-| `initial` | `T` | `undefined` | Baseline value before first emission. When provided, `get()` returns `T` instead of `T \| undefined`. |
-| `equals` | `(a: T, b: T) => boolean` | `undefined` | Emission guard. Skips emit when values are equal. |
-| `autoDirty` | `boolean` | `true` | Sends DIRTY signal on type 3 before each DATA emission. |
-| `resetOnTeardown` | `boolean` | `false` | Reset value to `initial` when last subscriber disconnects. |
-| `resubscribable` | `boolean` | `false` | Allow re-subscription after complete/error. Re-subscribing restarts the factory. |
-| `getter` | `(cached: T \| undefined) => T` | `undefined` | Pull-based `get()` when disconnected. Result is cached. |
-| `kind` | `string` | `"producer"` | Inspector kind override. |
 
 ## Returns
 
-`ProducerStore<T>` — a store with the following API:
+`ProducerStore&lt;T&gt;` — a store with:
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `get()` | `() => T \| undefined` | Returns the current value (or calls `getter` if disconnected). |
-| `emit(value)` | `(value: T) => void` | Sets value and pushes DATA to subscribers. |
-| `signal(s)` | `(s: Signal) => void` | Pushes a control signal (DIRTY/RESOLVED) on the STATE channel. |
-| `complete()` | `() => void` | Sends END to all subscribers, marks completed. |
-| `error(e)` | `(e: unknown) => void` | Sends END with error to all subscribers, marks errored. |
-| `source` | callbag | The underlying callbag source for subscriptions. |
-
-When `opts.initial` is provided, `get()` returns `T` (not `T | undefined`).
+| `get()` | `() =&gt; T \` | undefined |
+| `emit(value)` | `(value: T) =&gt; void` | Pushes a new value to subscribers. |
+| `signal(s)` | `(s: Signal) =&gt; void` | Sends DIRTY or RESOLVED on the STATE channel. |
+| `complete()` | `() =&gt; void` | Ends the stream successfully. |
+| `error(e)` | `(e: unknown) =&gt; void` | Ends the stream with an error. |
+| `source` | `callbag` | Underlying callbag source for subscriptions. |
 
 ## Basic Usage
 
 ```ts
 import { producer } from 'callbag-recharge';
 
-const ticker = producer(({ emit, complete }) => {
-  let i = 0;
-  const id = setInterval(() => {
-    emit(i++);
-    if (i >= 5) complete();
-  }, 1000);
-
-  return () => clearInterval(id);
-});
+const bus = producer<string>();
+bus.emit('a');
+bus.get(); // 'a'
 ```
 
 ## Options / Behavior Details
 
-- **Lazy start:** The factory function runs only when the first subscriber connects. Cleanup runs when the last subscriber disconnects.
-- **Pre-bound methods:** `emit`, `signal`, `complete`, and `error` are bound at construction, safe to destructure.
-- **Post-completion no-op:** After `complete()` or `error()`, all methods (`emit`, `signal`, `complete`, `error`) are no-ops.
-- **Resubscribable:** With `resubscribable: true`, subscribing after completion clears the completed flag and re-runs the factory. Used internally by `retry`, `rescue`, and `repeat`.
-- **autoDirty:** When `true` (default), each `emit()` sends a DIRTY signal on the STATE channel before the DATA value. This integrates the producer into the two-phase push protocol for diamond resolution.
+- **Lazy start:** No work until the first `source()` subscription.
+- **Tier 2 boundary:** Used by async/timer operators; each `emit` starts a new DIRTY+value cycle when `autoDirty` is true.
 
 ## Examples
 
-### WebSocket wrapper
+### Factory with cleanup
 
 ```ts
-const messages = producer<string>(({ emit, error, complete }) => {
-  const ws = new WebSocket('wss://example.com/feed');
-  ws.onmessage = (e) => emit(e.data);
-  ws.onerror = (e) => error(e);
-  ws.onclose = () => complete();
-
-  return () => ws.close();
-}, { name: 'ws-messages' });
-```
-
-### Manual emit without factory
-
-```ts
-const bus = producer<string>();
-bus.emit('hello');
-bus.get(); // 'hello'
-bus.emit('world');
-bus.get(); // 'world'
-```
-
-### With initial value and resetOnTeardown
-
-```ts
-const status = producer<string>(({ emit }) => {
-  emit('connected');
-  return () => {};
-}, {
-  initial: 'idle',
-  resetOnTeardown: true,
+const ticks = producer<number>(({ emit, complete }) => {
+    let n = 0;
+    const id = setInterval(() => {
+        emit(n++);
+        if (n >= 3) complete();
+      }, 10);
+  return () => clearInterval(id);
 });
-
-status.get(); // 'idle' (before any subscriber)
-// After subscriber connects: 'connected'
-// After last subscriber disconnects: 'idle' (reset)
 ```
 
 ## See Also
 
-- [state](./state) — thin wrapper for writable stores
+- [state](./state) — writable store
 - [operator](./operator) — transform primitive
-- [fromEvent, fromPromise](https://github.com/anthropics/callbag-recharge/tree/main/src/extra/) — built on producer
+- [effect](./effect) — side-effects

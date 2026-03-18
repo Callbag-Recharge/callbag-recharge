@@ -3,24 +3,39 @@ import { producer } from "../core/producer";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
-/**
- * Maps each upstream value to an inner store via `fn`, subscribing to the new inner
- * and unsubscribing from the previous one. The output reflects the latest inner
- * store's value.
- *
- * v5 (Option D3): Purely reactive — does NOT eagerly evaluate fn(outer.get()) at
- * construction or subscription. Inner subscription is only created when outer emits.
- * get() returns `initial` (if provided) or undefined before first inner emission.
- *
- * Tier 2 — dynamic subscription operator. Each inner switch is a cycle
- * boundary; each emit starts a new DIRTY+value cycle. No built-in dedup.
- * Forwards inner errors and upstream completion.
- */
 export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined>;
 export function switchMap<A, B>(
 	fn: (value: A) => Store<B>,
 	opts: { initial: B },
 ): StoreOperator<A, B>;
+/**
+ * Maps each outer value to an inner `Store`, subscribes to the latest inner, and unsubscribes from the previous.
+ * Reactive only: inner stores are created when the outer emits, not from `fn(outer.get())` at build time.
+ *
+ * @param fn - Factory for the inner store from each outer value.
+ * @param opts - Pass `{ initial: B }` to narrow the output type and seed `get()` before the first inner value.
+ *
+ * @returns `StoreOperator<A, B | undefined>` (or `B` when `initial` is set).
+ *
+ * @remarks **Tier 2:** Each switch starts a new reactive cycle.
+ * @remarks **Streaming:** Until first outer emission, output may be `undefined` unless `initial` is provided.
+ *
+ * @example
+ * ```ts
+ * import { state, pipe, producer } from 'callbag-recharge';
+ * import { switchMap } from 'callbag-recharge/extra';
+ *
+ * const outer = state('a');
+ * const out = pipe(
+ *   outer,
+ *   switchMap((x) => producer<string>(({ emit }) => { emit(x + '!'); })),
+ * );
+ * ```
+ *
+ * @seeAlso [concatMap](/api/concatMap) — queue inner subscriptions, [exhaustMap](/api/exhaustMap) — ignore while active, [flat](/api/flat) — flatten all inner sources
+ *
+ * @category extra
+ */
 export function switchMap<A, B>(
 	fn: (value: A) => Store<B>,
 	opts?: { initial?: B },

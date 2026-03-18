@@ -3,21 +3,19 @@ import { producer } from "../core/producer";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
-/**
- * Flattens a store of stores with switch semantics: when the outer store
- * emits a new inner store, unsubscribes from the previous inner and
- * subscribes to the new one.
- *
- * v5 (Option D3): Purely reactive — does NOT eagerly evaluate outer.get()
- * at construction. Inner subscription is only created when outer emits.
- * get() returns undefined before first inner emission.
- *
- * Tier 2 — dynamic subscription operator. Each inner switch is a cycle
- * boundary; each emit starts a new DIRTY+value cycle. No built-in dedup.
- * Forwards inner errors and upstream completion.
- */
 export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined>;
 export function flat<T>(opts: { initial: T }): StoreOperator<Store<T> | undefined, T>;
+/**
+ * Flattens `Store<Store<T>>` with switch semantics (same as `switchMap(identity)`).
+ *
+ * @param opts - Optional `{ initial: T }` to narrow `get()` before the first inner emission.
+ *
+ * @returns `StoreOperator` — Tier 2; reactive inner subscription on outer DATA only.
+ *
+ * @seeAlso [switchMap](/api/switchMap)
+ *
+ * @category extra
+ */
 export function flat<T>(opts?: {
 	initial?: T;
 }): StoreOperator<Store<T> | undefined, T | undefined> {

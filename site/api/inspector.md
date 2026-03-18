@@ -1,26 +1,33 @@
 # Inspector
 
-Global singleton for reactive graph observability. All metadata lives in WeakMaps, keeping store objects lean. Zero-cost when disabled.
+Static class for opt-in reactive graph observability. All metadata lives in WeakMaps, keeping store objects lean. Zero-cost when disabled.
 
 ## Signature
 
 ```ts
-const Inspector: {
-  enabled: boolean;
-  inspect<T>(store: Store<T>): StoreInfo<T>;
-  graph(): Map<string, StoreInfo>;
-  register(store: Store<unknown>, opts?: { name?: string; kind?: string }): void;
-  registerEdge(parent: Store<unknown>, child: Store<unknown>): void;
-  getEdges(): Map<string, string[]>;
-  getName(store: Store<unknown>): string | undefined;
-  getKind(store: Store<unknown>): string | undefined;
-  trace<T>(store: Store<T>, cb: (value: T, prev: T | undefined) => void): () => void;
+class Inspector {
+  static enabled: boolean;
 
-  // Signal hooks
-  onEmit: ((store: Store<unknown>, value: unknown) => void) | null;
-  onSignal: ((store: Store<unknown>, signal: unknown) => void) | null;
-  onStatus: ((store: Store<unknown>, status: NodeStatus) => void) | null;
-  onEnd: ((store: Store<unknown>, error?: unknown) => void) | null;
+  // Registration (called automatically by primitives)
+  static register(node: object, opts?: { name?: string; kind?: string; deps?: object[] }): void;
+  static registerEdge(parent: object, child: object): void;
+
+  // Read-only graph queries
+  static inspect<T>(node: object): StoreInfo<T>;
+  static graph(): Map<string, StoreInfo>;
+  static getEdges(): Map<string, string[]>;
+  static getName(node: object): string | undefined;
+  static getKind(node: object): string | undefined;
+  static dumpGraph(): string;
+  static snapshot(): { nodes: Array<{...}>; edges: Array<{...}> };
+
+  // Callbag sinks for debugging
+  static observe<T>(store: Store<T>): ObserveResult<T>;
+  static spy<T>(store: Store<T>, opts?: { name?: string; log?: Function }): ObserveResult<T>;
+  static trace<T>(store: Store<T>, cb: (value: T, prev: T | undefined) => void): () => void;
+
+  // Graph visualization
+  static tap<T>(store: Store<T>, name?: string): Store<T>;
 }
 ```
 
@@ -32,6 +39,22 @@ interface StoreInfo<T = unknown> {
   kind: string;
   value: T;
   status: NodeStatus | undefined;
+}
+```
+
+### ObserveResult
+
+```ts
+interface ObserveResult<T> {
+  values: T[];
+  signals: Signal[];
+  events: Array<{ type: "data" | "signal" | "end"; data: unknown }>;
+  ended: boolean;
+  endError: unknown;
+  dirtyCount: number;
+  resolvedCount: number;
+  name: string | undefined;
+  dispose: () => void;
 }
 ```
 
@@ -47,35 +70,39 @@ type NodeStatus =
   | "ERRORED"
 ```
 
-## API
+## API — Graph Queries
 
 | Method | Description |
 |--------|-------------|
-| `inspect(store)` | Returns `{ name, kind, value, status }` for a single store. |
+| `inspect(node)` | Returns `{ name, kind, value, status }` for a single node. |
 | `graph()` | Returns a `Map` of all living named stores. GC'd stores are automatically cleaned up. |
-| `register(store, opts?)` | Registers a store. Called automatically by primitives (`state`, `derived`, `producer`, `operator`). |
-| `registerEdge(parent, child)` | Tracks a dependency edge between two stores. |
-| `getEdges()` | Returns a copy of the dependency graph as a `Map<string, string[]>`. |
-| `getName(store)` | Returns the debug name of a store. |
-| `getKind(store)` | Returns the kind of a store (`"state"`, `"derived"`, `"producer"`, `"operator"`). |
-| `trace(store, cb)` | Subscribes to value changes via raw callbag. Returns an unsubscribe function. |
+| `getEdges()` | Returns a copy of the dependency graph as `Map<string, string[]>`. |
+| `getName(node)` | Returns the debug name of a node. |
+| `getKind(node)` | Returns the kind of a node (`"state"`, `"derived"`, `"producer"`, `"operator"`, `"effect"`). |
+| `dumpGraph()` | Pretty-print the entire graph for console/CLI debugging. Shows values, status, and edges. |
+| `snapshot()` | JSON-serializable snapshot of nodes + edges. Designed for AI consumption during debugging. |
+
+## API — Registration
+
+| Method | Description |
+|--------|-------------|
+| `register(node, opts?)` | Registers a node with name, kind, and deps. Called automatically by primitives. |
+| `registerEdge(parent, child)` | Tracks a dependency edge. Called automatically by `derived`, `operator`, `effect`. |
+
+## API — Debugging Sinks
+
+| Method | Description |
+|--------|-------------|
+| `observe(store)` | Subscribes to full callbag protocol. Returns live `ObserveResult` — arrays grow as the store emits. Test-friendly. |
+| `spy(store, opts?)` | Like `observe()` but also logs each event. Pass custom logger or defaults to `console.log`. |
+| `trace(store, cb)` | Subscribes to value changes only (deduped via `Object.is`). Returns unsubscribe function. |
+| `tap(store, name?)` | Creates a transparent passthrough wrapper for graph visualization. Zero overhead — subscribers connect to original. |
 
 ### Properties
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `enabled` | `boolean` | Auto-detected | When `false`, `register` and `getName` are no-ops. Auto-detects `NODE_ENV !== 'production'`. Set explicitly to override. |
-
-### Signal Hooks
-
-All hooks are `null` by default (zero-cost). Set a function to activate.
-
-| Hook | Signature | Fires when |
-|------|-----------|------------|
-| `onEmit` | `(store, value) => void` | A store emits a new value. |
-| `onSignal` | `(store, signal) => void` | A store sends a control signal (DIRTY/RESOLVED). |
-| `onStatus` | `(store, status) => void` | A store's NodeStatus changes. |
-| `onEnd` | `(store, error?) => void` | A store completes or errors. |
 
 ## Basic Usage
 
@@ -89,6 +116,21 @@ Inspector.inspect(count);
 ```
 
 ## Examples
+
+### observe() for testing
+
+```ts
+import { state, Inspector } from 'callbag-recharge';
+
+const n = state(0, { name: 'n' });
+const obs = Inspector.observe(n);
+
+n.set(5);
+obs.values;      // [5]
+obs.dirtyCount;  // 1
+obs.ended;       // false
+obs.dispose();   // stop observing
+```
 
 ### Building a devtools panel with graph()
 
@@ -108,6 +150,14 @@ for (const [key, info] of stores) {
 // sum: derived = 3 (DISCONNECTED)
 ```
 
+### snapshot() for AI debugging
+
+```ts
+const snap = Inspector.snapshot();
+// { nodes: [{ name: 'a', kind: 'state', value: 1, status: 'DISCONNECTED' }, ...],
+//   edges: [{ from: 'a', to: 'sum' }, { from: 'b', to: 'sum' }] }
+```
+
 ### Tracing value changes
 
 ```ts
@@ -121,6 +171,27 @@ count.set(1); // Logs: "count: 0 -> 1"
 count.set(2); // Logs: "count: 1 -> 2"
 
 stop(); // unsubscribe
+```
+
+### spy() for interactive debugging
+
+```ts
+const n = state(0);
+const obs = Inspector.spy(n, { name: 'debug' });
+// Logs each event: [debug] DATA: 0, [debug] STATE: DIRTY, etc.
+
+n.set(42); // Logs: [debug] DATA: 42
+obs.dispose();
+```
+
+### tap() for graph visualization
+
+```ts
+const source = state(0, { name: 'source' });
+const tapped = Inspector.tap(source, 'tap-point');
+
+// tapped appears as a separate node in Inspector.graph()
+// but delegates get()/source() to the original — zero overhead
 ```
 
 ### Disabling in production
@@ -141,3 +212,4 @@ Inspector.enabled = false;
 - [state](./state) — stores that register with Inspector
 - [derived](./derived) — computed stores with status tracking
 - [producer](./producer) — sources with lifecycle status
+- [Protocol](./protocol) — NodeStatus and control signals

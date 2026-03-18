@@ -164,3 +164,79 @@ const userData = cancellable(userId, async (id, signal) => {
 5. **Update `llms.txt`** and `llms-full.txt` with new patterns
 
 ---END SESSION---
+
+---
+SESSION: api-docs-generation (continuation)
+DATE: March 18, 2026
+TOPIC: JSDoc-based API doc generation, unified docs strategy
+---
+
+## KEY DECISIONS
+
+### 1. API docs generated from JSDoc (not manually maintained)
+
+**Problem:** With 59+ extras, data structures, orchestration, memory, and patterns, manually maintaining `site/api/*.md` pages doesn't scale. The Gemini session (ses_2fd2) explored `@microsoft/api-extractor`, `vitepress-jsdoc`, and `ts-morph` for auto-generation.
+
+**Solution:** Custom generator script (`scripts/gen-api-docs.mjs`) using the TypeScript compiler API (already a devDep — no new dependencies). Reads structured JSDoc from source, emits markdown matching the existing API page template.
+
+**Design:** Enriched JSDoc tags on exported functions serve as the single source of truth:
+- `@param`, `@returns` — standard parameter/return docs
+- `@returnsTable` — pipe-separated method rows for return type API tables
+- `@optionsType` + `@option` — options interface expansion into tables
+- `@remarks` — behavior detail bullets (one per `@remarks` tag)
+- `@example` — code examples (optional title on first line, multiple allowed)
+- `@seeAlso` — comma-separated markdown links
+- `@category` — module category
+
+The generator handles:
+- Function signature extraction (including overloads)
+- Namespace functions (e.g., `derived.from`)
+- Auto-reindentation of code blocks (TSDoc strips leading spaces from `* ` lines)
+- Check mode (`--check`) for CI drift detection
+
+### 2. Unified docs guidance
+
+**`docs/examples-plan.md` → `docs/docs-guidance.md`:** Renamed and expanded to be the single reference document for the full documentation strategy. Adds:
+- Tier 0 (structured JSDoc) as the new source of truth tier
+- Complete JSDoc tag reference with format specifications
+- Full template examples for both core primitives and extra operators
+- Generated output structure documentation
+- File locations summary table
+- Instructions that `site/api/*.md` are generated, not hand-edited
+
+This file is designed to be passed to other AI agents for bulk JSDoc creation.
+
+### 3. Validated approach
+
+**Prototyped on two functions:**
+- `state()` (core primitive) — enriched JSDoc with all tags, generated `site/api/state.md` matching the manually-written original
+- `map()` (extra operator) — enriched JSDoc, generated new `site/api/map.md`
+
+**Verified:**
+- All 1316 tests pass after JSDoc changes
+- VitePress site builds successfully with generated pages
+- Built HTML confirmed correct structure (headings, tables, code blocks, cross-references)
+- UI test confirmed state page renders all sections correctly
+
+## FILES CHANGED
+
+| File | Action |
+|---|---|
+| `scripts/gen-api-docs.mjs` | Created — API doc generator using TS compiler API |
+| `src/core/state.ts` | Enriched JSDoc with structured tags (prototype) |
+| `src/extra/map.ts` | Enriched JSDoc with structured tags (prototype) |
+| `site/api/state.md` | Now generated from JSDoc (was manually maintained) |
+| `site/api/map.md` | Created — generated from JSDoc (new page) |
+| `package.json` | Added `docs:gen` and `docs:gen:check` scripts |
+| `docs/examples-plan.md` | Renamed to `docs/docs-guidance.md`, expanded with full strategy |
+| `docs/docs-guidance.md` | Created — unified docs strategy with JSDoc generation guidance |
+
+## NEXT TODO
+
+1. **Enrich JSDoc on all core primitives** — `derived`, `effect`, `producer`, `operator`, `pipe` (use `docs/docs-guidance.md` as reference)
+2. **Enrich JSDoc on all extras** — 59 operators in `src/extra/`
+3. **Add all functions to REGISTRY** in `scripts/gen-api-docs.mjs`
+4. **Add `docs:gen:check` to CI** to catch JSDoc/markdown drift
+5. **Implement `streamFrom` and `cancellable` patterns** (carried from previous session)
+
+---END SESSION---

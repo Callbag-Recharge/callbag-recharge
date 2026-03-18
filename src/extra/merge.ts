@@ -4,20 +4,30 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
 /**
- * Merges multiple sources into one. The resulting store's value is the latest
- * emission from whichever source changed most recently.
+ * Merges multiple stores of the same type; the output holds the latest value from whichever source emitted last.
  *
- * Stateful: maintains last emitted value via operator()'s internal cache.
- * get() returns the most recent value from any source.
+ * @param sources - Two or more `Store<T>` inputs.
  *
- * v3: uses operator() with multi-dep dirty tracking via bitmask. Forwards
- * DIRTY on first dirty dep; forwards RESOLVED when all pending-dirty deps
- * have resolved. Emits immediately on each type 1 DATA from any source.
+ * @returns `Store<T | undefined>` — multi-dep Tier 1 node with bitmask dirty tracking.
  *
- * Note: when multiple deps are dirty simultaneously, each dep's DATA triggers
- * a separate emission. The second emission has no preceding DIRTY from merge
- * (only one DIRTY is forwarded per batch). Downstream nodes handle the extra
- * DATA via the "unexpected DATA = immediate trigger" rule (Option 3).
+ * @remarks **Concurrent dirty:** Multiple deps dirty in one batch can yield multiple DATA without extra DIRTY; downstream handles per library rules.
+ * @remarks **Completion:** Completes when all sources have completed without error.
+ *
+ * @example
+ * ```ts
+ * import { state } from 'callbag-recharge';
+ * import { merge } from 'callbag-recharge/extra';
+ *
+ * const a = state(1);
+ * const b = state(2);
+ * const m = merge(a, b);
+ * a.set(10);
+ * m.get(); // 10
+ * ```
+ *
+ * @seeAlso [combine](/api/combine), [race](/api/race) — first source to emit wins
+ *
+ * @category extra
  */
 export function merge<T>(...sources: Store<T>[]): Store<T | undefined> {
 	return operator<T | undefined>(

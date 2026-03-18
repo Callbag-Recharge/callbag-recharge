@@ -1,16 +1,3 @@
-/**
- * createStore — single-store pattern for Zustand/Redux users.
- *
- * Provides a familiar `create((set, get) => ({ ...state, ...actions }))` API
- * backed by callbag-recharge primitives. Key advantage over Zustand:
- * diamond-safe `select()` returns a `Store<U>` with automatic memoization
- * and dependency tracking — no reselect, no useShallow.
- *
- * Zustand StoreApi compatibility: matches `getState`, `setState`, `subscribe`,
- * `getInitialState` — Zustand middleware (persist, devtools, immer) can wrap
- * this store directly.
- */
-
 import { derived } from "../../core/derived";
 import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
@@ -68,6 +55,30 @@ interface CreateStoreResult<T> extends StoreApi<T> {
 // createStore
 // ---------------------------------------------------------------------------
 
+/**
+ * Zustand-style `create((set, get) => state)` with diamond-safe `select()` as reactive stores.
+ *
+ * @param initializer - Receives `set` / `get` like Zustand; return initial state object.
+ *
+ * @returns `CreateStoreResult<T>` — `getState`, `setState`, `subscribe`, `getInitialState`, plus `select`, `store`, `destroy`.
+ *
+ * @remarks **select:** Returns a `Store<U>` with push-phase memoization — safer than ad-hoc selectors in diamonds.
+ * @remarks **Middleware:** StoreApi shape matches Zustand for persist/devtools wrappers.
+ *
+ * @example
+ * ```ts
+ * import { createStore } from 'callbag-recharge/patterns/createStore';
+ *
+ * const useBear = createStore((set) => ({
+ *   n: 0,
+ *   inc: () => set((s) => ({ n: s.n + 1 })),
+ * }));
+ * ```
+ *
+ * @seeAlso [state](/api/state), [derived](/api/derived)
+ *
+ * @category patterns
+ */
 export function createStore<T extends object>(initializer: StateCreator<T>): CreateStoreResult<T> {
 	// --- Phase 1: initialization ---
 	// `source` doesn't exist yet. get()/set() use `initialState` directly.

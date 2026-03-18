@@ -4,15 +4,14 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Buffers N upstream values, then flushes the buffer as an array.
+ * Flushes every `count` values as an array; optional `startEvery` enables overlapping (sliding) buffers.
  *
- * When `startEvery` is provided, a new buffer opens every `startEvery` values
- * (sliding window). Without it, buffers are non-overlapping (tumbling window).
+ * @param count - Buffer size before flush.
+ * @param startEvery - If set, start a new buffer every N emissions (sliding); omit for tumbling windows.
  *
- * Tier 2: each flush starts a new DIRTY+value cycle (autoDirty: true).
+ * @returns `StoreOperator<A, A[]>` — Tier 2.
  *
- * On upstream completion, any partial buffer is flushed before completing.
- * On upstream error, partial buffer is discarded and error is forwarded.
+ * @category extra
  */
 export function bufferCount<A>(count: number, startEvery?: number): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {

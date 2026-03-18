@@ -3,16 +3,13 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Emits only the value at the given index (0-based), then disconnects and
- * completes. If upstream completes before reaching the index, sends END
- * with no DATA.
+ * Emits the value at zero-based emission index `index`, then completes.
  *
- * Stateful: maintains the matched value. get() returns undefined until the
- * n-th value arrives, then the captured value (frozen after completion).
+ * @param index - Which DATA emission to capture (0 = first).
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards STATE signals
- * until the target index is reached. Counts only actual DATA emissions.
- * On target, emits DATA, disconnects upstream, and completes.
+ * @returns `StoreOperator<A, A | undefined>` — Tier 1.
+ *
+ * @category extra
  */
 export function elementAt<A>(index: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

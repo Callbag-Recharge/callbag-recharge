@@ -4,15 +4,17 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Passes the first upstream change through immediately, then silences further
- * changes for `ms` milliseconds. Leading-edge semantics.
+ * Emits the first value in a window, then drops further values until `ms` has passed (leading throttle).
  *
- * Stateful: maintains last throttled value via producer. get() returns
- * undefined before first emission, then the last passed-through value.
+ * @param ms - Minimum milliseconds between forwarded values.
  *
- * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * No built-in dedup — emits every throttled value.
- * Forwards upstream completion and errors.
+ * @returns `StoreOperator<A, A | undefined>` — Tier 2; `undefined` until first emission.
+ *
+ * @remarks **Completion/errors:** Forwards upstream end and error; clears timers on teardown.
+ *
+ * @seeAlso [debounce](/api/debounce), [audit](/api/audit)
+ *
+ * @category extra
  */
 export function throttle<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

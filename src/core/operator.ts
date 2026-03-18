@@ -17,13 +17,13 @@ import {
 	decodeStatus,
 	END,
 	RESOLVED,
-	SINGLE_DEP,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
+	SINGLE_DEP,
 	START,
 	STATE,
 	STATUS_MASK,
@@ -256,6 +256,36 @@ export class OperatorImpl<B> {
 	}
 }
 
+/**
+ * Creates a custom transform node: you handle every callbag signal from each dependency and decide what to forward.
+ * Building block for Tier 1 operators; participates in diamond resolution when you forward STATE correctly.
+ *
+ * @param deps - Upstream stores (multi-dep uses bitmask dirty tracking).
+ * @param init - Receives `emit`, `signal`, `complete`, `error`, `disconnect`, `seed`; return per-signal handler.
+ * @param opts - `initial`, `getter`, `equals`, `name`, `resetOnTeardown`, etc. (see `SourceOptions`).
+ *
+ * @returns `Store<B>` — output store with standard `get()` / `source()`.
+ *
+ * @remarks **STATE channel:** Forward `DIRTY`/`RESOLVED` (and unknown signals) for correct graph behavior.
+ * @remarks **Skip re-emit:** After DIRTY, if the output value is unchanged, call `signal(RESOLVED)` instead of `emit`.
+ *
+ * @example Double each value
+ * ```ts
+ * import { state, operator } from 'callbag-recharge';
+ * import { DATA, STATE } from 'callbag-recharge';
+ *
+ * const n = state(2);
+ * const doubled = operator<number>([n], ({ emit, signal }) => {
+ *   return (_, type, data) => {
+ *     if (type === STATE) signal(data);
+ *     else if (type === DATA) emit((data as number) * 2);
+ *   };
+ * });
+ * doubled.get(); // 4
+ * ```
+ *
+ * @seeAlso [producer](./producer), [derived](./derived), [map](/api/map)
+ */
 export function operator<B>(
 	deps: Store<unknown>[],
 	init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void,

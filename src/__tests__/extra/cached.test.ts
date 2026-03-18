@@ -1,16 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { cached } from "../../extra/cached";
-import {
-	batch,
-	DATA,
-	derived,
-	DIRTY,
-	pipe,
-	RESOLVED,
-	START,
-	STATE,
-	state,
-} from "../../index";
+import { batch, DATA, DIRTY, derived, pipe, RESOLVED, START, STATE, state } from "../../index";
 
 // ---------------------------------------------------------------------------
 // Factory form: cached([deps], fn, opts?)
@@ -151,10 +141,7 @@ describe("cached() factory form", () => {
 		const expensiveA = cached([a], () => a.get() * 100);
 
 		// Multi-dep derived depending on cached and b
-		const combined = derived(
-			[expensiveA, b],
-			() => expensiveA.get() + b.get(),
-		);
+		const combined = derived([expensiveA, b], () => expensiveA.get() + b.get());
 
 		const values: number[] = [];
 		combined.source(START, (type: number, data: any) => {

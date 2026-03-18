@@ -28,6 +28,37 @@ import {
 } from "./protocol";
 import type { Store } from "./types";
 
+/**
+ * Runs a side effect when all dependencies have resolved after a change; returns `dispose()`.
+ * Eagerly subscribes to deps on creation. Not a store — no `get()` or `source()`.
+ *
+ * @param deps - Stores to watch; effect runs when dirty tracking shows all deps settled.
+ * @param fn - Called on each run; may return a cleanup function run before the next run or on dispose.
+ * @param opts - Optional `{ name }` for Inspector.
+ *
+ * @returns `() => void` — call to unsubscribe and run final cleanup.
+ *
+ * @remarks **Immediate first run:** `fn()` runs once right after wiring deps.
+ * @remarks **RESOLVED skip:** If deps send RESOLVED without value changes, the effect may not re-run.
+ * @remarks **Cleanup:** Return a function from `fn` to tear down listeners before the next run.
+ *
+ * @example
+ * ```ts
+ * import { state, effect } from 'callbag-recharge';
+ *
+ * const count = state(0);
+ * let runs = 0;
+ * const stop = effect([count], () => {
+ *   runs++;
+ * });
+ * // runs === 1
+ * count.set(1);
+ * // runs === 2
+ * stop();
+ * ```
+ *
+ * @seeAlso [derived](./derived), [state](./state), [subscribe](/api/subscribe)
+ */
 export function effect(
 	deps: Store<unknown>[],
 	fn: () => undefined | (() => void),

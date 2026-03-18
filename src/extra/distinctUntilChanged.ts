@@ -3,15 +3,15 @@ import { DATA, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Filters out consecutive duplicate values. When upstream emits a value equal
- * to the cached one, sends RESOLVED downstream (enabling subtree skipping)
- * instead of re-emitting the unchanged value.
+ * Drops consecutive duplicates; optional `eq` replaces default `Object.is` (Tier 1).
  *
- * Stateful: maintains cached value via operator()'s internal cache.
- * get() returns the last distinct value.
+ * @param eq - Equality for consecutive pair comparison.
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards DIRTY on type 3
- * STATE; on type 1 DATA checks equality and emits or sends RESOLVED.
+ * @returns `StoreOperator<A, A>`
+ *
+ * @seeAlso [filter](/api/filter)
+ *
+ * @category extra
  */
 export function distinctUntilChanged<A>(eq?: (a: A, b: A) => boolean): StoreOperator<A, A> {
 	const eqFn = eq ?? Object.is;

@@ -70,7 +70,13 @@ export default defineConfig({
 					{ text: "operator()", link: "/api/operator" },
 					{ text: "pipe()", link: "/api/pipe" },
 					{ text: "batch()", link: "/api/batch" },
+					{ text: "subscribe()", link: "/api/subscribe" },
+					{ text: "teardown()", link: "/api/teardown" },
+					{ text: "Protocol & teardown", link: "/api/protocol" },
 					{ text: "Inspector", link: "/api/inspector" },
+					{ text: "merge()", link: "/api/merge" },
+					{ text: "combine()", link: "/api/combine" },
+					{ text: "pipeRaw()", link: "/api/pipeRaw" },
 				],
 			},
 			{

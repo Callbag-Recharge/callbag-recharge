@@ -2,15 +2,13 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a source that emits a single value when the promise resolves,
- * or forwards the rejection as an error.
+ * Emits the promise’s resolved value once then completes; rejections become stream errors (Tier 2).
  *
- * Stateful: maintains resolved value via producer. get() returns undefined
- * before resolution, then the resolved value.
+ * @param promise - The promise to adapt.
  *
- * v3: Tier 2 Producer — event source, no upstream deps. emit() sends DIRTY
- * then the resolved value on type 1, then complete() sends END.
- * Rejection calls error() to forward the rejection reason.
+ * @returns `ProducerStore<T>`
+ *
+ * @category extra
  */
 export function fromPromise<T>(promise: Promise<T>): ProducerStore<T> {
 	return producer<T>(({ emit, complete, error }) => {

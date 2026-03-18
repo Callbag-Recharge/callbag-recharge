@@ -4,23 +4,13 @@ import { DATA, DIRTY, END, RESOLVED, START, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
 /**
- * Splits a source into two based on a predicate. Returns a tuple of
- * `[matching, notMatching]` stores. Values where predicate returns true
- * go to the first store; others go to the second.
+ * Fan-out to `[pass, fail]` stores by predicate; single shared upstream subscription.
  *
- * Both branches share a single upstream subscription (refcounted).
- * Upstream connects when the first branch subscribes, disconnects when
- * the last sink across both branches leaves.
+ * @param predicate - If true, value goes to first store; else second. Non-matching branch gets RESOLVED when matching gets DATA.
  *
- * Stateful: each branch maintains its own last value via its cached value.
- * get() returns the last value that went to that branch, or undefined.
+ * @returns Curried `(input) => [Store, Store]`.
  *
- * v4: type 3 DIRTY is forwarded to both branches. On DATA, the matching
- * branch receives DATA while the non-matching branch receives RESOLVED
- * (since it was marked dirty but its value didn't change). Both branches
- * receive END when upstream completes. Late subscribers after completion
- * receive END immediately. Unknown STATE signals forwarded for v4
- * forward-compat. _status tracked per branch for Inspector.
+ * @category extra
  */
 export function partition<A>(
 	predicate: (value: A) => boolean,

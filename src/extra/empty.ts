@@ -2,12 +2,11 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a source that completes immediately without emitting any values.
+ * Completes immediately with no DATA (Tier 2).
  *
- * Stateful: get() always returns undefined — no values are ever emitted.
+ * @returns `ProducerStore<T>`
  *
- * v3: Tier 2 Producer — sends END immediately on start. Tests validate
- * that END propagation works with no preceding DATA.
+ * @category extra
  */
 export function empty<T = never>(): ProducerStore<T> {
 	return producer<T>(({ complete }) => {

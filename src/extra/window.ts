@@ -6,13 +6,13 @@ import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Splits upstream values into nested stores (windows) based on a notifier.
- * Each time the notifier emits, the current window completes and a new one opens.
+ * Multiplexes upstream into per-window writable stores; notifier edges close/open windows (Tier 2).
  *
- * The output store emits the current window (a WritableStore<T>) whenever a
- * new window is created.
+ * @param notifier - Emissions delimit windows.
  *
- * Tier 2: each new window starts a new DIRTY+value cycle.
+ * @returns `StoreOperator<A, Store<A> | undefined>` — current window store.
+ *
+ * @category extra
  */
 export function window<A>(notifier: Store<unknown>): StoreOperator<A, Store<A> | undefined> {
 	return (input: Store<A>) => {

@@ -4,16 +4,15 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Trailing-edge throttle. When a value arrives, starts a timer.
- * When the timer fires, emits the latest value received during that window.
- * Ignores values that arrive while no timer is running (i.e., after a flush
- * and before the next value).
+ * Trailing-edge sample: after a value arrives, waits `ms` then emits the **latest** value seen in that window (Tier 2).
  *
- * Complements throttle (leading) and debounce (resets timer on each value).
+ * @param ms - Silence period before emitting the most recent upstream value.
  *
- * Tier 2: each emit starts a new DIRTY+value cycle (autoDirty: true).
- * Forwards upstream completion and errors. On completion, if a timer is
- * pending, the latest value is flushed before completing.
+ * @returns `StoreOperator<A, A | undefined>`
+ *
+ * @seeAlso [throttle](/api/throttle), [sample](/api/sample)
+ *
+ * @category extra
  */
 export function audit<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

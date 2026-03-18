@@ -3,29 +3,22 @@ import type { NodeStatus } from "../core/protocol";
 import { DATA, DIRTY, deferEmission, END, isBatching, START, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
-/**
- * Multicast primitive. A subject is both a source and a manual emitter.
- * `next(value)` pushes to all current sinks. `complete()` sends END to all.
- *
- * Stateful: maintains currentValue. get() returns the last value passed
- * to next(), or undefined before first emission. Object.is dedup on next()
- * only when sinks are connected (matches original semantics — values set
- * without sinks are always accepted).
- *
- * v4: next() sends DIRTY on type 3 then value on type 1. Batching-aware
- * (defers type 1 emissions during batch). No upstream deps — manually driven.
- * Output slot model: null → fn → Set. _status tracked for Inspector.
- *
- * Note: subject cannot use producer() because producer's equals guard runs
- * unconditionally (whenever _value !== undefined), while subject only deduplicates
- * when sinks are connected. This semantic difference requires manual implementation.
- */
+/** Manual multicast source: `next` / `error` / `complete` drive the stream. */
 export interface Subject<T> extends Store<T | undefined> {
 	next(value: T): void;
 	error(err: unknown): void;
 	complete(): void;
 }
 
+/**
+ * Creates a `Subject` — imperative push API plus `get()` / `source()` like any store.
+ *
+ * @returns `Subject<T>` with `next`, `error`, `complete`, batch-aware emissions, and optional dedup when sinks exist.
+ *
+ * @remarks **Dedup:** `Object.is` guard on `next` applies only while subscribers are connected.
+ *
+ * @category extra
+ */
 export function subject<T>(): Subject<T> {
 	let currentValue: T | undefined;
 	let completed = false;

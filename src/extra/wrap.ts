@@ -1,15 +1,3 @@
-/**
- * Raw callbag interop wrapper — promotes raw callbag sources and operators
- * to proper Store nodes with output slot, multicast, and STATE forwarding.
- *
- * Two overloads:
- * - wrap<T>(rawSource) → tier 2 store (each DATA starts DIRTY+DATA cycle)
- * - wrap<A, B>(input, rawOp) → tier 1 store (STATE bypasses raw op)
- *
- * Constraint: operator wrapping is synchronous map-only. Filtering or tier 2
- * raw ops must use operator() directly with explicit signal handling.
- */
-
 import { Inspector } from "../core/inspector";
 import { operator } from "../core/operator";
 import { producer } from "../core/producer";
@@ -24,6 +12,18 @@ export function wrap<T>(rawSource: Callbag): Store<T>;
 // Overload 2: wrap a raw callbag operator with input → tier 1 store
 export function wrap<A, B>(input: Store<A>, rawOp: (source: Callbag) => Callbag): Store<B>;
 
+/**
+ * Adapts raw callbag sources or callbag operators into first-class stores.
+ *
+ * @param sourceOrInput - Raw callbag source **or** input store when using two-arg form.
+ * @param rawOp - When set, `(source) => transformedSource` — STATE from input bypasses the raw op (Tier 1).
+ *
+ * @returns `Store<T>` or `Store<B>` — Tier 2 for bare sources (each DATA is a cycle).
+ *
+ * @remarks **Sync map only** for operator form; filtering needs explicit `operator()` wiring.
+ *
+ * @category extra
+ */
 export function wrap<T>(
 	sourceOrInput: Callbag | Store<any>,
 	rawOp?: (source: Callbag) => Callbag,

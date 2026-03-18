@@ -4,15 +4,7 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Errors if the input source does not emit within `ms` milliseconds.
- * The timer resets on each emission. If the timer fires, sinks receive
- * END with a TimeoutError.
- *
- * Stateful: maintains last forwarded value via producer. get() returns
- * input's initial value before first emission.
- *
- * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * No equals — every upstream value is forwarded to keep the timer alive.
+ * Error thrown when `timeout(ms)` fires because no upstream value arrived in time.
  */
 export class TimeoutError extends Error {
 	constructor(ms: number) {
@@ -21,6 +13,15 @@ export class TimeoutError extends Error {
 	}
 }
 
+/**
+ * Forwards values while resetting an idle timer; if `ms` passes without DATA, errors with `TimeoutError` (Tier 2).
+ *
+ * @param ms - Maximum silence before failure.
+ *
+ * @returns `StoreOperator<A, A>`
+ *
+ * @category extra
+ */
 export function timeout<A>(ms: number): StoreOperator<A, A> {
 	return (input: Store<A>) => {
 		const store = producer<A>(

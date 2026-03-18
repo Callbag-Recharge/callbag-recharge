@@ -4,16 +4,28 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
 /**
- * Combines multiple sources into a single store whose value is a tuple
- * of all source values. Recomputes whenever any source changes.
+ * Builds a tuple store from multiple sources; updates when any dep changes (multi-dep Tier 1).
  *
- * Stateful: maintains tuple value via operator()'s cache. get() returns
- * the current tuple of all source values.
+ * @param sources - Stores whose values become tuple elements in order.
  *
- * v3: Tier 1 — uses operator() with multi-dep dirty tracking via bitmask.
- * Forwards DIRTY on first dirty dep; recomputes and emits when all dirty
- * deps have resolved via DATA. If all dirty deps RESOLVED without DATA,
- * forwards RESOLVED (subtree skipping). Always produces a new array ref.
+ * @returns `Store<[...]>` — typed tuple of each store’s `T`.
+ *
+ * @remarks **New array:** Each recompute uses a fresh tuple reference.
+ *
+ * @example
+ * ```ts
+ * import { state } from 'callbag-recharge';
+ * import { combine } from 'callbag-recharge/extra';
+ *
+ * const a = state(1);
+ * const b = state(2);
+ * const c = combine(a, b);
+ * c.get(); // [1, 2]
+ * ```
+ *
+ * @seeAlso [merge](/api/merge), [withLatestFrom](/api/withLatestFrom) — latest value from secondary sources
+ *
+ * @category extra
  */
 export function combine<Sources extends Store<unknown>[]>(
 	...sources: Sources

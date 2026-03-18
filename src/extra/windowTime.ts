@@ -5,13 +5,13 @@ import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Splits upstream values into nested stores (windows) that each last `ms` milliseconds.
- * A new window opens at the start and every `ms` ms thereafter.
+ * Time-based windows: new inner store every `ms` (Tier 2).
  *
- * Tier 2: each new window starts a new DIRTY+value cycle.
+ * @param ms - Window duration in milliseconds.
  *
- * On upstream completion, the current window remains and the outer store completes.
- * On upstream error, the error is forwarded.
+ * @returns `StoreOperator<A, Store<A> | undefined>`
+ *
+ * @category extra
  */
 export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined> {
 	return (input: Store<A>) => {

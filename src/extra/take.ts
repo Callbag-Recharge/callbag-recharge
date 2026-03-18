@@ -3,14 +3,26 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Passes through the first `n` value changes from upstream, then disconnects
- * and completes. Subsequent subscribers receive END immediately.
+ * Emits at most `n` DATA values from upstream, then completes and disconnects.
  *
- * Stateful: maintains own cached value. get() returns the last accepted
- * value (or undefined before first emission). Frozen after completion.
+ * @param n - Number of values to forward (`n <= 0` completes immediately with no DATA).
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards STATE signals
- * while count < n. Counts only actual DATA emissions.
+ * @returns `StoreOperator<A, A | undefined>` — Tier 1; forwards STATE until the take limit is reached.
+ *
+ * @remarks **Completion:** After `n` emissions, upstream is disconnected to stop further work.
+ *
+ * @example
+ * ```ts
+ * import { pipe } from 'callbag-recharge';
+ * import { fromIter, take } from 'callbag-recharge/extra';
+ *
+ * const s = pipe(fromIter([1, 2, 3]), take(2));
+ * // emits 1, 2 then completes
+ * ```
+ *
+ * @seeAlso [skip](/api/skip), [first](/api/first) — take only the first value
+ *
+ * @category extra
  */
 export function take<A>(n: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

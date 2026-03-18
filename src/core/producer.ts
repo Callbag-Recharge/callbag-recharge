@@ -24,7 +24,6 @@ import type { Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
-	SINGLE_DEP,
 	decodeStatus,
 	deferEmission,
 	deferStart,
@@ -37,6 +36,7 @@ import {
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
+	SINGLE_DEP,
 	START,
 	STATE,
 	STATUS_MASK,
@@ -303,6 +303,57 @@ export function producer<T>(
 	opts: ProducerOpts<T> & { initial: T },
 ): ProducerStore<T> & Store<T>;
 export function producer<T>(fn?: ProducerFn<T>, opts?: ProducerOpts<T>): ProducerStore<T>;
+/**
+ * Creates a general-purpose reactive source with `emit`, `signal`, `complete`, and `error`.
+ * The optional factory runs on first subscriber; its return value is cleanup on last disconnect.
+ *
+ * @param fn - Optional setup function receiving action callbacks; return teardown on disconnect.
+ * @param opts - Optional configuration (initial value, equality, autoDirty, getter, etc.).
+ *
+ * @returns `ProducerStore<T>` — a store with:
+ *
+ * @returnsTable get() | () => T \| undefined | Current value (or `getter` result when disconnected).
+ * emit(value) | (value: T) => void | Pushes a new value to subscribers.
+ * signal(s) | (s: Signal) => void | Sends DIRTY or RESOLVED on the STATE channel.
+ * complete() | () => void | Ends the stream successfully.
+ * error(e) | (e: unknown) => void | Ends the stream with an error.
+ * source | callbag | Underlying callbag source for subscriptions.
+ *
+ * @optionsType ProducerOpts
+ * @option initial | T | undefined | Value before first emit; reset target when `resetOnTeardown`.
+ * @option equals | (a: T, b: T) => boolean | undefined | Skips emit when new value equals cached.
+ * @option autoDirty | boolean | true | Send DIRTY on STATE before each DATA emission.
+ * @option getter | (cached) => T | undefined | Pull-based recompute when disconnected.
+ * @option resetOnTeardown | boolean | false | Reset to `initial` when last sink disconnects.
+ * @option resubscribable | boolean | false | Allow new subscriptions after complete/error.
+ * @option name | string | undefined | Debug name for Inspector.
+ *
+ * @remarks **Lazy start:** No work until the first `source()` subscription.
+ * @remarks **Tier 2 boundary:** Used by async/timer operators; each `emit` starts a new DIRTY+value cycle when `autoDirty` is true.
+ *
+ * @example Manual emit (no factory)
+ * ```ts
+ * import { producer } from 'callbag-recharge';
+ *
+ * const bus = producer<string>();
+ * bus.emit('a');
+ * bus.get(); // 'a'
+ * ```
+ *
+ * @example Factory with cleanup
+ * ```ts
+ * const ticks = producer<number>(({ emit, complete }) => {
+ *   let n = 0;
+ *   const id = setInterval(() => {
+ *     emit(n++);
+ *     if (n >= 3) complete();
+ *   }, 10);
+ *   return () => clearInterval(id);
+ * });
+ * ```
+ *
+ * @seeAlso [state](./state) — writable store, [operator](./operator) — transform primitive, [effect](./effect) — side-effects
+ */
 export function producer<T>(fn?: ProducerFn<T>, opts?: ProducerOpts<T>): ProducerStore<T> {
 	return new ProducerImpl<T>(fn, opts) as any;
 }

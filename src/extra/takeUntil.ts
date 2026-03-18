@@ -13,19 +13,13 @@ import {
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Passes through all values from input until notifier emits, then completes.
- * Upstream subscriptions are torn down when the notifier fires.
- * After completion, get() returns the frozen last value.
+ * Mirrors upstream until the notifier becomes dirty, then completes and tears down input (Tier 1-style wiring).
  *
- * Stateful: maintains frozen value after completion; get() delegates to
- * input.get() while active, returns cached frozen value after completion.
+ * @param notifier - First DIRTY from notifier ends the stream (before notifier DATA in the same batch).
  *
- * v4: both input and notifier are subscribed via raw callbag. Completion is
- * triggered on type 3 STATE(DIRTY) from the notifier — in-band during DIRTY
- * propagation, before any type 1 DATA emissions in the same batch reach
- * downstream. Input STATE/DATA signals are forwarded directly to sinks.
- * Unknown STATE signals forwarded for v4 forward-compat.
- * Output slot model: null → fn → Set. _status tracked for Inspector.
+ * @returns `StoreOperator<A, A>` — frozen last value after completion.
+ *
+ * @category extra
  */
 export function takeUntil<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 	return (input: Store<A>) => {

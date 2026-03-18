@@ -3,14 +3,13 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Emits only the first value from upstream, then disconnects and completes.
- * Semantically equivalent to `take(1)`.
+ * Emits the first upstream value then completes (same idea as `take(1)`).
  *
- * Stateful: maintains the first received value. get() returns undefined
- * before first emission, then the captured value (frozen after completion).
+ * @returns `StoreOperator<A, A | undefined>` — Tier 1.
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards STATE signals
- * until first DATA arrives, then emits, disconnects upstream, and completes.
+ * @seeAlso [take](/api/take)
+ *
+ * @category extra
  */
 export function first<A>(): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

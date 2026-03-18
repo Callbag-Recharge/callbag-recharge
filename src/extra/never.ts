@@ -2,12 +2,11 @@ import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
 
 /**
- * Creates a source that never emits, never errors, and never completes.
+ * Inert source: never emits, completes, or errors (Tier 2).
  *
- * Stateful: get() always returns undefined — no values are ever emitted.
+ * @returns `ProducerStore<T>`
  *
- * v3: Tier 2 Producer — starts but never calls emit/complete/error.
- * Cleanup function is a no-op. Tests verify no leaks from idle sources.
+ * @category extra
  */
 export function never<T = never>(): ProducerStore<T> {
 	return producer<T>(() => {

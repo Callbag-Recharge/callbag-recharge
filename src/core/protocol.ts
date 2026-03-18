@@ -75,6 +75,33 @@ const deferredEmissions: Array<() => void> = [];
 // naturally included in the same pass).
 let draining = false;
 
+/**
+ * Runs `fn` while deferring type 1 (DATA) emissions until the outermost batch completes.
+ * Type 3 (STATE) DIRTY signals still propagate immediately so the graph knows what changed.
+ *
+ * @param fn - Synchronous work that may call `set()` / `emit()` on many stores.
+ *
+ * @returns The return value of `fn`.
+ *
+ * @remarks **Nesting:** Inner batches increment depth; only the outermost `finally` drains deferred emissions.
+ * @remarks **Derived/effects:** Downstream nodes typically see one settled value per batch boundary.
+ *
+ * @example
+ * ```ts
+ * import { state, derived, batch } from 'callbag-recharge';
+ *
+ * const a = state(1);
+ * const b = state(2);
+ * const sum = derived([a, b], () => a.get() + b.get());
+ * batch(() => {
+ *   a.set(10);
+ *   b.set(20);
+ * });
+ * sum.get(); // 30
+ * ```
+ *
+ * @seeAlso [state](./state), [derived](./derived)
+ */
 export function batch<T>(fn: () => T): T {
 	batchDepth++;
 	try {
@@ -141,6 +168,24 @@ export function deferStart(start: () => void): void {
 // - DerivedImpl → calls ._handleEnd() (no public complete() on derived)
 // ---------------------------------------------------------------------------
 
+/**
+ * Completes a store-like node and cascades END to all downstream sinks (and tears down the subgraph).
+ * After teardown, the node will not accept new subscriptions or values in the usual way.
+ *
+ * @param store - Any node with `source` and optionally `complete()` or internal `_handleEnd` (e.g. derived).
+ *
+ * @remarks **Producers:** Calls `complete()` when available. **Derived:** Uses `_handleEnd` when present.
+ *
+ * @example
+ * ```ts
+ * import { producer, teardown } from 'callbag-recharge';
+ *
+ * const s = producer<number>();
+ * teardown(s);
+ * ```
+ *
+ * @seeAlso [producer](./producer)
+ */
 export function teardown(store: { source: (type: number, payload?: any) => void }): void {
 	const node = store as any;
 	if (typeof node.complete === "function") {

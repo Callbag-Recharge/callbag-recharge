@@ -4,16 +4,29 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Delays propagation of each upstream change by `ms` milliseconds.
- * If another change arrives before the timer fires, the timer resets.
+ * Delays each upstream change by `ms`; resets the timer if another value arrives sooner (leading-edge cancel).
  *
- * Stateful: maintains last debounced value via producer. get() returns
- * undefined before first emission, then the last debounced value.
+ * @param ms - Debounce interval in milliseconds.
  *
- * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * No built-in dedup — emits every debounced value.
- * On upstream completion, flushes pending value (if any) then completes.
- * On upstream error, cancels pending timer and forwards error.
+ * @returns `StoreOperator<A, A | undefined>` — `undefined` until the first debounced emission; flushes pending on upstream complete.
+ *
+ * @remarks **Tier 2:** Cycle boundary; each debounced `emit` is its own DIRTY+DATA cycle.
+ * @remarks **Errors:** Cancels the timer and forwards upstream errors.
+ *
+ * @example
+ * ```ts
+ * import { state, pipe } from 'callbag-recharge';
+ * import { debounce } from 'callbag-recharge/extra';
+ *
+ * const q = state('');
+ * const d = pipe(q, debounce(100));
+ * q.set('hi');
+ * // after 100ms idle, d emits 'hi'
+ * ```
+ *
+ * @seeAlso [throttle](/api/throttle) — rate-limit emissions, [audit](/api/audit) — sample after silence
+ *
+ * @category extra
  */
 export function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

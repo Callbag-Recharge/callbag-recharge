@@ -4,28 +4,16 @@ import { beginDeferredStart, DATA, END, endDeferredStart, START, STATE } from ".
 import type { Store } from "../core/types";
 
 /**
- * Creates a source that subscribes to the source returned by `factory`,
- * and re-subscribes on normal completion, up to `count` total subscriptions.
- * Each repetition creates a fresh source via the factory function.
+ * Re-subscribes to `factory()` on each **clean** completion; optional `count` caps total rounds (Tier 2).
  *
- * `repeat(factory, 3)` subscribes at most 3 times total.
- * `repeat(factory)` with no count repeats indefinitely.
+ * @param factory - Returns a fresh `Store<T>` per subscription.
+ * @param count - Max subscription rounds (omit for infinite repeat).
  *
- * Error propagation: if an inner source errors (END with data), the error
- * is forwarded immediately — repeat does NOT re-subscribe on error
- * (use `retry` for that).
+ * @returns `Store<T | undefined>` — errors are **not** retried (use `retry`).
  *
- * Stack safety: re-subscription is deferred via a trampoline to prevent
- * stack overflow when inner sources complete synchronously.
+ * @seeAlso [retry](/api/retry)
  *
- * Stateful: maintains last emitted value via producer's internal cache.
- * get() returns the last value emitted by any subscription round.
- *
- * v3: uses producer(autoDirty:false) — a Tier 2 boundary. Type 3 STATE
- * signals from the active subscription are forwarded manually; type 1 DATA
- * is emitted directly without auto-DIRTY (since DIRTY already arrived via
- * type 3). On upstream END, creates a new source via factory and subscribes
- * if repetitions remain. Tests verify previous-subscription disposal.
+ * @category extra
  */
 export function repeat<T>(factory: () => Store<T>, count?: number): Store<T | undefined> {
 	return producer<T | undefined>(

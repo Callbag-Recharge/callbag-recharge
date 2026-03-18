@@ -3,15 +3,26 @@ import { DATA, DIRTY, END, RESOLVED, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Skips the first `n` value changes from upstream, then passes through all
- * subsequent ones.
+ * Ignores the first `n` upstream DATA emissions, then mirrors the rest.
  *
- * Stateful: maintains own cached value. get() returns undefined until the
- * first post-skip value arrives, then returns the last forwarded value.
+ * @param n - Count of initial values to drop.
  *
- * v3: Tier 1 — uses operator() with single dep. During the skip phase
- * (emissionCount < n), STATE signals are not forwarded and DATA values are
- * silently consumed. After n values, STATE and DATA forward normally.
+ * @returns `StoreOperator<A, A | undefined>` — `undefined` until the first value after the skip window.
+ *
+ * @remarks **Tier 1:** During skip, DIRTY/RESOLVED handling keeps the graph consistent after the window.
+ *
+ * @example
+ * ```ts
+ * import { pipe } from 'callbag-recharge';
+ * import { fromIter, skip } from 'callbag-recharge/extra';
+ *
+ * const s = pipe(fromIter([1, 2, 3]), skip(1));
+ * // forwards 2, 3
+ * ```
+ *
+ * @seeAlso [take](/api/take)
+ *
+ * @category extra
  */
 export function skip<A>(n: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

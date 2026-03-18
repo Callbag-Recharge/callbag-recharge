@@ -4,14 +4,15 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Delays each upstream value by `ms` milliseconds.
- * Unlike debounce, each value gets its own independent timer.
+ * Shifts each upstream value forward in time by `ms` (independent timer per value).
  *
- * Stateful: maintains last delayed value via producer. get() returns
- * undefined before first emission and after teardown (resetOnTeardown).
+ * @param ms - Delay in milliseconds.
  *
- * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * No equals — every delayed value is forwarded faithfully.
+ * @returns `StoreOperator<A, A | undefined>` — Tier 2; may reorder rapid bursts by completion time.
+ *
+ * @seeAlso [debounce](/api/debounce)
+ *
+ * @category extra
  */
 export function delay<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {

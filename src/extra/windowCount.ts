@@ -5,13 +5,13 @@ import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Splits upstream values into nested stores of exactly `count` values each.
- * Each window completes after receiving `count` values and a new window opens.
+ * Fixed-size counting windows: each inner store receives up to `count` values (Tier 2).
  *
- * Tier 2: each new window starts a new DIRTY+value cycle.
+ * @param count - Values per window before rotating.
  *
- * On upstream completion, the final partial window remains open with whatever
- * values it has received.
+ * @returns `StoreOperator<A, Store<A> | undefined>`
+ *
+ * @category extra
  */
 export function windowCount<A>(count: number): StoreOperator<A, Store<A> | undefined> {
 	return (input: Store<A>) => {

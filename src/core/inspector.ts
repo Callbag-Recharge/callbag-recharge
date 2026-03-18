@@ -46,6 +46,16 @@ export interface ObserveResult<T> {
 }
 
 // Static-only class is intentional API for Inspector namespace
+/**
+ * Opt-in graph observability (`inspect`, `graph`, `trace`, `observe`, …). Metadata in WeakMaps.
+ *
+ * @example
+ * ```ts
+ * const n = state(0, { name: "n" });
+ * Inspector.inspect(n).value; // 0
+ * Inspector.inspect(n).kind; // "state"
+ * ```
+ */
 // biome-ignore lint/complexity/noStaticOnlyClass: public API surface
 export class Inspector {
 	// WeakMaps for metadata — keyed by any graph node (stores, effects, etc.)

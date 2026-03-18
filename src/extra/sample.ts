@@ -4,14 +4,13 @@ import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
 /**
- * Emits the latest value from the input source whenever the notifier emits.
+ * On each notifier emission, emits the **latest** value from the primary input (Tier 2).
  *
- * Stateful: maintains latest input value. get() always returns the latest
- * input value (via getter), not just the last sampled emission.
+ * @param notifier - Sampling clock store.
  *
- * v3: Tier 2 — each emit starts a new DIRTY+value cycle (autoDirty: true).
- * No built-in dedup. getter overrides get() to return latest input.
- * Forwards input and notifier completion and errors.
+ * @returns `StoreOperator<A, A>` — `get()` reflects latest input, not only last sample.
+ *
+ * @category extra
  */
 export function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 	return (input: Store<A>) => {

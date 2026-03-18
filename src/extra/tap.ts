@@ -3,14 +3,13 @@ import { DATA, END, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
- * Side-effect passthrough operator. Calls `fn` for each upstream value
- * without altering it. Useful for debugging and logging.
+ * Runs `fn` for each value then re-emits it unchanged (Tier 1).
  *
- * Stateful: maintains cached value via operator()'s internal cache.
- * get() returns the last received value.
+ * @param fn - Observer side effect.
  *
- * v3: Tier 1 — uses operator() with single dep. Forwards all type 3
- * STATE signals unchanged; calls fn and emits each type 1 DATA value.
+ * @returns `StoreOperator<A, A>`
+ *
+ * @category extra
  */
 export function tap<A>(fn: (value: A) => void): StoreOperator<A, A> {
 	return (input: Store<A>) => {
