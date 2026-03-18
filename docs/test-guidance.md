@@ -64,7 +64,9 @@ src/__tests__/
 ├── data/           ← Level 3 reactive data structure tests
 │   ├── reactiveMap.test.ts           — CRUD, reactive API, TTL, namespace, eviction, lifecycle
 │   ├── reactiveLog.test.ts           — append, bounded trim, reactive stores, events, lifecycle
-│   └── reactiveIndex.test.ts         — add/remove/update, reactive select/keys/size, lifecycle
+│   ├── reactiveIndex.test.ts         — add/remove/update, reactive select/keys/size, lifecycle
+│   ├── pubsub.test.ts                — publish/subscribe, multi-topic, reactive effects, destroy
+│   └── nodeV0.test.ts                — id/version/snapshot for all data structures
 └── integrations/
     └── interop.test.ts                 — external callbag operator compatibility
 ```

@@ -26,12 +26,25 @@ import { derived } from "../core/derived";
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
-import type { LogEntry, LogEvent, ReactiveLog, ReactiveLogOptions } from "./types";
+import type { LogEntry, LogEvent, LogSnapshot, ReactiveLog, ReactiveLogOptions } from "./types";
 
 let logCounter = 0;
 
+/**
+ * Restore a reactiveLog from a snapshot. Preserves id; version resets to 0.
+ */
+reactiveLog.from = function from<V>(
+	snap: LogSnapshot<V>,
+	opts?: Omit<ReactiveLogOptions, "id">,
+): ReactiveLog<V> {
+	const log = reactiveLog<V>({ ...opts, id: snap.id });
+	for (const entry of snap.entries) log.append(entry.value);
+	return log;
+};
+
 export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
-	const id = ++logCounter;
+	const counter = ++logCounter;
+	const nodeId = opts?.id ?? `rlog-${counter}`;
 	const maxSize = opts?.maxSize ?? 0; // 0 = unlimited
 
 	// Storage — circular buffer via array + head pointer
@@ -40,11 +53,11 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 	let _headSeq = 1; // sequence number of the oldest entry still in the log
 
 	// Version counter — bumped on every structural change (append/trim/clear)
-	const _version = state<number>(0, { name: `rlog-${id}:ver` });
+	const _version = state<number>(0, { name: `${nodeId}:ver` });
 
 	// Events — zero cost if unsubscribed
 	const _events = state<LogEvent<V> | undefined>(undefined, {
-		name: `rlog-${id}:events`,
+		name: `${nodeId}:events`,
 		equals: () => false, // always emit
 	});
 
@@ -71,6 +84,13 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 	// ---- Public API ----
 
 	const log: ReactiveLog<V> = {
+		get id() {
+			return nodeId;
+		},
+		get version() {
+			return _version.get();
+		},
+
 		append(value: V): number {
 			if (destroyed) return -1;
 			const seq = ++_seq;
@@ -136,13 +156,13 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 		// --- Reactive ---
 
 		lengthStore: derived([_version], () => _entries.length, {
-			name: `rlog-${id}:length`,
+			name: `${nodeId}:length`,
 		}) as Store<number>,
 
 		latest: derived(
 			[_version],
 			() => (_entries.length > 0 ? _entries[_entries.length - 1] : undefined),
-			{ name: `rlog-${id}:latest` },
+			{ name: `${nodeId}:latest` },
 		) as Store<LogEntry<V> | undefined>,
 
 		tail(n?: number): Store<LogEntry<V>[]> {
@@ -154,13 +174,26 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 					if (n === undefined || n >= _entries.length) return _entries.slice();
 					return _entries.slice(-n);
 				},
-				{ name: `rlog-${id}:tail${n ?? ""}` },
+				{ name: `${nodeId}:tail${n ?? ""}` },
 			);
 			_tails.set(n, cached);
 			return cached;
 		},
 
 		events: _events as Store<LogEvent<V> | undefined>,
+
+		// --- Serialization ---
+
+		snapshot(): LogSnapshot<V> {
+			return {
+				type: "reactiveLog",
+				id: nodeId,
+				version: _version.get(),
+				entries: _entries.map((e) => ({ seq: e.seq, value: e.value })),
+				headSeq: _entries.length > 0 ? _headSeq : 0,
+				tailSeq: _seq,
+			};
+		},
 
 		// --- Lifecycle ---
 

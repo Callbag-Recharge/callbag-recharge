@@ -8,13 +8,16 @@
 // - _nodes: Map<string, MemoryNode<T>> for O(1) ID lookup
 // - _nodesStore: state<MemoryNode<T>[]> for reactive node list
 // - _sizeStore: derived from _nodesStore for reactive count
+// - _tagIndex: reactiveIndex for O(1) tag-based lookups (replaces O(n) scan)
 // - maxSize eviction uses decay scoring — lowest-score nodes evicted first
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
+import { effect } from "../core/effect";
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { reactiveIndex } from "../data/reactiveIndex";
 import { reactiveScored } from "../utils/reactiveEviction";
 import { computeScore } from "./decay";
 import { memoryNode } from "./node";
@@ -35,6 +38,11 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 
 	// Internal storage
 	const _nodes = new Map<string, MemoryNodeInterface<T>>();
+
+	// Tag index — O(1) tag-based lookups via reactiveIndex
+	const _tagIndex = reactiveIndex();
+	// Per-node effect disposers for tag change tracking
+	const _tagEffects = new Map<string, () => void>();
 
 	// Reactive eviction policy — O(log n) heap, updated on every meta push.
 	// Subscribes directly to node.meta via effect — no intermediate derived needed.
@@ -63,12 +71,33 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 		_nodesStore.set(Array.from(_nodes.values()));
 	}
 
+	function _trackTags(node: MemoryNodeInterface<T>): void {
+		// Effect runs eagerly on creation — handles both initial and subsequent tag changes.
+		// No separate _tagIndex.add() needed; update() does add on first call.
+		const dispose = effect([node.meta], () => {
+			const currentTags = Array.from(node.meta.get().tags);
+			_tagIndex.update(node.id, currentTags);
+			return undefined;
+		});
+		_tagEffects.set(node.id, dispose);
+	}
+
+	function _untrackTags(nodeId: string): void {
+		const dispose = _tagEffects.get(nodeId);
+		if (dispose) {
+			dispose();
+			_tagEffects.delete(nodeId);
+		}
+		_tagIndex.remove(nodeId);
+	}
+
 	function _evictIfNeeded(): void {
 		if (!_evictionPolicy || _nodes.size <= maxSize) return;
 		const toRemove = _evictionPolicy.evict(_nodes.size - maxSize);
 		for (const nodeId of toRemove) {
 			const node = _nodes.get(nodeId);
 			if (node) {
+				_untrackTags(nodeId);
 				node.destroy();
 				_nodes.delete(nodeId);
 			}
@@ -80,6 +109,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			if (destroyed) throw new Error("Collection is destroyed");
 			const node = memoryNode<T>(content, nodeOpts);
 			_nodes.set(node.id, node);
+			_trackTags(node);
 			_evictionPolicy?.insert(node.id);
 			_evictIfNeeded();
 			_syncNodesStore();
@@ -90,6 +120,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			const nodeId = typeof nodeOrId === "string" ? nodeOrId : nodeOrId.id;
 			const node = _nodes.get(nodeId);
 			if (!node) return false;
+			_untrackTags(nodeId);
 			_evictionPolicy?.delete(nodeId);
 			node.destroy();
 			_nodes.delete(nodeId);
@@ -107,6 +138,7 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 
 		nodes: _nodesStore as Store<MemoryNodeInterface<T>[]>,
 		size: _sizeStore,
+		tagIndex: _tagIndex,
 
 		query(filter: (node: MemoryNodeInterface<T>) => boolean): MemoryNodeInterface<T>[] {
 			const result: MemoryNodeInterface<T>[] = [];
@@ -117,9 +149,11 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 		},
 
 		byTag(tag: string): MemoryNodeInterface<T>[] {
+			const nodeIds = _tagIndex.get(tag);
 			const result: MemoryNodeInterface<T>[] = [];
-			for (const node of _nodes.values()) {
-				if (node.meta.get().tags.has(tag)) result.push(node);
+			for (const nodeId of nodeIds) {
+				const node = _nodes.get(nodeId);
+				if (node) result.push(node);
 			}
 			return result;
 		},
@@ -139,6 +173,9 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			if (destroyed) return;
 			destroyed = true;
 			_evictionPolicy?.clear();
+			for (const dispose of _tagEffects.values()) dispose();
+			_tagEffects.clear();
+			_tagIndex.destroy();
 			batch(() => {
 				for (const node of _nodes.values()) node.destroy();
 				_nodes.clear();

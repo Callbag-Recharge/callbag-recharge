@@ -17,7 +17,7 @@ export interface KVEvent<V> {
 	value?: V;
 }
 
-export interface ReactiveMap<V> {
+export interface ReactiveMap<V> extends NodeV0 {
 	// --- CRUD ---
 
 	/** Point read — O(1), ~10ns */
@@ -78,6 +78,11 @@ export interface ReactiveMap<V> {
 	/** Virtual partitioning via key prefix. */
 	namespace(prefix: string): ReactiveMap<V>;
 
+	// --- Serialization ---
+
+	/** Return a JSON-serializable snapshot of the map. */
+	snapshot(): MapSnapshot<V>;
+
 	// --- Lifecycle ---
 
 	/** Tear down all stores and timers. */
@@ -85,6 +90,8 @@ export interface ReactiveMap<V> {
 }
 
 export interface ReactiveMapOptions<V> {
+	/** User-specified ID. Auto-generated if omitted. */
+	id?: string;
 	/** Default TTL in milliseconds for all keys. 0 = no expiry (default). */
 	defaultTTL?: number;
 	/** Custom equality function for value deduplication. Default: Object.is */
@@ -113,7 +120,7 @@ export interface LogEvent<V> {
 	value?: V;
 }
 
-export interface ReactiveLog<V> {
+export interface ReactiveLog<V> extends NodeV0 {
 	// --- Write ---
 
 	/** Append a value. Returns the assigned sequence number. */
@@ -147,6 +154,11 @@ export interface ReactiveLog<V> {
 	/** Event notification store. Zero cost if unsubscribed. */
 	events: Store<LogEvent<V> | undefined>;
 
+	// --- Serialization ---
+
+	/** Return a JSON-serializable snapshot of the log. */
+	snapshot(): LogSnapshot<V>;
+
 	// --- Lifecycle ---
 
 	/** Remove all entries. */
@@ -156,6 +168,8 @@ export interface ReactiveLog<V> {
 }
 
 export interface ReactiveLogOptions {
+	/** User-specified ID. Auto-generated if omitted. */
+	id?: string;
 	/** Maximum number of entries. 0 = unlimited (default). Oldest trimmed on overflow. */
 	maxSize?: number;
 }
@@ -165,7 +179,7 @@ export interface ReactiveLogOptions {
 // ---------------------------------------------------------------------------
 
 /** An index entry mapping an index key to a set of primary keys. */
-export interface ReactiveIndex {
+export interface ReactiveIndex extends NodeV0 {
 	// --- Read ---
 
 	/** Get all primary keys matching an index key. */
@@ -197,6 +211,11 @@ export interface ReactiveIndex {
 	/** Clear all entries. */
 	clear(): void;
 
+	// --- Serialization ---
+
+	/** Return a JSON-serializable snapshot of the index. */
+	snapshot(): IndexSnapshot;
+
 	// --- Lifecycle ---
 
 	/** Tear down all stores. */
@@ -206,4 +225,54 @@ export interface ReactiveIndex {
 export interface ReactiveIndexOptions<V> {
 	/** Function that extracts index keys from a value. */
 	keyFn: (value: V, primaryKey: string) => string[];
+}
+
+// ---------------------------------------------------------------------------
+// NodeV0 — id + version + snapshot (Level 3 serialization)
+// ---------------------------------------------------------------------------
+
+export interface NodeV0 {
+	/** User-specified or auto-generated unique identifier. */
+	readonly id: string;
+	/** Monotonically increasing version number (bumped on structural changes). */
+	readonly version: number;
+}
+
+export interface MapSnapshot<V> extends NodeV0 {
+	type: "reactiveMap";
+	entries: [string, V][];
+}
+
+export interface LogSnapshot<V> extends NodeV0 {
+	type: "reactiveLog";
+	entries: Array<{ seq: number; value: V }>;
+	headSeq: number;
+	tailSeq: number;
+}
+
+export interface IndexSnapshot extends NodeV0 {
+	type: "reactiveIndex";
+	index: Record<string, string[]>;
+}
+
+// ---------------------------------------------------------------------------
+// PubSub
+// ---------------------------------------------------------------------------
+
+export interface PubSub<T = unknown> extends NodeV0 {
+	/** Publish a message to a topic. */
+	publish(topic: string, message: T): void;
+	/** Subscribe to a topic. Returns a read-only reactive store of the latest message. */
+	subscribe(topic: string): Store<T | undefined>;
+	/** Get all topics that have been created. */
+	topics(): string[];
+	/** Return a JSON-serializable snapshot. */
+	snapshot(): PubSubSnapshot<T>;
+	/** Tear down all channel stores. */
+	destroy(): void;
+}
+
+export interface PubSubSnapshot<T> extends NodeV0 {
+	type: "pubsub";
+	channels: Record<string, T | undefined>;
 }

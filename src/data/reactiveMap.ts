@@ -22,12 +22,25 @@ import { state } from "../core/state";
 import type { Store, WritableStore } from "../core/types";
 import type { EvictionPolicy } from "../utils/eviction";
 import { fifo } from "../utils/eviction";
-import type { KVEvent, ReactiveMap, ReactiveMapOptions } from "./types";
+import type { KVEvent, MapSnapshot, ReactiveMap, ReactiveMapOptions } from "./types";
 
 let mapCounter = 0;
 
+/**
+ * Restore a reactiveMap from a snapshot. Preserves id; version resets to 0.
+ */
+reactiveMap.from = function from<V>(
+	snap: MapSnapshot<V>,
+	opts?: Omit<ReactiveMapOptions<V>, "id">,
+): ReactiveMap<V> {
+	const m = reactiveMap<V>({ ...opts, id: snap.id });
+	for (const [k, v] of snap.entries) m.set(k, v);
+	return m;
+};
+
 export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
-	const id = ++mapCounter;
+	const counter = ++mapCounter;
+	const nodeId = opts?.id ?? `rmap-${counter}`;
 	const defaultTTL = opts?.defaultTTL ?? 0;
 	const equals = opts?.equals ?? (Object.is as (a: V, b: V) => boolean);
 	const maxSize = opts?.maxSize ?? 0; // 0 = unlimited
@@ -45,20 +58,20 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 	const _deadlines = new Map<string, number>();
 
 	// Version counter — bumped on key add/delete (not value updates)
-	const _version = state<number>(0, { name: `rmap-${id}:ver` });
+	const _version = state<number>(0, { name: `${nodeId}:ver` });
 
 	// Lazy keys materialization — only recomputes when _version changes
 	const _keysStore: Store<string[]> = derived([_version], () => Array.from(_map.keys()), {
-		name: `rmap-${id}:keys`,
+		name: `${nodeId}:keys`,
 	});
 
 	const _sizeStore: Store<number> = derived([_version], () => _map.size, {
-		name: `rmap-${id}:size`,
+		name: `${nodeId}:size`,
 	});
 
 	// Keyspace events — zero cost if unsubscribed
 	const _events = state<KVEvent<V> | undefined>(undefined, {
-		name: `rmap-${id}:events`,
+		name: `${nodeId}:events`,
 		equals: () => false, // Always emit (events are ephemeral)
 	});
 
@@ -79,7 +92,7 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 		let s = _states.get(key);
 		if (!s) {
 			s = state<V | undefined>(_map.get(key), {
-				name: `rmap-${id}:${key}`,
+				name: `${nodeId}:${key}`,
 				equals: _undefinedSafeEquals,
 			});
 			_states.set(key, s);
@@ -126,6 +139,13 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 	// ---- Public API ----
 
 	const rmap: ReactiveMap<V> = {
+		get id() {
+			return nodeId;
+		},
+		get version() {
+			return _version.get();
+		},
+
 		get(key: string): V | undefined {
 			_evictionPolicy?.touch(key);
 			return _map.get(key);
@@ -240,7 +260,7 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 
 			const internal = _getOrCreateState(key);
 			cached = derived([internal], () => internal.get(), {
-				name: `rmap-${id}:${key}:select`,
+				name: `${nodeId}:${key}:select`,
 				equals: _undefinedSafeEquals,
 			});
 			_selects.set(key, cached);
@@ -251,10 +271,11 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 		sizeStore: _sizeStore,
 
 		where(pred: (value: V, key: string) => boolean): Store<[string, V][]> {
-			// Re-derive on version change (key add/delete) AND on any value change
-			// For now: derive from _version (conservative — recomputes on structural changes)
+			// Derive from both _version (structural changes) and _events (value updates).
+			// _events fires on every set/delete/clear, so value updates on existing keys
+			// also trigger recomputation of the filter.
 			return derived(
-				[_version],
+				[_version, _events],
 				() => {
 					const result: [string, V][] = [];
 					for (const [k, v] of _map) {
@@ -262,7 +283,7 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 					}
 					return result;
 				},
-				{ name: `rmap-${id}:where` },
+				{ name: `${nodeId}:where` },
 			);
 		},
 
@@ -292,7 +313,14 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 
 		namespace(prefix: string): ReactiveMap<V> {
 			// Thin proxy that prefixes all keys
+			const nsId = `${nodeId}:ns:${prefix}`;
 			const ns: ReactiveMap<V> = {
+				get id() {
+					return nsId;
+				},
+				get version() {
+					return _version.get();
+				},
 				get: (key) => rmap.get(prefix + key),
 				set: (key, value) => rmap.set(prefix + key, value),
 				delete: (key) => rmap.delete(prefix + key),
@@ -355,7 +383,7 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 					return count;
 				}),
 				where: (pred) =>
-					derived([_version], () => {
+					derived([_version, _events], () => {
 						const result: [string, V][] = [];
 						for (const [k, v] of _map) {
 							if (k.startsWith(prefix) && pred(v, k.slice(prefix.length))) {
@@ -369,9 +397,26 @@ export function reactiveMap<V>(opts?: ReactiveMapOptions<V>): ReactiveMap<V> {
 				persist: (key) => rmap.persist(prefix + key),
 				events: rmap.events, // Shares parent events (includes prefixed keys)
 				namespace: (subPrefix) => rmap.namespace(prefix + subPrefix),
+				snapshot: () => ({
+					type: "reactiveMap" as const,
+					id: nsId,
+					version: _version.get(),
+					entries: ns.entries(),
+				}),
 				destroy: () => ns.clear(), // Namespace destroy only clears its keys
 			};
 			return ns;
+		},
+
+		// --- Serialization ---
+
+		snapshot(): MapSnapshot<V> {
+			return {
+				type: "reactiveMap",
+				id: nodeId,
+				version: _version.get(),
+				entries: Array.from(_map.entries()),
+			};
 		},
 
 		// --- Lifecycle ---

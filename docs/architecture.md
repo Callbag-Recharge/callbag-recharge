@@ -60,7 +60,8 @@ src/
 │   ├── reactiveMap.ts   ← reactive key-value store (replaces kvStore)
 │   ├── reactiveLog.ts   ← append-only reactive log with bounded size
 │   ├── reactiveIndex.ts ← reactive secondary index (indexKey → Set<primaryKey>)
-│   └── types.ts         ← shared type definitions
+│   ├── pubsub.ts        ← thin topic-based publish/subscribe channel
+│   └── types.ts         ← shared type definitions (including NodeV0)
 ├── memory/          ← Level 3 agent memory — import from core + utils + data
 │   ├── node.ts      ← memoryNode: content + meta + reactive score
 │   ├── collection.ts← collection: bounded container with decay-scored eviction
@@ -772,10 +773,55 @@ Append-only reactive log. Each entry gets a monotonic sequence number. Supports 
 
 Reactive secondary index mapping `indexKey → Set<primaryKey>`. Maintains a reverse map (`primaryKey → Set<indexKey>`) for O(1) update/remove. Reactive `select(indexKey)`, `keysStore`, `sizeStore`. Designed to be driven by a source data structure that calls `add/remove/update` when entries change.
 
-**Pattern:** All three data structures follow the same architecture:
+### pubsub (`data/pubsub.ts`)
+
+Thin topic-based publish/subscribe channel. Each topic is a lazily created `state` store with `equals: () => false` (always emit). `publish(topic, msg)` sets the store; `subscribe(topic)` returns it. Zero cost for unobserved topics.
+
+**Pattern:** All data structures follow the same architecture:
 - Plain JS collections as source of truth (Map, array)
 - `state<number>` version counter for structural changes
 - `derived` stores for lazy reactive views
 - `state` with `equals: () => false` for event streams
 - `batch()` for atomic multi-mutation operations
 - `teardown()` in `destroy()` for cleanup
+
+---
+
+## 21. NodeV0 — Serialization (Level 3)
+
+Every Level 3 data structure implements the `NodeV0` interface:
+
+```ts
+interface NodeV0 {
+  readonly id: string;      // user-specified or auto-generated
+  readonly version: number;  // monotonically increasing, bumped on structural changes
+}
+```
+
+**`id`** — user-specified via options (`{ id: "my-map" }`) or auto-generated (`rmap-1`, `rlog-2`, `ridx-3`). Stable across the lifetime of the structure.
+
+**`version`** — reads from the internal `_version` state counter. Increments on key add/delete (map), append/clear (log), index key add/remove (index). Value updates that don't change structure do not bump version.
+
+**`snapshot()`** — returns a JSON-serializable representation of the structure's current state:
+
+```ts
+reactiveMap.snapshot()   → { type: "reactiveMap",   id, version, entries: [k, v][] }
+reactiveLog.snapshot()   → { type: "reactiveLog",   id, version, entries, headSeq, tailSeq }
+reactiveIndex.snapshot() → { type: "reactiveIndex", id, version, index: Record<string, string[]> }
+```
+
+NodeV0 is the Level 3 minimum — negligible overhead (two fields). Level 4 adds `cid` + `prev` + `schema` (NodeV1) on demand.
+
+---
+
+## 22. Collection Tag Index Integration
+
+`collection` (in `src/memory/`) uses `reactiveIndex` internally for O(1) tag-based lookups. When a node is added, its tags are indexed. An `effect` per node watches `meta` changes and updates the index when tags change. `byTag(tag)` delegates to `_tagIndex.get(tag)` instead of scanning all nodes.
+
+The `tagIndex` property is exposed on the `Collection` interface, enabling reactive tag queries:
+
+```ts
+const col = collection<string>();
+col.add("doc", { id: "d1", tags: ["important"] });
+col.tagIndex.select("important").get(); // Set{"d1"}
+```

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import type { Store, WritableStore } from "../core/types";
+import type { ReactiveIndex } from "../data/types";
 
 // ---------------------------------------------------------------------------
 // Phase 1: Memory Primitives
@@ -87,10 +88,13 @@ export interface Collection<T> {
 
 	/** Query nodes with a filter function (snapshot). */
 	query(filter: (node: MemoryNode<T>) => boolean): MemoryNode<T>[];
-	/** Get nodes by tag (snapshot). */
+	/** Get nodes by tag (snapshot). O(1) via reactiveIndex. */
 	byTag(tag: string): MemoryNode<T>[];
 	/** Get top-K nodes by score (snapshot). */
 	topK(k: number, weights?: ScoreWeights): MemoryNode<T>[];
+
+	/** Reactive tag index — select(tag) returns reactive Set<nodeId>. */
+	readonly tagIndex: ReactiveIndex;
 
 	/** Tear down all nodes and internal stores. */
 	destroy(): void;

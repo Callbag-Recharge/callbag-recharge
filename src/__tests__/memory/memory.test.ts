@@ -327,4 +327,67 @@ describe("collection — Phase 1: Collection", () => {
 
 		expect(() => col.add("c")).toThrow("Collection is destroyed");
 	});
+
+	// --- Tag index integration (reactiveIndex) ---
+
+	it("tagIndex provides reactive tag lookups", () => {
+		const col = collection<string>();
+		col.add("a", { id: "n1", tags: ["x"] });
+		col.add("b", { id: "n2", tags: ["y"] });
+		col.add("c", { id: "n3", tags: ["x", "y"] });
+
+		// Reactive select on tag
+		const xSet = col.tagIndex.select("x").get();
+		expect(xSet.has("n1")).toBe(true);
+		expect(xSet.has("n3")).toBe(true);
+		expect(xSet.size).toBe(2);
+		col.destroy();
+	});
+
+	it("tagIndex updates when node tags change", () => {
+		const col = collection<string>();
+		const n = col.add("data", { id: "n1", tags: ["a"] });
+
+		expect(col.byTag("a")).toHaveLength(1);
+		expect(col.byTag("b")).toHaveLength(0);
+
+		// Tag the node with "b"
+		n.tag("b");
+		expect(col.byTag("b")).toHaveLength(1);
+
+		// Untag "a"
+		n.untag("a");
+		expect(col.byTag("a")).toHaveLength(0);
+		expect(col.byTag("b")).toHaveLength(1);
+
+		col.destroy();
+	});
+
+	it("tagIndex cleans up when node is removed", () => {
+		const col = collection<string>();
+		col.add("data", { id: "n1", tags: ["x"] });
+
+		expect(col.tagIndex.get("x").has("n1")).toBe(true);
+
+		col.remove("n1");
+		expect(col.tagIndex.get("x").size).toBe(0);
+
+		col.destroy();
+	});
+
+	it("byTag uses index for O(1) lookup", () => {
+		const col = collection<string>();
+		col.add("a", { tags: ["common"] });
+		col.add("b", { tags: ["unique"] });
+		col.add("c", { tags: ["common"] });
+
+		const common = col.byTag("common");
+		expect(common).toHaveLength(2);
+		expect(common.map((n) => n.content.get()).sort()).toEqual(["a", "c"]);
+
+		const none = col.byTag("nonexistent");
+		expect(none).toHaveLength(0);
+
+		col.destroy();
+	});
 });

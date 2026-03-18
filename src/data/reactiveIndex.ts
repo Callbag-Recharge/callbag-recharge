@@ -22,12 +22,29 @@ import { derived } from "../core/derived";
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, WritableStore } from "../core/types";
-import type { ReactiveIndex } from "./types";
+import type { IndexSnapshot, ReactiveIndex } from "./types";
 
 let indexCounter = 0;
 
-export function reactiveIndex(): ReactiveIndex {
-	const id = ++indexCounter;
+export interface ReactiveIndexCreateOptions {
+	/** User-specified ID. Auto-generated if omitted. */
+	id?: string;
+}
+
+/**
+ * Restore a reactiveIndex from a snapshot. Preserves id; version resets to 0.
+ */
+reactiveIndex.from = function from(snap: IndexSnapshot): ReactiveIndex {
+	const idx = reactiveIndex({ id: snap.id });
+	for (const [indexKey, primaryKeys] of Object.entries(snap.index)) {
+		for (const pk of primaryKeys) idx.add(pk, [indexKey]);
+	}
+	return idx;
+};
+
+export function reactiveIndex(opts?: ReactiveIndexCreateOptions): ReactiveIndex {
+	const counter = ++indexCounter;
+	const nodeId = opts?.id ?? `ridx-${counter}`;
 
 	// indexKey → Set<primaryKey>
 	const _index = new Map<string, Set<string>>();
@@ -42,14 +59,14 @@ export function reactiveIndex(): ReactiveIndex {
 	const _selects = new Map<string, Store<Set<string>>>();
 
 	// Version counter — bumped on index key add/remove
-	const _version = state<number>(0, { name: `ridx-${id}:ver` });
+	const _version = state<number>(0, { name: `${nodeId}:ver` });
 
 	const _keysStore: Store<string[]> = derived([_version], () => Array.from(_index.keys()), {
-		name: `ridx-${id}:keys`,
+		name: `${nodeId}:keys`,
 	});
 
 	const _sizeStore: Store<number> = derived([_version], () => _index.size, {
-		name: `ridx-${id}:size`,
+		name: `${nodeId}:size`,
 	});
 
 	let destroyed = false;
@@ -62,7 +79,7 @@ export function reactiveIndex(): ReactiveIndex {
 		let s = _states.get(indexKey);
 		if (!s) {
 			s = state<Set<string>>(_index.get(indexKey) ?? new Set(), {
-				name: `ridx-${id}:${indexKey}`,
+				name: `${nodeId}:${indexKey}`,
 				equals: () => false, // Sets are mutable — always emit on update
 			});
 			_states.set(indexKey, s);
@@ -103,9 +120,16 @@ export function reactiveIndex(): ReactiveIndex {
 	// ---- Public API ----
 
 	const idx: ReactiveIndex = {
+		get id() {
+			return nodeId;
+		},
+		get version() {
+			return _version.get();
+		},
+
 		get(indexKey: string): Set<string> {
 			const set = _index.get(indexKey);
-			return set ? new Set(set) : _emptySet;
+			return set ? (Object.freeze(new Set(set)) as Set<string>) : _emptySet;
 		},
 
 		has(indexKey: string): boolean {
@@ -129,7 +153,7 @@ export function reactiveIndex(): ReactiveIndex {
 
 			const internal = _getOrCreateState(indexKey);
 			cached = derived([internal], () => internal.get(), {
-				name: `ridx-${id}:${indexKey}:select`,
+				name: `${nodeId}:${indexKey}:select`,
 			});
 			_selects.set(indexKey, cached);
 			return cached;
@@ -222,6 +246,21 @@ export function reactiveIndex(): ReactiveIndex {
 				for (const s of _states.values()) s.set(new Set());
 				_version.update((v) => v + 1);
 			});
+		},
+
+		// --- Serialization ---
+
+		snapshot(): IndexSnapshot {
+			const index: Record<string, string[]> = {};
+			for (const [key, set] of _index) {
+				index[key] = Array.from(set);
+			}
+			return {
+				type: "reactiveIndex",
+				id: nodeId,
+				version: _version.get(),
+				index,
+			};
 		},
 
 		// --- Lifecycle ---
