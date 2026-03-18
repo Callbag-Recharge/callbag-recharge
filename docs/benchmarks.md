@@ -27,15 +27,15 @@ Measured on Node v22+ using `vitest bench`. Hz = ops/sec. Post-D3 architecture (
 
 | Scenario | Ops/sec (Hz) | Notes |
 |---|---|---|
-| **State read** | **35.0 M** | Hot path baseline |
+| **State read** | **34.1 M** | Hot path baseline |
 | **State write (no subs)** | **18.8 M** | Inlined `set()` fast path |
-| **Derived read (changed deps)** | **23.4 M** | P0 single-dep recomputation |
-| **Derived read (cached)** | **33.9 M** | Connected-mode cache hit |
-| **Diamond (A→B,C→D)** | **16.8 M** | Glitch-free, integer `_status` |
-| **Effect re-run** | **4.4 M** | Multi-dep scheduling overhead |
-| **Producer emit + get** | **7.9 M** | Stream-to-store bridge |
-| **Operator (transform)** | **4.4 M** | Single-dep operator node |
-| **Pipe (3 operators)** | **13.8 M** | Composed derived chain |
+| **Derived read (changed deps)** | **23.0 M** | P0 single-dep recomputation |
+| **Derived read (cached)** | **34.0 M** | Connected-mode cache hit |
+| **Diamond (A→B,C→D)** | **16.4 M** | Glitch-free, integer `_status` |
+| **Effect re-run** | **6.9 M** | Massive ~50% gain after optimizations |
+| **Producer emit + get** | **7.3 M** | Stream-to-store bridge |
+| **Operator (transform)** | **6.5 M** | Improved node handling (+40%) |
+| **Pipe (3 operators)** | **13.5 M** | Composed derived chain |
 | **Fan-out (10 subscribers)** | **1.8 M** | Set iteration dispatch cost |
 
 **D3 impact:** Derived read and diamond benchmarks measure connected-mode (with subscribers) — D3’s disconnect-on-unsub has no throughput cost here. The memory win is structural: disconnected derived stores hold zero upstream connections vs the pre-D3 perpetual connection.
@@ -48,17 +48,17 @@ File: [`src/__bench__/data-algorithms.bench.ts`](../src/__bench__/data-algorithm
 
 | Scenario | Baseline | Intent | Baseline Hz | Recharge Hz | Gap |
 |----------|----------|--------|-------------|-------------|-----|
-| `reactiveMap` set/get | `Map` | Reactive KV overhead | 14.17 M | 8.55 M | 1.66x |
-| `reactiveMap.update` | Map RMW | Atomic update | 8.45 M | 7.59 M | 1.11x |
-| `select(k0).get` (churn) | `Map.get(k0)` | Per-key reactive view | 14.32 M | 8.14 M | 1.76x |
-| `reactiveLog.append` | `array.push` | Append path | 26.78 M | 11.99 M | 2.23x |
-| Bounded log | Ring buffer | Circular buffer trim | 32.58 M | 10.67 M | 3.05x |
-| `reactiveIndex` add/remove | Hand-rolled index | Index maintenance | 2.13 M | 1.73 M | 1.23x |
-| Index read | `Map.get` | Read hot path | 33.61 M | 28.39 M | 1.18x |
-| `lru()` | Naive MRU array | Eviction policy | 3.66 M | **6.07 M** | **0.60x** |
-| `scored` vs `reactiveScored` | evict(1)+reinsert | Heap + sub costs | 261 K | 14 K | 18.6x |
-| `fifo()` | Array queue | FIFO policy | 7.33 M | 5.93 M | 1.24x |
-| 50× add + tag read | Index-only | Collection overhead | 1.0 K | **42.9 K** | **0.02x** |
+| `reactiveMap` set/get | `Map` | Reactive KV overhead | 12.89 M | 8.12 M | 1.59x |
+| `reactiveMap.update` | Map RMW | Atomic update | 11.95 M | 7.56 M | 1.58x |
+| `select(k0).get` (churn) | `Map.get(k0)` | Per-key reactive view | 14.04 M | 8.29 M | 1.69x |
+| `reactiveLog.append` | `array.push` | Append path | 26.53 M | 12.02 M | 2.21x |
+| Bounded log | Ring buffer | Circular buffer trim | 33.35 M | 10.47 M | 3.19x |
+| `reactiveIndex` add/remove | Hand-rolled index | Index maintenance | 2.22 M | 1.76 M | 1.26x |
+| Index read | `Map.get` | Read hot path | 34.85 M | 29.48 M | 1.18x |
+| `lru()` | Naive MRU array | Eviction policy | 3.50 M | **6.02 M** | **0.58x** |
+| `scored` vs `reactiveScored` | evict(1)+reinsert | Heap + sub costs | 260 K | 13 K | 20x |
+| `fifo()` | Array queue | FIFO policy | 7.30 M | 6.71 M | 1.09x |
+| 50× add + tag read | Index-only | Collection overhead | 0.88 K | **45.4 K** | **0.02x** |
 
 **Notable:** `lru()` beats its naive baseline (O(1) doubly-linked list vs O(n) array touch). Collection’s version-gated lazy materialization is 42.9x faster than the old index-only baseline.
 
