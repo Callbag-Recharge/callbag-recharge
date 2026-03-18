@@ -10,7 +10,6 @@
 
 import { describe, expect, it } from "vitest";
 import { P_SKIP_DIRTY } from "../../core/producer";
-import type { Store } from "../../core/types";
 import { map } from "../../extra/map";
 import {
 	batch,
@@ -18,10 +17,8 @@ import {
 	DIRTY,
 	derived,
 	effect,
-	operator,
 	pipe,
 	producer,
-	RESOLVED,
 	START,
 	STATE,
 	state,
@@ -89,8 +86,7 @@ describe("Skip DIRTY optimization", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get() * 2);
 
-		const stateSignals: Array<{ type: number; data: unknown }> = [];
-		// Observe signals going INTO the derived (from state)
+		// Observe signals at the derived sink
 		const derivedSignals: Array<{ type: number; data: unknown }> = [];
 		d.source(START, (type: number, data: unknown) => {
 			if (type !== START) derivedSignals.push({ type, data });
@@ -371,7 +367,7 @@ describe("Skip DIRTY optimization", () => {
 
 	it("P_SKIP_DIRTY cleared on producer complete()", () => {
 		const p = producer<number>(
-			({ emit, complete }) => {
+			({ emit }) => {
 				emit(1);
 				// Don't complete yet — we'll test resubscription
 			},

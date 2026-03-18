@@ -470,7 +470,9 @@ function generateMarkdown(name, data) {
 		lines.push("| Method | Signature | Description |");
 		lines.push("|--------|-----------|-------------|");
 		for (const row of data.returnsTable) {
-			lines.push(`| \`${escapeVue(row.method)}\` | \`${escapeVue(row.signature)}\` | ${escapeVue(row.description)} |`);
+			lines.push(
+				`| \`${escapeVue(row.method)}\` | \`${escapeVue(row.signature)}\` | ${escapeVue(row.description)} |`,
+			);
 		}
 		lines.push("");
 	}
@@ -557,7 +559,7 @@ function processFunction(name, filePath) {
 	// Check for namespace (e.g., derived.from)
 	const namespaceFns = [];
 	const ns = findNamespace(sourceFile, name);
-	if (ns && ns.body && ts.isModuleBlock(ns.body)) {
+	if (ns?.body && ts.isModuleBlock(ns.body)) {
 		for (const stmt of ns.body.statements) {
 			if (ts.isFunctionDeclaration(stmt) && stmt.name) {
 				const nsName = stmt.name.text;
