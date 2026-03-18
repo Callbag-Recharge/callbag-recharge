@@ -1,6 +1,7 @@
 {
 	"name": "callbag-recharge",
 	"version": "0.1.0",
+	"packageManager": "pnpm@10.32.1+sha512.a706938f0e89ac1456b6563eab4edf1d1faf3368d1191fc5c59790e96dc918e4456ab2e67d613de1043d2e8c81f87303e6b40d4ffeca9df15ef1ad567348f2be",
 	"description": "Reactive state management with streaming operators, glitch-free diamond resolution, and an inspectable graph. 5 primitives, 60+ operators, framework-agnostic.",
 	"type": "module",
 	"main": "dist/index.cjs",
@@ -92,9 +93,9 @@
 		"lint": "biome check .",
 		"lint:fix": "biome check --write .",
 		"format": "biome format --write .",
-		"docs:dev": "cd site && npx vitepress dev",
-		"docs:build": "cd site && npx vitepress build",
-		"docs:preview": "cd site && npx vitepress preview",
+		"docs:dev": "pnpm --dir site run dev",
+		"docs:build": "pnpm --dir site run build",
+		"docs:preview": "pnpm --dir site run preview",
 		"size": "node scripts/bundle-size.mjs"
 	},
 	"keywords": [
@@ -116,7 +117,13 @@
 	"homepage": "https://github.com/Callbag-Recharge/callbag-recharge#readme",
 	"license": "MIT",
 	"devDependencies": {
-		"@biomejs/biome": "^2.4.6",
+		"@semantic-release/changelog": "^6.0.3",
+		"@semantic-release/commit-analyzer": "^13.0.0",
+		"@semantic-release/git": "^10.0.1",
+		"@semantic-release/github": "^11.0.0",
+		"@semantic-release/npm": "^12.0.0",
+		"@semantic-release/release-notes-generator": "^14.0.1",
+		"@biomejs/biome": "2.4.6",
 		"@preact/signals-core": "^1.14.0",
 		"callbag-basics": "^4.0.0",
 		"callbag-filter": "^1.1.0",
@@ -126,9 +133,15 @@
 		"esbuild": "^0.24.2",
 		"tsup": "^8.5.1",
 		"typescript": "^5.7.0",
-		"vitest": "^3.0.0"
+		"vitest": "^3.0.0",
+		"bmad-method": "^6.2.0",
+		"semantic-release": "^24.0.0"
 	},
-	"dependencies": {
-		"bmad-method": "^6.2.0"
+	"pnpm": {
+		"onlyBuiltDependencies": [
+			"@biomejs/biome",
+			"esbuild",
+			"rollup"
+		]
 	}
 }

@@ -7,14 +7,14 @@ Comparative benchmarks against [@preact/signals-core](https://github.com/preactj
 All benchmarks run via **[Vitest bench](https://vitest.dev/guide/features.html#benchmarking)**, which uses **[tinybench](https://github.com/tinylibs/tinybench)** for timing, warmup, and statistical summaries (mean latency, throughput, relative “x faster than” within each `describe` group).
 
 ```bash
-npm install
-npm run bench              # full suite (core + compare + data algorithms)
-npm run bench:core         # primitives only (ex- bench.ts)
-npm run bench:compare      # Recharge vs Preact vs callbag (ex- bench-compare.ts)
-npm run bench:data         # Level 3 vs plain JS baselines only
+pnpm install
+pnpm run bench              # full suite (core + compare + data algorithms)
+pnpm run bench:core         # primitives only (ex- bench.ts)
+pnpm run bench:compare      # Recharge vs Preact vs callbag (ex- bench-compare.ts)
+pnpm run bench:data         # Level 3 vs plain JS baselines only
 ```
 
-- **Tests** stay separate: `*.bench.ts` under `src/__bench__/` are excluded from `npm test` ([vitest.config.ts](../vitest.config.ts)).
+- **Tests** stay separate: `*.bench.ts` under `src/__bench__/` are excluded from `pnpm test` ([vitest.config.ts](../vitest.config.ts)).
 - **Redis** is intentionally not part of these benchmarks (fair algorithm comparisons are in-process only).
 - Absolute numbers vary by CPU and Node version; use relative comparisons within each group and re-run before/after architectural changes.
 - **Inspector store-creation** benches use a short time window (~200ms) so each run does not allocate unbounded `state()` instances during tinybench sampling.
@@ -45,7 +45,7 @@ File: [`src/__bench__/data-algorithms.bench.ts`](../src/__bench__/data-algorithm
 
 ## Historical reference tables (fixed-iteration era)
 
-The tables below used **100,000 iterations / 1,000 warmup** via an earlier Node harness (since replaced by Vitest bench). Vitest bench may report different relative ordering for some cases (e.g. effect scheduling). Treat these as **qualitative**; run `npm run bench` for current tinybench output.
+The tables below used **100,000 iterations / 1,000 warmup** via an earlier Node harness (since replaced by Vitest bench). Vitest bench may report different relative ordering for some cases (e.g. effect scheduling). Treat these as **qualitative**; run `pnpm run bench` for current tinybench output.
 
 ### State read
 
@@ -137,7 +137,7 @@ Measure with Node `--expose-gc` if you need stable heap deltas; not part of the 
 | Inspector OFF | **6.6M** | 1.5ms |
 | Inspector ON (default) | 1.1M | 9.1ms |
 
-Vitest: see `compare: Inspector ON/OFF` in `npm run bench`.
+Vitest: see `compare: Inspector ON/OFF` in `pnpm run bench`.
 
 ### batch() — 10 set() calls with effect
 
@@ -166,4 +166,4 @@ Small pull-phase cost; wins when downstream can skip on RESOLVED.
 
 ## Perspective
 
-At **~5M+ ops/sec** on hot paths, typical UIs (60fps ≈ 16ms/frame) have enormous headroom. callbag-recharge trades some memory and diamond throughput for **inspectability, explicit deps, and correctness**. Level 3 structures add reactive indexing and logs on top of that baseline—use `npm run bench:data` to see overhead vs plain `Map`/arrays.
+At **~5M+ ops/sec** on hot paths, typical UIs (60fps ≈ 16ms/frame) have enormous headroom. callbag-recharge trades some memory and diamond throughput for **inspectability, explicit deps, and correctness**. Level 3 structures add reactive indexing and logs on top of that baseline—use `pnpm run bench:data` to see overhead vs plain `Map`/arrays.

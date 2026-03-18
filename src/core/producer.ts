@@ -24,22 +24,22 @@ import type { Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
-	STATUS_MASK,
-	STATUS_SHIFT,
-	S_COMPLETED,
-	S_DIRTY,
-	S_DISCONNECTED,
-	S_ERRORED,
-	S_RESOLVED,
-	S_SETTLED,
 	decodeStatus,
 	deferEmission,
 	deferStart,
 	END,
 	isBatching,
 	RESOLVED,
+	S_COMPLETED,
+	S_DIRTY,
+	S_DISCONNECTED,
+	S_ERRORED,
+	S_RESOLVED,
+	S_SETTLED,
 	START,
 	STATE,
+	STATUS_MASK,
+	STATUS_SHIFT,
 } from "./protocol";
 import type { ProducerStore, SourceOptions, Store } from "./types";
 
@@ -174,7 +174,7 @@ export class ProducerImpl<T> {
 
 	complete(): void {
 		if (this._flags & P_COMPLETED) return;
-		this._flags = (this._flags | P_COMPLETED) & ~_STATUS_MASK | _S_COMPLETED;
+		this._flags = ((this._flags | P_COMPLETED) & ~_STATUS_MASK) | _S_COMPLETED;
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
@@ -191,7 +191,7 @@ export class ProducerImpl<T> {
 
 	error(e: unknown): void {
 		if (this._flags & P_COMPLETED) return;
-		this._flags = (this._flags | P_COMPLETED) & ~_STATUS_MASK | _S_ERRORED;
+		this._flags = ((this._flags | P_COMPLETED) & ~_STATUS_MASK) | _S_ERRORED;
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
@@ -219,8 +219,7 @@ export class ProducerImpl<T> {
 		if (this._cleanup) this._cleanup();
 		this._cleanup = undefined;
 		if (this._flags & P_RESET) this._value = this._initial;
-		if (!(this._flags & P_COMPLETED))
-			this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
+		if (!(this._flags & P_COMPLETED)) this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 	}
 
 	source(type: number, payload?: any): void {

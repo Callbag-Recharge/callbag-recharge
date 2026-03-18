@@ -8,7 +8,14 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!dist", "!node_modules", "!**/dist", "!site/.vitepress/cache"]
+		"includes": [
+			"**",
+			"!dist",
+			"!node_modules",
+			"!**/dist",
+			"!site/.vitepress/cache",
+			"!release.config.mjs"
+		]
 	},
 	"linter": {
 		"enabled": true,

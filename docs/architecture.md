@@ -86,6 +86,16 @@ src/
 
 ---
 
+## 2b. Repository & release tooling
+
+This section is about the **repo layout**, not the runtime graph above.
+
+- **pnpm workspace** — The published library lives at the repo root; **VitePress docs** live in `site/` (`callbag-recharge-docs`, private). One **`pnpm-lock.yaml`** at the root; **Corepack** honors **`packageManager`** in root `package.json` (pnpm 10.x).
+- **Local setup** — `corepack enable`, then `pnpm install` (or `mise run bootstrap` if using the repo `.mise.toml`). **pnpm 10** may require **`pnpm.onlyBuiltDependencies`** for packages that run install scripts (e.g. native tooling).
+- **Releases** — Pushes to **`main`** run **semantic-release** (see `release.config.mjs`): version bump, `CHANGELOG.md`, git tag, npm publish, GitHub Release. Commits should follow **Angular-style** messages (`feat:`, `fix:`, …). Maintainer setup: **`NPM_TOKEN`** secret on the repo. See **`CONTRIBUTING.md`** for a commit-type cheat sheet.
+
+---
+
 ## 3. Protocol: Type Constants & Signal Vocabulary
 
 ```ts

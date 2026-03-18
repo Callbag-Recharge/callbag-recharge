@@ -38,7 +38,7 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 
 	// --- Unbounded storage (plain array) ---
 	// --- Bounded storage (circular buffer) ---
-	let _entries: LogEntry<V>[] = [];
+	const _entries: LogEntry<V>[] = [];
 	let _head = 0; // index of oldest entry in circular buffer (bounded only)
 	let _count = 0; // number of entries currently in buffer (bounded only)
 	let _seq = 0; // next sequence number (monotonically increasing)

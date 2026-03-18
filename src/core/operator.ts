@@ -14,19 +14,19 @@ import type { Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
+	decodeStatus,
 	END,
 	RESOLVED,
-	START,
-	STATE,
-	STATUS_MASK,
-	STATUS_SHIFT,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
-	decodeStatus,
+	START,
+	STATE,
+	STATUS_MASK,
+	STATUS_SHIFT,
 } from "./protocol";
 import type { Actions, SourceOptions, Store } from "./types";
 
@@ -123,7 +123,7 @@ export class OperatorImpl<B> {
 			complete: () => {
 				if (completed) return;
 				completed = true;
-				this._flags = (this._flags | O_COMPLETED) & ~_STATUS_MASK | _S_COMPLETED;
+				this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_COMPLETED;
 				this._handler = null;
 				for (const tb of localTalkbacks) tb?.(END);
 				localTalkbacks.fill(null);
@@ -143,7 +143,7 @@ export class OperatorImpl<B> {
 			error: (e: unknown) => {
 				if (completed) return;
 				completed = true;
-				this._flags = (this._flags | O_COMPLETED) & ~_STATUS_MASK | _S_ERRORED;
+				this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_ERRORED;
 				this._handler = null;
 				for (const tb of localTalkbacks) tb?.(END);
 				localTalkbacks.fill(null);

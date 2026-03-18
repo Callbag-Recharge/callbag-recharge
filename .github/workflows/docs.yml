@@ -9,7 +9,8 @@ on:
       - "src/**"
       - "tsup.config.ts"
       - "package.json"
-      - "package-lock.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
       - "scripts/**"
   workflow_dispatch:
 
@@ -34,14 +35,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
-          cache: npm
-          cache-dependency-path: package-lock.json
+          node-version-file: .node-version
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
 
+      - run: corepack enable
       - name: Install and build library
         run: |
-          npm ci
-          npm run build
+          pnpm install --frozen-lockfile
+          pnpm run build
 
       - name: Measure bundle size
         id: size
@@ -53,25 +55,15 @@ jobs:
           sed -i "s/\*\*~[0-9.]* KB\*\* gzipped/**~${SIZE} KB** gzipped/g" README.md
           sed -i "s/\*\*~[0-9.]* KB\*\* (core, gzip)/**~${SIZE} KB** (core, gzip)/g" README.md
 
-      - name: Update repo description
-        env:
-          # Use REPO_TOKEN (PAT with repo scope) if you want description updated; else step is best-effort.
-          GH_TOKEN: ${{ secrets.REPO_TOKEN || github.token }}
-        continue-on-error: true
-        run: |
-          SIZE="${{ steps.size.outputs.bundle_size_gzip_kb }}"
-          gh repo edit --description "Reactive stores — ~${SIZE} KB gzip core, every step is inspectable"
-
       - name: Update site/public/llms.txt with bundle size
         run: |
           SIZE="${{ steps.size.outputs.bundle_size_gzip_kb }}"
           sed -i "s/~[0-9.]* KB gzipped/~${SIZE} KB gzipped/g" site/public/llms.txt
 
-      - name: Install and build site
+      - name: Build site
         env:
           VITE_BUNDLE_SIZE_GZIP_KB: ${{ steps.size.outputs.bundle_size_gzip_kb }}
-        run: |
-          cd site && npm ci && npm run build
+        run: pnpm --dir site run build
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -8,13 +8,13 @@
 
 import { Inspector } from "./inspector";
 import {
+	_S_DIRTY,
+	_S_SETTLED,
+	_STATUS_MASK,
 	P_AUTO_DIRTY,
 	P_COMPLETED,
 	P_PENDING,
 	ProducerImpl,
-	_STATUS_MASK,
-	_S_DIRTY,
-	_S_SETTLED,
 } from "./producer";
 import { DATA, DIRTY, deferEmission, isBatching, STATE } from "./protocol";
 import type { StoreOptions, WritableStore } from "./types";

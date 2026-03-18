@@ -12,23 +12,23 @@
 import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
 import {
+	beginDeferredStart,
 	DATA,
 	DIRTY,
+	decodeStatus,
 	END,
+	endDeferredStart,
 	RESOLVED,
-	START,
-	STATE,
-	STATUS_MASK,
-	STATUS_SHIFT,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
-	beginDeferredStart,
-	decodeStatus,
-	endDeferredStart,
+	START,
+	STATE,
+	STATUS_MASK,
+	STATUS_SHIFT,
 } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
@@ -98,7 +98,7 @@ export class DerivedImpl<T> {
 			return;
 		}
 		this._cachedValue = result;
-		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
+		this._flags = ((this._flags | D_HAS_CACHED) & ~_STATUS_MASK) | _S_SETTLED;
 		this._dispatch(DATA, this._cachedValue);
 	}
 
@@ -109,14 +109,14 @@ export class DerivedImpl<T> {
 			return;
 		}
 		this._cachedValue = data;
-		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
+		this._flags = ((this._flags | D_HAS_CACHED) & ~_STATUS_MASK) | _S_SETTLED;
 		this._dispatch(DATA, data);
 	}
 
 	_lazyConnect(): void {
 		if (this._flags & (D_CONNECTED | D_COMPLETED)) return;
 		this._cachedValue = this._fn();
-		this._flags = (this._flags | D_HAS_CACHED) & ~_STATUS_MASK | _S_SETTLED;
+		this._flags = ((this._flags | D_HAS_CACHED) & ~_STATUS_MASK) | _S_SETTLED;
 		beginDeferredStart();
 		this._connectUpstream();
 		if (!(this._flags & D_COMPLETED)) {
@@ -277,8 +277,7 @@ export class DerivedImpl<T> {
 	_handleEnd(errorData: any): void {
 		this._flags |= D_COMPLETED;
 		this._flags =
-			(this._flags & ~_STATUS_MASK) |
-			(errorData !== undefined ? _S_ERRORED : _S_COMPLETED);
+			(this._flags & ~_STATUS_MASK) | (errorData !== undefined ? _S_ERRORED : _S_COMPLETED);
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._flags &= ~(D_CONNECTED | D_STANDALONE);
