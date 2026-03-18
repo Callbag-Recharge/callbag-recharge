@@ -22,6 +22,7 @@ import {
 	END,
 	endDeferredStart,
 	RESOLVED,
+	SINGLE_DEP,
 	START,
 	STATE,
 } from "./protocol";
@@ -54,6 +55,7 @@ export function effect(
 		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) {
 				talkbacks.push(data);
+				if (deps.length === 1) data(STATE, SINGLE_DEP);
 				return;
 			}
 			if (disposed) return;

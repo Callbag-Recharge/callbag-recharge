@@ -24,6 +24,7 @@ import type { Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
+	SINGLE_DEP,
 	decodeStatus,
 	deferEmission,
 	deferStart,
@@ -66,6 +67,9 @@ const P_RESET = 8;
 const P_RESUB = 16;
 export const P_PENDING = 32;
 
+// Bit 10: single subscriber signaled SINGLE_DEP — skip DIRTY in unbatched emit/set
+export const P_SKIP_DIRTY = 1 << 10;
+
 // Status bits (bits 7-9) — exported for StateImpl fast path
 export const _STATUS_MASK = STATUS_MASK;
 export const _S_DIRTY = S_DIRTY << STATUS_SHIFT;
@@ -88,6 +92,7 @@ export class ProducerImpl<T> {
 	_eqFn: ((a: T, b: T) => boolean) | undefined;
 	_getterFn: ((cached: T | undefined) => T) | undefined;
 	_initial: T | undefined;
+	_singleDepCount = 0;
 
 	constructor(fn?: ProducerFn<T>, opts?: ProducerOpts<T>) {
 		this._value = opts?.initial;
@@ -103,13 +108,11 @@ export class ProducerImpl<T> {
 		// S_DISCONNECTED = 0, so no need to set status bits
 		this._flags = flags;
 
-		// Bind public API methods so they work when detached (callbag interop,
-		// destructuring, etc.). Replaces per-instance closure functions.
+		// Bind only source + emit (commonly detached in callbag interop and
+		// destructuring). signal/complete/error are provided via actions wrapper
+		// in _start() — see Optimization #2 in docs/optimizations.md.
 		this.source = this.source.bind(this);
 		this.emit = this.emit.bind(this);
-		this.signal = this.signal.bind(this);
-		this.complete = this.complete.bind(this);
-		this.error = this.error.bind(this);
 
 		if (!opts?._skipInspect) Inspector.register(this as any, { kind: "producer", ...opts });
 	}
@@ -155,7 +158,7 @@ export class ProducerImpl<T> {
 				});
 			}
 		} else {
-			if (this._flags & P_AUTO_DIRTY) {
+			if (this._flags & P_AUTO_DIRTY && !(this._flags & P_SKIP_DIRTY)) {
 				this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 				this._dispatch(STATE, DIRTY);
 			}
@@ -178,7 +181,8 @@ export class ProducerImpl<T> {
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
-		this._flags &= ~P_MULTI;
+		this._flags &= ~(P_MULTI | P_SKIP_DIRTY);
+		this._singleDepCount = 0;
 		this._stop();
 		if (output) {
 			if (wasMulti) {
@@ -195,7 +199,8 @@ export class ProducerImpl<T> {
 		const output = this._output;
 		const wasMulti = this._flags & P_MULTI;
 		this._output = null;
-		this._flags &= ~P_MULTI;
+		this._flags &= ~(P_MULTI | P_SKIP_DIRTY);
+		this._singleDepCount = 0;
 		this._stop();
 		if (output) {
 			if (wasMulti) {
@@ -209,7 +214,12 @@ export class ProducerImpl<T> {
 	_start(): void {
 		if (this._flags & P_STARTED || !this._fn) return;
 		this._flags |= P_STARTED;
-		const result = this._fn(this as any);
+		const result = this._fn({
+			emit: this.emit,
+			signal: (s: Signal) => this.signal(s),
+			complete: () => this.complete(),
+			error: (e: unknown) => this.error(e),
+		} as any);
 		this._cleanup = typeof result === "function" ? result : undefined;
 	}
 
@@ -241,13 +251,23 @@ export class ProducerImpl<T> {
 				set.add(this._output);
 				set.add(sink);
 				this._output = set;
-				this._flags |= P_MULTI;
+				this._flags = (this._flags | P_MULTI) & ~P_SKIP_DIRTY;
 			} else {
 				(this._output as Set<any>).add(sink);
 			}
-			sink(START, (t: number) => {
+			let isSingleDep = false;
+			sink(START, (t: number, d?: any) => {
 				if (t === DATA) sink(DATA, this._value);
+				if (t === STATE && d === SINGLE_DEP && !isSingleDep) {
+					isSingleDep = true;
+					this._singleDepCount++;
+					if (!(this._flags & P_MULTI)) this._flags |= P_SKIP_DIRTY;
+				}
 				if (t === END) {
+					if (isSingleDep) {
+						isSingleDep = false;
+						this._singleDepCount--;
+					}
 					if (this._output === null) return;
 					if (this._flags & P_MULTI) {
 						const set = this._output as Set<any>;
@@ -255,14 +275,19 @@ export class ProducerImpl<T> {
 						if (set.size === 1) {
 							this._output = set.values().next().value;
 							this._flags &= ~P_MULTI;
+							// Restore P_SKIP_DIRTY if remaining subscriber is single-dep
+							if (this._singleDepCount > 0) this._flags |= P_SKIP_DIRTY;
 						} else if (set.size === 0) {
 							this._output = null;
-							this._flags &= ~P_MULTI;
+							this._flags &= ~(P_MULTI | P_SKIP_DIRTY);
+							this._singleDepCount = 0;
 							this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 							this._stop();
 						}
 					} else if (this._output === sink) {
 						this._output = null;
+						this._flags &= ~P_SKIP_DIRTY;
+						this._singleDepCount = 0;
 						this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 						this._stop();
 					}

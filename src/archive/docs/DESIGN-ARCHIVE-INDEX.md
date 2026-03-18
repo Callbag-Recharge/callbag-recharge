@@ -194,6 +194,17 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 
 **Outcome:** Architecture pivot approved. Implementation: lazy switchMap → derived disconnect → other Tier 2 operators → tests. Streaming example drops from 5 operators to 3.
 
+### Session f47ed59e (March 18) — Skip DIRTY, Cached Operator, and Code Review Fixes
+**Topic:** Four optimizations (SINGLE_DEP signaling, reduced bound methods, streamlined transitions, `cached()` operator) + adversarial code review fixes
+
+**Key insight:** SINGLE_DEP signaling via the callbag talkback reverse channel enables source-side DIRTY skip without API changes. For single-dep subscribers in unbatched paths, DIRTY is pure overhead — DATA follows synchronously. The `_singleDepCount` field (8 bytes/store) enables MULTI→SINGLE restoration, preserving the optimization across subscriber lifecycle changes.
+
+**Code review findings (3 fixed):** P1: Stale P_SKIP_DIRTY on complete/error (resubscribable safety). P2: Multi-dep cached diamond glitch (added Bitmask dirty-dep counting). D1: MULTI→SINGLE P_SKIP_DIRTY restoration (added `_singleDepCount` tracking).
+
+**Rejected:** Drop MULTI→SINGLE restoration (simpler but loses optimization permanently); alternative to `_singleDepCount` (can't query remaining sink after transition).
+
+**Outcome:** 50% dispatch reduction for single-dep unbatched paths. `cached()` extra with factory + pipe forms. All 1316 tests passing.
+
 ---
 
 ## Additional Sessions (Partial Coverage)
@@ -265,5 +276,5 @@ This format preserves the thinking process, not just conclusions.
 
 ---
 
-**Created:** March 16, 2026  
-**Archive Status:** Complete through Session 88e9bd81
+**Created:** March 16, 2026
+**Archive Status:** Complete through Session f47ed59e

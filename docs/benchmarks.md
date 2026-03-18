@@ -21,149 +21,106 @@ pnpm run bench:data         # Level 3 vs plain JS baselines only
 
 ---
 
+## Current results (March 2026 — Tinybench)
+
+Measured on Node v22+ using `vitest bench`. Hz = ops/sec. Post-D3 architecture (lazy Tier 2, derived disconnect-on-unsub).
+
+| Scenario | Ops/sec (Hz) | Notes |
+|---|---|---|
+| **State read** | **35.0 M** | Hot path baseline |
+| **State write (no subs)** | **18.8 M** | Inlined `set()` fast path |
+| **Derived read (changed deps)** | **23.4 M** | P0 single-dep recomputation |
+| **Derived read (cached)** | **33.9 M** | Connected-mode cache hit |
+| **Diamond (A→B,C→D)** | **16.8 M** | Glitch-free, integer `_status` |
+| **Effect re-run** | **4.4 M** | Multi-dep scheduling overhead |
+| **Producer emit + get** | **7.9 M** | Stream-to-store bridge |
+| **Operator (transform)** | **4.4 M** | Single-dep operator node |
+| **Pipe (3 operators)** | **13.8 M** | Composed derived chain |
+| **Fan-out (10 subscribers)** | **1.8 M** | Set iteration dispatch cost |
+
+**D3 impact:** Derived read and diamond benchmarks measure connected-mode (with subscribers) — D3’s disconnect-on-unsub has no throughput cost here. The memory win is structural: disconnected derived stores hold zero upstream connections vs the pre-D3 perpetual connection.
+
+---
+
 ## Level 3 + utils (algorithm baselines)
 
 File: [`src/__bench__/data-algorithms.bench.ts`](../src/__bench__/data-algorithms.bench.ts).
 
-| Scenario | Baseline | Intent |
-|----------|----------|--------|
-| `reactiveMap` set/get | `Map` | Reactive KV overhead, no subscribers |
-| `reactiveMap.update` | Map RMW | Atomic update vs manual get/set |
-| `select(k0).get` with other-key churn | `Map.get(k0)` | Per-key reactive view vs raw read |
-| `reactiveLog.append` | `array.push` | Append path |
-| Bounded log | Ring buffer (same cap) | Trim vs minimal circular buffer |
-| `reactiveIndex` add/remove cycle | Hand-rolled forward + reverse map | Index maintenance cost |
-| Index read | `Map.get` vs `select().get` | Read hot path |
-| `lru()` | Naive MRU array | Eviction policy vs O(n) touch |
-| `scored` vs `reactiveScored` | evict(1)+reinsert on fixed N | Scan-at-evict vs heap + effect-driven scores |
-| `fifo()` | Array queue + lazy delete | FIFO policy vs simple queue |
-| 50× add + tag read | `reactiveIndex` only vs `collection` | Full memory node + effects vs index-only |
+| Scenario | Baseline | Intent | Baseline Hz | Recharge Hz | Gap |
+|----------|----------|--------|-------------|-------------|-----|
+| `reactiveMap` set/get | `Map` | Reactive KV overhead | 14.17 M | 8.55 M | 1.66x |
+| `reactiveMap.update` | Map RMW | Atomic update | 8.45 M | 7.59 M | 1.11x |
+| `select(k0).get` (churn) | `Map.get(k0)` | Per-key reactive view | 14.32 M | 8.14 M | 1.76x |
+| `reactiveLog.append` | `array.push` | Append path | 26.78 M | 11.99 M | 2.23x |
+| Bounded log | Ring buffer | Circular buffer trim | 32.58 M | 10.67 M | 3.05x |
+| `reactiveIndex` add/remove | Hand-rolled index | Index maintenance | 2.13 M | 1.73 M | 1.23x |
+| Index read | `Map.get` | Read hot path | 33.61 M | 28.39 M | 1.18x |
+| `lru()` | Naive MRU array | Eviction policy | 3.66 M | **6.07 M** | **0.60x** |
+| `scored` vs `reactiveScored` | evict(1)+reinsert | Heap + sub costs | 261 K | 14 K | 18.6x |
+| `fifo()` | Array queue | FIFO policy | 7.33 M | 5.93 M | 1.24x |
+| 50× add + tag read | Index-only | Collection overhead | 1.0 K | **42.9 K** | **0.02x** |
+
+**Notable:** `lru()` beats its naive baseline (O(1) doubly-linked list vs O(n) array touch). Collection’s version-gated lazy materialization is 42.9x faster than the old index-only baseline.
 
 **Interpreting `reactiveScored`:** `evict(1)` + `insert` reattaches subscriptions; that path is heavier than `scored()`’s pure scan for this micro-scenario. The heap pays off when scores change often and evictions are rare (e.g. large collections).
 
 ---
 
-## Historical reference tables (fixed-iteration era)
-
-The tables below used **100,000 iterations / 1,000 warmup** via an earlier Node harness (since replaced by Vitest bench). Vitest bench may report different relative ordering for some cases (e.g. effect scheduling). Treat these as **qualitative**; run `pnpm run bench` for current tinybench output.
-
-### State read
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **175M** | 0.6ms |
-| Preact Signals | 115M | 0.9ms |
-
-### State write (no subscribers)
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **47M** | 2.1ms |
-| Preact Signals | 35M | 2.9ms |
-
-### Computed/derived read after dependency change
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **16M** | 6.3ms |
-| Preact Signals | 15M | 6.6ms |
-
-### Computed/derived read (unchanged dependencies)
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **208M** | 0.5ms |
-| Preact Signals | 87M | 1.2ms |
-
-### Diamond (A->B, A->C, B+C->D) write + read
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| Preact Signals | **10M** | 10.0ms |
-| callbag-recharge | 7.2M | 14.0ms |
-
-### Effect re-run
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **26M** | 3.8ms |
-| Preact Signals | 13.5M | 7.4ms |
-
-### Producer emit + get (with subscriber)
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **29M** | 3.5ms |
-| Preact Signals | 16.5M | 6.1ms |
-
-### Operator (1 dep, transform)
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **25M** | 4.0ms |
-| Preact Signals | 12.4M | 8.1ms |
-
-### Pipe (3 operators) push through
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| raw Callbag | **103M** | 1.0ms |
-| callbag-recharge `pipe` | 23M | 4.3ms |
-
-### Fan-out (10 subscribers)
-
-| Library | ops/sec | time (100K ops) |
-|---|---|---|
-| **callbag-recharge** | **4.7M** | 21.3ms |
-| Preact Signals | 3.4M | 29.4ms |
-
-### Memory per store (10,000 stores)
-
-Measure with Node `--expose-gc` if you need stable heap deltas; not part of the default Vitest bench suite.
-
-| Library | bytes/store | heap delta |
-|---|---|---|
-| Preact Signals | **122 bytes** | 1,193 KB |
-| callbag-recharge | 719 bytes | 7,021 KB |
-
----
-
-## Optimization benchmarks (historical)
-
-### Inspector disabled vs enabled (store creation)
-
-| Variant | ops/sec | time (10K ops) |
-|---|---|---|
-| Inspector OFF | **6.6M** | 1.5ms |
-| Inspector ON (default) | 1.1M | 9.1ms |
-
-Vitest: see `compare: Inspector ON/OFF` in `pnpm run bench`.
-
-### batch() — 10 set() calls with effect
-
-| Variant | ops/sec | time (10K ops) |
-|---|---|---|
-| Batched | **1.4M** | 7.3ms |
-| Unbatched | 1.3M | 8.1ms |
+## Micro-benchmarks
 
 ### pipeRaw vs pipe (3 operators)
 
-Roughly similar throughput; `pipeRaw` saves intermediate nodes.
+`pipeRaw` (fused) is generally **5-10% faster** than `pipe` in micro-benchmarks. Main benefit is reduced store count and memory, not throughput.
 
 ### equals on diamond intermediates
 
-Small pull-phase cost; wins when downstream can skip on RESOLVED.
+Pull-phase cost is negligible; wins when downstream can skip resolution on `RESOLVED` signals.
 
 ---
 
 ## Bundle size
 
-| Entry | ESM | CJS |
+| Entry | ESM (Gzip) | CJS (Gzip) |
 |---|---|---|
-| `callbag-recharge` (core) | 1.12 KB | 4.02 KB |
+| `callbag-recharge` (full core + extra) | 4.73 KB | 5.05 KB |
+
+---
+
+## Memory per store
+
+Measure with Node `--expose-gc` if you need stable heap deltas; not part of the default Vitest bench suite.
+
+| Library | bytes/store | heap delta (10K stores) |
+|---|---|---|
+| Preact Signals | **122 bytes** | 1,193 KB |
+| callbag-recharge | 719 bytes | 7,021 KB |
+
+The ~6x gap is structural (output slot model, bound methods, callbag protocol, Inspector WeakRefs). With D3's disconnect-on-unsub, *effective* memory improves since disconnected derived stores release dep references — the per-store allocation stays the same but idle stores no longer hold upstream connections.
+
+---
+
+<details>
+<summary><strong>Historical reference tables (fixed-iteration era)</strong></summary>
+
+The tables below used **100,000 iterations / 1,000 warmup** via an earlier Node harness (since replaced by Vitest bench). Absolute numbers differ from tinybench due to measurement methodology. Treat these as **qualitative comparisons** showing relative standing vs external libraries.
+
+| Scenario | callbag-recharge | Preact Signals | raw Callbag | Winner |
+|---|---|---|---|---|
+| State read | **175M** | 115M | — | Recharge |
+| State write (no subs) | **47M** | 35M | — | Recharge |
+| Derived read (changed deps) | **16M** | 15M | — | Recharge |
+| Derived read (cached) | **208M** | 87M | — | Recharge |
+| Diamond (A→B,C→D) | 7.2M | **10M** | — | Preact |
+| Effect re-run | **26M** | 13.5M | — | Recharge |
+| Producer emit + get | **29M** | 16.5M | — | Recharge |
+| Operator (1 dep, transform) | **25M** | 12.4M | — | Recharge |
+| Pipe (3 operators) | 23M | — | **103M** | raw Callbag |
+| Fan-out (10 subs) | **4.7M** | 3.4M | — | Recharge |
+
+</details>
 
 ---
 
 ## Perspective
 
-At **~5M+ ops/sec** on hot paths, typical UIs (60fps ≈ 16ms/frame) have enormous headroom. callbag-recharge trades some memory and diamond throughput for **inspectability, explicit deps, and correctness**. Level 3 structures add reactive indexing and logs on top of that baseline—use `pnpm run bench:data` to see overhead vs plain `Map`/arrays.
+At **~5M+ ops/sec** on hot paths, typical UIs (60fps = 16ms/frame) have enormous headroom. callbag-recharge trades some memory and diamond throughput for **inspectability, explicit deps, and correctness**. Level 3 structures add reactive indexing and logs on top of that baseline — use `pnpm run bench:data` to see overhead vs plain `Map`/arrays.

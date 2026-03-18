@@ -14,6 +14,7 @@ import {
 	P_AUTO_DIRTY,
 	P_COMPLETED,
 	P_PENDING,
+	P_SKIP_DIRTY,
 	ProducerImpl,
 } from "./producer";
 import { DATA, DIRTY, deferEmission, isBatching, STATE } from "./protocol";
@@ -59,7 +60,7 @@ export class StateImpl<T> extends ProducerImpl<T> {
 				});
 			}
 		} else {
-			if (this._flags & P_AUTO_DIRTY) {
+			if (this._flags & P_AUTO_DIRTY && !(this._flags & P_SKIP_DIRTY)) {
 				this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 				this._dispatch(STATE, DIRTY);
 			}

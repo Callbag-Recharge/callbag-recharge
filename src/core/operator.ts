@@ -17,6 +17,7 @@ import {
 	decodeStatus,
 	END,
 	RESOLVED,
+	SINGLE_DEP,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
@@ -96,10 +97,9 @@ export class OperatorImpl<B> {
 	}
 
 	_connectUpstream(): void {
-		const localTalkbacks: Array<((type: number) => void) | null> = new Array(
-			this._deps.length,
-		).fill(null);
-		this._upstreamTalkbacks = localTalkbacks;
+		this._upstreamTalkbacks.length = this._deps.length;
+		this._upstreamTalkbacks.fill(null);
+		const localTalkbacks = this._upstreamTalkbacks;
 
 		let completed = false;
 
@@ -179,6 +179,7 @@ export class OperatorImpl<B> {
 			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
 					localTalkbacks[depIndex] = data;
+					if (this._deps.length === 1) data(STATE, SINGLE_DEP);
 					return;
 				}
 				this._handler?.(depIndex, type, data);
@@ -188,7 +189,7 @@ export class OperatorImpl<B> {
 
 	_disconnectUpstream(): void {
 		for (const tb of this._upstreamTalkbacks) tb?.(END);
-		this._upstreamTalkbacks = [];
+		this._upstreamTalkbacks.length = 0;
 		this._handler = null;
 		this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 		if (this._flags & O_RESET) this._value = this._initial;

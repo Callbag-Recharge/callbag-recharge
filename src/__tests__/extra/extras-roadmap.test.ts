@@ -12,7 +12,7 @@ import { partition } from "../../extra/partition";
 import { repeat } from "../../extra/repeat";
 import { subscribe } from "../../extra/subscribe";
 import { throwError } from "../../extra/throwError";
-import { Inspector, pipe, producer, state } from "../../index";
+import { batch, Inspector, pipe, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -902,7 +902,9 @@ describe("find (RESOLVED signals)", () => {
 			if (type === STATE) signals.push(data);
 		});
 
-		s.set(3); // non-matching — should get DIRTY then RESOLVED
+		// Use batch() so DIRTY is dispatched (Skip DIRTY optimization
+		// skips DIRTY for single-dep subscribers in unbatched paths)
+		batch(() => s.set(3)); // non-matching — should get DIRTY then RESOLVED
 
 		expect(signals).toContain(DIRTY);
 		expect(signals).toContain(RESOLVED);

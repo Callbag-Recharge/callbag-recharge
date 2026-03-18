@@ -11,6 +11,9 @@ export const DIRTY = Symbol("DIRTY");
 /** Control signal: "I was dirty but my value didn't change" */
 export const RESOLVED = Symbol("RESOLVED");
 
+/** Talkback signal: "I'm the only dep subscriber — skip DIRTY in unbatched paths" */
+export const SINGLE_DEP = Symbol("SINGLE_DEP");
+
 export type Signal = typeof DIRTY | typeof RESOLVED;
 
 /** Node status — tracks current lifecycle state (v4) */

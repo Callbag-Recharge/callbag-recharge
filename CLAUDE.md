@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 **pnpm workspace** (root = library, `site/` = docs). `corepack enable` then `pnpm install` (or `mise run bootstrap`). See `CONTRIBUTING.md` for commit conventions (semantic-release on `main`).
 
 - **Build:** `pnpm run build` (tsup → ESM + CJS + .d.ts into `dist/`)
-- **Test:** `pnpm test` (vitest run) — 44 test files, 1282 tests
+- **Test:** `pnpm test` (vitest run) — 46 test files, 1316 tests
 - **Test watch:** `pnpm run test:watch`
 - **Single test:** `pnpm exec vitest run src/__tests__/core/basics.test.ts`
 - **Lint:** `pnpm run lint` (biome check)
@@ -39,12 +39,13 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 - **Two-phase push:** Phase 1: DIRTY propagates through the graph via type 3. Phase 2: values propagate via type 1. Derived nodes count dirty deps and wait for all to resolve before recomputing.
 - **Tier model:** Tier 1 (state graph + passthrough operators) participates in diamond resolution via type 3. Tier 2 (async/timer/dynamic-subscription operators) are cycle boundaries — each `emit` starts a new DIRTY+value cycle.
 - **Single-dep optimization (P0):** Single-dep derived/operator nodes skip bitmask — direct DIRTY/DATA forwarding. Multi-dep nodes use bitmask only at convergence points.
+- **SINGLE_DEP signaling:** Single-dep subscribers send `talkback(STATE, SINGLE_DEP)` to upstream sources, setting `P_SKIP_DIRTY` flag. Unbatched `emit()`/`set()` skips DIRTY dispatch (DATA follows synchronously). `_singleDepCount` tracks single-dep subscribers for MULTI→SINGLE restoration. Cleared on complete/error/full disconnect.
 - **Producer as universal base:** All sources are built on `producer()`. State is a thin wrapper. Tier 2 extras use producer options (`initial`, `equals`, `resetOnTeardown`, `getter`, `error()`) to avoid manual implementations. D3 higher-order operators (`switchMap`, `concatMap`, `exhaustMap`, `flat`) accept an optional `{ initial: B }` option that narrows the return type from `B | undefined` to `B`.
 - **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
 - **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking.
 - **Inspector:** Static class for opt-in observability via WeakMaps. Zero intrusion into primitives — no hooks in hot paths. Read-only metadata: `inspect()`, `graph()`, `getEdges()`, `dumpGraph()`, `snapshot()`. Callbag sinks: `observe()` (protocol-level test utility), `spy()` (observe + console logging), `trace()` (value change callback). Graph wrapper: `tap()` (transparent passthrough node for visualization). See `docs/test-guidance.md` for usage patterns.
 
-### Extra modules (src/extra/ — 58 operators, 60 files)
+### Extra modules (src/extra/ — 59 operators, 61 files)
 
 **Tier 1** (participate in diamond resolution, forward type 3):
 - Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`, `of`, `empty`, `throwError`, `never`
@@ -63,7 +64,7 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 - Error handling: `rescue`, `retry`
 - Resubscription: `repeat`
 
-**Utilities:** `tap`, `remember`, `subject`, `wrap` (RxJS/callbag interop)
+**Utilities:** `tap`, `remember`, `subject`, `wrap` (RxJS/callbag interop), `cached` (input-level memoization)
 
 Each extra module is a separate entry point, tree-shakeable via `callbag-recharge/extra` or `callbag-recharge/extra/<name>`.
 

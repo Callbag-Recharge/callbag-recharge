@@ -554,7 +554,21 @@ class DerivedImpl<T> {
 
 ### Bitmask flags (unchanged)
 
-Pack booleans into `_flags: number`. Boolean state such as `autoDirty`, `resetOnTeardown`, single-dep mode packed as bit flags.
+Pack booleans into `_flags: number`. Boolean state such as `autoDirty`, `resetOnTeardown`, single-dep mode packed as bit flags. `P_SKIP_DIRTY` (bit 10) skips DIRTY dispatch for single-dep subscribers in unbatched paths.
+
+### SINGLE_DEP signaling and P_SKIP_DIRTY
+
+Single-dep subscribers (derived, effect, operator with one dep) send `talkback(STATE, SINGLE_DEP)` after receiving the START talkback. The source sets `P_SKIP_DIRTY` in `_flags`, skipping DIRTY dispatch in unbatched `emit()`/`set()` paths (the downstream node doesn't need DIRTY — DATA follows synchronously).
+
+**`_singleDepCount`** — per-ProducerImpl counter tracking how many active subscribers sent SINGLE_DEP. Each talkback closure has a local `isSingleDep` boolean; the counter aggregates across subscribers. Used to restore `P_SKIP_DIRTY` on MULTI→SINGLE transition (when one subscriber disconnects and the remaining one is single-dep).
+
+**Safety invariants:**
+- `P_SKIP_DIRTY` cleared on SINGLE→MULTI (second subscriber — diamond resolution needs DIRTY)
+- `P_SKIP_DIRTY` cleared on SINGLE→null (last subscriber leaves)
+- `P_SKIP_DIRTY` cleared on `complete()`/`error()` (terminal — resubscribable must start clean)
+- `_singleDepCount` reset to 0 on full disconnect, complete, or error
+- During batching, DIRTY is always dispatched (skip only applies to unbatched path)
+- Derived synthesizes DIRTY for its own downstream when receiving DATA-without-DIRTY
 
 ### Method binding in constructor (unchanged)
 

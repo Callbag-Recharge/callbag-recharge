@@ -23,6 +23,7 @@ import {
 	END,
 	endDeferredStart,
 	RESOLVED,
+	SINGLE_DEP,
 	S_COMPLETED,
 	S_DIRTY,
 	S_DISCONNECTED,
@@ -130,7 +131,7 @@ export class DerivedImpl<T> {
 	}
 
 	_connectUpstream(): void {
-		this._upstreamTalkbacks = [];
+		this._upstreamTalkbacks.length = 0;
 		if (this._deps.length === 1) {
 			if (this._flags & D_IDENTITY) {
 				this._connectSingleDepIdentity();
@@ -148,6 +149,7 @@ export class DerivedImpl<T> {
 		this._deps[0].source(START, (type: number, data: any) => {
 			if (type === START) {
 				this._upstreamTalkbacks.push(data);
+				data(STATE, SINGLE_DEP);
 				return;
 			}
 			if (this._flags & D_COMPLETED) return;
@@ -186,6 +188,7 @@ export class DerivedImpl<T> {
 		this._deps[0].source(START, (type: number, data: any) => {
 			if (type === START) {
 				this._upstreamTalkbacks.push(data);
+				data(STATE, SINGLE_DEP);
 				return;
 			}
 			if (this._flags & D_COMPLETED) return;
@@ -305,7 +308,7 @@ export class DerivedImpl<T> {
 
 	_disconnectUpstream(): void {
 		for (const tb of this._upstreamTalkbacks) tb(END);
-		this._upstreamTalkbacks = [];
+		this._upstreamTalkbacks.length = 0;
 		this._flags &= ~(D_CONNECTED | D_ANY_DATA);
 		this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 		this._dirtyDeps.reset();

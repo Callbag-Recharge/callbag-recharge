@@ -10,6 +10,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { wrap } from "../../extra/wrap";
 import {
+	batch,
 	DIRTY,
 	derived,
 	effect,
@@ -492,7 +493,9 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 			if (type === 1) signals.push({ type: 1, data });
 		});
 
-		s.set(5);
+		// Use batch() so DIRTY is dispatched (Skip DIRTY optimization
+		// skips DIRTY for single-dep subscribers in unbatched paths)
+		batch(() => s.set(5));
 		expect(signals).toEqual([
 			{ type: STATE, data: DIRTY },
 			{ type: 1, data: 10 },

@@ -5,6 +5,7 @@ export { audit } from "./audit";
 export { buffer } from "./buffer";
 // Tier 2 operators
 export { bufferCount } from "./bufferCount";
+export { cached } from "./cached";
 export { bufferTime } from "./bufferTime";
 export { combine } from "./combine";
 export { concat } from "./concat";

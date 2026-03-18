@@ -120,7 +120,9 @@ describe("type 3 STATE protocol", () => {
 			if (type === STATE) signals.push(data);
 		});
 
-		s.set(1);
+		// Use batch() so DIRTY is still dispatched (Skip DIRTY only
+		// applies to the unbatched path for single-dep subscribers)
+		batch(() => s.set(1));
 
 		// Should have received DIRTY signal
 		expect(signals).toContain(DIRTY);
