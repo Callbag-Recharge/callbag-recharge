@@ -88,24 +88,24 @@ describe("Derived (like Signal.Computed)", () => {
 		expect(quadrupled.get()).toBe(12);
 	});
 
-	it("v4.1: computes lazily on first get() (lazy STANDALONE)", () => {
+	it("v6: computes lazily on first get() (pull-compute)", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
 		const doubled = derived([count], computeFn);
 
-		// v4.1: not computed at construction — fully lazy
+		// v6: not computed at construction — fully lazy
 		expect(computeFn).toHaveBeenCalledTimes(0);
 
 		doubled.get();
-		// First get() triggers computation + connection
+		// First get() pull-computes (no connection)
 		expect(computeFn).toHaveBeenCalledTimes(1);
 
 		doubled.get();
-		// Subsequent get() returns cached — no recomputation
-		expect(computeFn).toHaveBeenCalledTimes(1);
+		// Each get() on disconnected derived pull-computes again
+		expect(computeFn).toHaveBeenCalledTimes(2);
 	});
 
-	it("v4: get() returns cached value (STANDALONE keeps it current)", () => {
+	it("v6: get() pull-computes each time when disconnected", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() * 2);
 		const doubled = derived([count], computeFn);
@@ -113,15 +113,16 @@ describe("Derived (like Signal.Computed)", () => {
 		doubled.get();
 		doubled.get();
 		doubled.get();
-		// v4: computed once at construction, cached for subsequent get() calls
-		expect(computeFn).toHaveBeenCalledTimes(1);
+		// v6: each get() on disconnected derived pull-computes
+		expect(computeFn).toHaveBeenCalledTimes(3);
 
-		// After state change, STANDALONE connection recomputes once
+		// After state change, get() pull-computes with new dep value
 		count.set(5);
-		expect(computeFn).toHaveBeenCalledTimes(2);
 		expect(doubled.get()).toBe(10);
-		// get() still returns cached — no extra recomputation
-		expect(computeFn).toHaveBeenCalledTimes(2);
+		expect(computeFn).toHaveBeenCalledTimes(4);
+		// Another get() pull-computes again
+		expect(doubled.get()).toBe(10);
+		expect(computeFn).toHaveBeenCalledTimes(5);
 	});
 
 	it("handles conditional dependencies (all deps listed upfront)", () => {

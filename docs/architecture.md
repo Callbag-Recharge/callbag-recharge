@@ -1,7 +1,7 @@
 # Architecture
 
-> **Status:** Canonical design document. The output slot model, status model, and STANDALONE
-> derived are implemented and shipped. This is the definitive architecture reference.
+> **Status:** Canonical design document. The output slot model, status model, and lazy
+> derived (Option D3) are implemented and shipped. This is the definitive architecture reference.
 
 ---
 
@@ -92,7 +92,7 @@ This section is about the **repo layout**, not the runtime graph above.
 
 - **pnpm workspace** — The published library lives at the repo root; **VitePress docs** live in `site/` (`callbag-recharge-docs`, private). One **`pnpm-lock.yaml`** at the root; **Corepack** honors **`packageManager`** in root `package.json` (pnpm 10.x).
 - **Local setup** — `corepack enable`, then `pnpm install` (or `mise run bootstrap` if using the repo `.mise.toml`). **pnpm 10** may require **`pnpm.onlyBuiltDependencies`** for packages that run install scripts (e.g. native tooling).
-- **Releases** — Pushes to **`main`** run **semantic-release** (see `release.config.mjs`): version bump, `CHANGELOG.md`, git tag, npm publish, GitHub Release. Commits should follow **Angular-style** messages (`feat:`, `fix:`, …). Maintainer setup: **`NPM_TOKEN`** secret on the repo. See **`CONTRIBUTING.md`** for a commit-type cheat sheet.
+- **Releases** — Pushes to **`main`** run **semantic-release** (see `release.config.mjs`): version bump, `CHANGELOG.md`, git tag, npm publish (via **Trusted Publishing / OIDC**), GitHub Release. GitHub App + npm trusted-publisher setup: **`docs/github-actions-release-setup.md`**. Commits: **Angular-style** (`feat:`, `fix:`, …). See **`CONTRIBUTING.md`** for a commit cheat sheet.
 
 ---
 
@@ -157,7 +157,7 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 - Maintains `_value` (last computed output) and `_status`
 - Dep subscription handlers inline state tracking, transform, value caching, and dispatch (see §5 conceptual model)
 - Exposes `get()` and `source()` — is a full store, subscribable by anything downstream
-- `derived([deps], fn)` = operator with automatic STANDALONE mode (see §6)
+- `derived([deps], fn)` = operator with lazy connect/disconnect lifecycle (see §6)
 
 ### Sink (`effect`) — terminal, no downstream
 
@@ -204,7 +204,7 @@ DATA value → B._cachedValue = value; B._status = SETTLED; dispatch to output s
 
 ### Why the tap is always active
 
-The handler closure captures `this` and always writes to `_cachedValue`/`_status`, regardless of whether `_output` has a downstream consumer. `_dispatch()` no-ops when `_output === null` (STANDALONE mode), but the state/value updates still happen. Whoever is connected — B's own STANDALONE subscription, or a downstream C, or a downstream effect — B's cached state stays current.
+The handler closure captures `this` and always writes to `_cachedValue`/`_status`, regardless of whether `_output` has a downstream consumer. `_dispatch()` no-ops when `_output === null`, but the state/value updates still happen. When connected, whoever is downstream — a subscriber C, or a downstream effect — B's cached state stays current.
 
 ---
 
@@ -219,36 +219,29 @@ A itself is always completely unaware of what happens at the output slot.
 ### Output slot mode transitions
 
 ```
-STANDALONE ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
-    ↑                                   |                           |
-    └──[last subscriber leaves]─────────┘                           |
-    ↑                                                               |
-    └──[last subscriber leaves]─────────────────────────────────────┘
+DISCONNECTED ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
+      ↑                                   |                           |
+      └──[last subscriber leaves]─────────┘                           |
+      ↑                                                               |
+      └──[last subscriber leaves]─────────────────────────────────────┘
 ```
 
-### Mode 0: STANDALONE
+### DISCONNECTED (no subscribers)
 
-`derived` only (`operator` is lazy). When B has no external subscribers:
+Both `derived` and `operator` start DISCONNECTED. When B has no subscribers:
 
 - `_output = null`
-- Dep connections are always active via closures from `_connectUpstream()`
-- The handler closure still writes to `_cachedValue`/`_status` — the tap is always active
-- `_dispatch()` no-ops (no output target)
-- `B.get()` returns `_cachedValue` — always populated, never DISCONNECTED
-
-> **Why derived auto-connects but operator doesn't:**
-> `derived([A], fn)` is user-facing sugar meant to be "always reactive." The user expects
-> `derived.get()` to return the current computed value. `operator` is a lower-level
-> building block that only activates when subscribed to.
+- Dep connections are inactive — B is not subscribed to any deps
+- `B.get()` performs a pull-based recompute: calls `_fn()` which reads deps via closure (always-fresh), writes result to `_cachedValue`, and returns it
+- No computation or connection overhead at construction — fully lazy
 
 ### Mode 1: SINGLE
 
-When the first external subscriber C subscribes to B:
+When the first subscriber C subscribes to B:
 
 1. `_output = sink` (C's sink function)
-2. Clear `D_STANDALONE` flag
-3. Dep connections unchanged — they're independent of the output slot
-4. B's handler closure fires as before — `_cachedValue` and `_status` remain current
+2. Connect to deps via `_lazyConnect()` — subscribe to each dep's `source()`
+3. Handler closures fire on dep signals — `_cachedValue` and `_status` kept current
 
 C receives a talkback. Calling `talkback(END)` removes C from the output slot.
 
@@ -263,20 +256,19 @@ When a second subscriber D subscribes while C is already in the slot:
 
 **Key:** A never gets an additional subscriber. The only topology change is in the output slot. This is the decisive advantage: topology changes are O(1) and source-agnostic.
 
-### DISCONNECTED
+### Return to DISCONNECTED
 
-When the last external subscriber leaves:
+When the last subscriber leaves:
 
-- For `derived`: `_output = null`, set `D_STANDALONE`. Deps stay connected (back to STANDALONE)
-- For `operator`: `_output = null`, `_status = DISCONNECTED`, pipeline pauses
+- For both `derived` and `operator`: `_output = null`, disconnect from all deps, `_status = DISCONNECTED`
 
-`_cachedValue` is retained — `get()` still returns the last SETTLED value.
+`_cachedValue` is retained — `get()` returns the last cached value (or performs a fresh pull-recompute for derived).
 
 ### Why ADOPT isn't needed
 
 The ADOPT protocol (REQUEST_ADOPT/GRANT_ADOPT handshake) was designed for a model where derived nodes hold an "internal terminator" in the output slot, requiring a handoff when external subscribers arrive. The actual implementation sidesteps this:
 
-- Dep connections are always active via closures, independent of the output slot
+- Dep connections are managed by `_lazyConnect()` / disconnect, independent of the output slot's dispatch logic
 - The output slot is purely a dispatch point: `null → fn → Set`
 - Subscriber arrival/departure is mechanical — no upstream awareness or signaling needed
 
@@ -293,7 +285,7 @@ The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 | `SETTLED` | Return `_value` — definitely current |
 | `RESOLVED` | Return `_value` — guaranteed unchanged from last SETTLED |
 | `DIRTY` | Return `_value` alongside a staleness indicator (exact API TBD — see below) |
-| `DISCONNECTED` | Pull-based recompute: call each dep's `.get()`, apply `fn`, return result |
+| `DISCONNECTED` | Pull-based recompute: call `_fn()` which reads deps via closure, write result to `_cachedValue`, return it |
 | `COMPLETED` / `ERRORED` | Return `_value` — last value before terminal; `_status` communicates terminal state |
 
 **Honest DIRTY feedback** — when `_status === DIRTY`, a new value is in flight. Silently returning `_value` misleads callers. Options for the API shape:
@@ -303,7 +295,7 @@ The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 
 The chosen approach is: `.get()` returns `_value` for compatibility; `_status` is always publicly readable; `Inspector.inspect()` surfaces both together. The full pull-propagation design for a `getLive()` is deferred.
 
-**DISCONNECTED pull recompute** does NOT write to `_value`. It is a read-only on-demand computation. `_value` only reflects values that actually flowed through the connected pipeline.
+**DISCONNECTED pull recompute** writes the result to `_cachedValue` so subsequent `get()` calls can return it. When a subscriber later arrives, `_lazyConnect()` establishes the push pipeline and `_cachedValue` is overwritten by incoming DATA.
 
 ---
 
@@ -411,24 +403,21 @@ Values from raw callbag deps are captured by calling `dep.get()` inside `recompu
 ```
 derived([A], fn) or operator([A], init):
   1. Initialize all instance properties (_cachedValue, _status, _flags, _output, etc.)
-  2. Connect to deps:
-       Single-dep: _connectSingleDep() — inline handler closure
-       Multi-dep:  _connectMultiDep()  — inline handler with bitmask logic
-  3. If derived: eagerly connect to deps (STANDALONE mode)
-     If operator: wait for first external subscriber
+  2. Prepare handler closures (but do NOT connect to deps yet)
+  3. Both derived and operator: wait for first subscriber (fully lazy)
   4. Register with Inspector: kind, name, initial value
 ```
 
-**Connection time** — runs each time a subscriber arrives (or STANDALONE activates):
+**Connection time** — runs when the first subscriber arrives:
+- `_lazyConnect()` subscribes to each dep's `source()`
 - Allocate handler-local state: counters, accumulators, skip counts, flags
 - This is the equivalent of `init()` running fresh in the operator handler
 
 **Disconnection time** — runs when all subscribers leave:
 - Release handler-local state
-- For `operator`: no reconnect until next subscriber; state is gone
-- For `derived`: deps stay connected (STANDALONE), handler state preserved
+- For both `derived` and `operator`: disconnect from deps, no reconnect until next subscriber; state is gone
 
-This split means the dep connection structure is always stable (no re-wiring on reconnect), while behavioral state (counters, queues) resets cleanly on each new subscription session.
+Dep connections are created and torn down with the subscriber lifecycle. Behavioral state (counters, queues) resets cleanly on each new subscription session.
 
 ### Connection batching
 
@@ -440,12 +429,9 @@ This split means the dep connection structure is always stable (no re-wiring on 
 talkback(END) ← upstream from subscriber
   → remove subscriber from output slot
   → if output slot empty:
-      if derived: _output = null, set D_STANDALONE (deps stay connected)
-      if operator: _output = null, _status = DISCONNECTED
-      // _cachedValue retained — get() can still return last SETTLED value
+      _output = null, disconnect from all deps, _status = DISCONNECTED
+      // _cachedValue retained — get() performs pull-recompute for derived
 ```
-
-Note: For derived, B does NOT disconnect from A when going back to STANDALONE. Dep connections are independent of the output slot.
 
 ### Completion/error teardown
 
@@ -465,7 +451,7 @@ complete() or error(e):
 
 ### Reconnect
 
-- **derived**: stays connected to deps in STANDALONE mode when all subscribers leave. Reconnect is transparent.
+- **derived**: reconnects via `_lazyConnect()` when a new subscriber calls `source(START, ...)`. Handler closures re-subscribe to deps.
 - **operator**: reconnects when a new subscriber calls `source(START, ...)`. `init()` re-runs, handler-local state resets.
 - **producer**: `_start()` re-runs on new subscriber after last left. If `resetOnTeardown`, `_value` resets.
 - **effect**: no reconnect. Dispose and create new.
@@ -568,7 +554,7 @@ class DerivedImpl<T> {
 
 ### Bitmask flags (unchanged)
 
-Pack booleans into `_flags: number`. `D_STANDALONE` tracks whether derived is in STANDALONE mode.
+Pack booleans into `_flags: number`. Boolean state such as `autoDirty`, `resetOnTeardown`, single-dep mode packed as bit flags.
 
 ### Method binding in constructor (unchanged)
 
@@ -582,9 +568,9 @@ The dep subscription handler closures should not allocate on every signal. They 
 
 Null `_output` before iterating, no `[...sinks]` snapshot.
 
-### Dep connections built once
+### Dep connection handlers built once
 
-Dep subscription handlers are created once in the constructor. The closure is assembled once and reused — no re-construction on reconnect.
+Dep subscription handler closures are assembled once. `_lazyConnect()` subscribes to deps on first subscriber; disconnect tears them down. Reconnect re-subscribes using the same handler closures — no re-construction.
 
 ### Effect as closure (unchanged)
 
@@ -692,7 +678,7 @@ Raw callbag sinks (terminal consumers, not operators) need no wrapping — they 
 
 ### 17.1 Initial value on first connection — RESOLVED
 
-STANDALONE mode ensures `_cachedValue` is populated at construction. When C subscribes, C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. No re-trigger needed.
+When C subscribes, `_lazyConnect()` connects to deps and computes the initial value. C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. If `get()` was called before any subscriber, `_cachedValue` is already populated via pull-recompute.
 
 ---
 

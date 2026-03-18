@@ -1,135 +1,104 @@
-# GitHub Actions: npm publish & semantic-release
+# GitHub Actions: releases (Trusted Publishing + GitHub App)
 
-One-time maintainer setup so **Release** (and CI) work on `main`.
+This repo publishes **without a long-lived npm token**: **npm Trusted Publishing (OIDC)** from GitHub Actions, and uses a **GitHub App** installation token so semantic-release can push to `main` (changelog, version bump) when branch protection blocks the default `GITHUB_TOKEN`.
 
-## 1. Node version
-
-CI and Release use **`.node-version`** (currently **24**). No matrix of older Node versions.
+CI uses **Node 24** (`.node-version`). The Release workflow must stay named **`release.yml`** — npm’s trusted-publisher config matches that filename exactly.
 
 ---
 
-## 2. NPM_TOKEN (required to publish)
+## 1. npm Trusted Publishing (OIDC)
 
-semantic-release publishes with **`npm`**; the registry needs an automation token.
+Replaces automation tokens and avoids npm’s warning about token risk for CI. Requires **npm CLI ≥ 11.5.1** and **Node ≥ 22.14** (this repo uses **24**).
 
-### Create the token (npmjs.com)
+### On npmjs.com
 
-1. Log in at [npmjs.com](https://www.npmjs.com).
-2. Avatar → **Access Tokens** (or [npmjs.com/settings/~/tokens](https://www.npmjs.com/settings/~/tokens)).
-3. **Generate New Token** → choose **Granular Access Token** (recommended) or **Classic**:
-   - **Granular:** type *Automation*, package *callbag-recharge* (or your scope), permission **Read and write**.
-   - **Classic:** type *Automation* (works with 2FA on publish).
-4. Copy the token once (it won’t be shown again).
+1. Open the package → **Settings** (or package admin).
+2. **Trusted publishing** → choose **GitHub Actions**.
+3. Set:
+   - **Organization or user** — e.g. `Callbag-Recharge`
+   - **Repository** — e.g. `callbag-recharge`
+   - **Workflow filename** — **`release.yml`** (only the filename, with `.yml`; must match [`.github/workflows/release.yml`](../.github/workflows/release.yml)).
 
-### Add to GitHub
+Save. npm does **not** validate the link until the first publish.
 
-1. Repo → **Settings** → **Secrets and variables** → **Actions**.
-2. **New repository secret** → name **`NPM_TOKEN`**, value = pasted token.
+### Strongly recommended after it works
 
-`NODE_AUTH_TOKEN` in the workflow is set from the same secret for `setup-node` registry auth.
+Under package **Publishing access**, restrict token-based publishes (e.g. disallow write tokens) so only trusted publishing can publish — see [npm: trusted publishers](https://docs.npmjs.com/trusted-publishers).
 
-### npm package access
+### Requirements
 
-The npm user that owns the token must have **publish rights** on `callbag-recharge` (owner or maintainer on npm).
+- **GitHub-hosted runners** (OIDC not supported on self-hosted yet for this path).
+- Workflow permission **`id-token: write`** (already set in `release.yml`).
+- **`@semantic-release/npm` v13+** + **semantic-release v25+** (OIDC-aware verify/publish).
 
----
-
-## 3. Pushing to `main` (@semantic-release/git)
-
-semantic-release commits **CHANGELOG.md**, **package.json**, and **pnpm-lock.yaml** and pushes to `main`. The default **`GITHUB_TOKEN`** often **cannot push** if `main` is **branch-protected**.
-
-Pick **one** approach.
-
-### Option A — Allow GitHub Actions (simplest)
-
-1. Repo → **Settings** → **Rules** → **Rulesets** (or **Branches**).
-2. Edit the rule protecting `main`.
-3. Under **Bypass list**, add **Repository admin** or explicitly allow **GitHub Actions** (wording varies by UI version).
-4. Ensure the **Release** workflow’s actor can push (sometimes “Allow specified actors to bypass” includes `github-actions[bot]`).
-
-No extra secrets.
-
-### Option B — Personal Access Token (PAT)
-
-1. GitHub → **Settings** → **Developer settings** → **Personal access tokens**.
-2. **Fine-grained**: resource = this repo, permissions **Contents: Read and write** (and **Metadata: Read**).
-   Or **Classic**: scope **`repo`**.
-3. Repo → **Actions** secrets → **`SEMANTIC_RELEASE_GITHUB_TOKEN`** = the PAT.
-
-The Release workflow uses:
-
-`secrets.SEMANTIC_RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN`
-
-So if the PAT secret exists, pushes and GitHub API use it; otherwise the default Actions token is used.
-
-**Rotate the PAT** before expiry; update the secret.
+No **`NPM_TOKEN`** or **`NODE_AUTH_TOKEN`** is set for publish. If you later add **private npm dependencies**, use a **read-only** granular token only for `pnpm install` (see npm docs — not needed for this public repo today).
 
 ---
 
-## 4. GitHub App (optional, instead of PAT)
+## 2. GitHub App (pushes + GitHub Release)
 
-Use a **GitHub App** when org policy prefers apps over long-lived PATs.
+semantic-release needs a token that can **push** to `main` and talk to the GitHub API. A **GitHub App** installation token is used for that.
 
 ### Create the app
 
-1. GitHub (org or user) → **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**.
-2. **GitHub App name:** e.g. `callbag-recharge-release`.
-3. **Webhook:** inactive (uncheck active) unless you need it.
-4. **Permissions → Repository:**
+1. GitHub → **Settings** → **Developer settings** → **GitHub Apps** → **New GitHub App**.
+2. **Name** — e.g. `callbag-recharge-release`.
+3. **Webhook** — inactive unless you need it.
+4. **Repository permissions:**
    - **Contents:** Read and write  
    - **Metadata:** Read  
-   - **Issues** / **Pull requests:** Read & write (semantic-release may comment on released issues/PRs).
-5. **Where can this GitHub App be installed?** — Only on this account/org, or any account (your choice).
-6. Create app → note **App ID** (numeric).
-7. **Generate a private key** → download the `.pem` file. Paste the full PEM into a secret (newlines are fine; the action normalizes them).
+   - **Issues** / **Pull requests:** Read and write (for release comments, if enabled).
+5. **Where can this GitHub App be installed?** — your org/user.
+6. Create the app → note **App ID**.
+7. **Generate a private key** (`.pem`).
 
 ### Install the app
 
-1. App page → **Install App** → select org/user → **Only select repositories** → choose **`callbag-recharge`**.
+**Install** on the org/user → **Only select repositories** → **`callbag-recharge`** (or the repo name you use).
 
-### Wire into Actions
+### GitHub Actions secrets
 
-1. Repo → **Settings** → **Secrets and variables** → **Actions**:
-   - **`RELEASE_APP_ID`** = App ID (numeric string). You may use a **variable** instead if you prefer it non-secret.
-   - **`RELEASE_APP_PRIVATE_KEY`** = full `.pem` text (including `-----BEGIN … PRIVATE KEY-----` lines).
+Repo → **Settings** → **Secrets and variables** → **Actions**:
 
-2. **Variables** → **Actions** → **New repository variable**:
-   - Name **`SEMANTIC_RELEASE_USE_GITHUB_APP`**, value **`true`**.
-
-The Release workflow runs `actions/create-github-app-token` when that variable is `true`, then sets **`GITHUB_TOKEN`** to the installation token for semantic-release.
-
-To **turn off** the app path: delete the variable or set it to anything other than `true` (then PAT or default token applies).
-
-### App vs PAT
-
-Do **not** set **`SEMANTIC_RELEASE_USE_GITHUB_APP=true`** and rely on **`SEMANTIC_RELEASE_GITHUB_TOKEN`** for the same job in conflicting ways. Prefer **one** of: bypass, PAT only, or App only.
+| Secret | Value |
+|--------|--------|
+| **`RELEASE_APP_ID`** | Numeric App ID |
+| **`RELEASE_APP_PRIVATE_KEY`** | Full PEM text (`-----BEGIN … PRIVATE KEY-----` …) |
 
 ---
 
-## 5. First release / tags
+## 3. First release / tags
 
-If **`0.1.0`** is already on npm, create a matching tag so semantic-release continues from there:
+If **`0.1.0`** is already on npm, add a matching tag so semantic-release continues from there:
 
 ```bash
-git tag v0.1.0 <commit-sha-that-matched-publish>
+git tag v0.1.0 <commit-sha>
 git push origin v0.1.0
 ```
 
-Otherwise semantic-release infers from commit history (can jump version if many `feat:` commits exist).
-
 ---
 
-## 6. Docs workflow (`git push`)
+## 4. Docs workflow (`git push`)
 
-The **Deploy Docs** job also pushes README / `llms.txt` commits. If that push fails, apply the **same** bypass or PAT/App pattern to that workflow (today it uses default `GITHUB_TOKEN` only). Easiest fix: **branch bypass** for Actions on `main`.
+**Deploy Docs** still uses the default `GITHUB_TOKEN` for README / `llms.txt` commits. If those pushes fail on a protected `main`, either allow **GitHub Actions** to bypass rules for that path or extend the docs job with the same App token pattern as Release.
 
 ---
 
 ## Checklist
 
-| Step | Secret / variable |
-|------|-------------------|
-| Publish to npm | `NPM_TOKEN` |
-| Push protected `main` (PAT) | `SEMANTIC_RELEASE_GITHUB_TOKEN` |
-| Push protected `main` (App) | `SEMANTIC_RELEASE_USE_GITHUB_APP=true`, `RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY` |
-| Or | Branch rule bypass for `github-actions[bot]` |
+| Item | Done when |
+|------|-----------|
+| Trusted publisher on npm | `release.yml`, correct org/repo |
+| GitHub App installed on repo | Single-repo install |
+| **`RELEASE_APP_ID`** + **`RELEASE_APP_PRIVATE_KEY`** | Actions secrets |
+| Optional | Restrict npm token publishing after first successful OIDC publish |
+
+---
+
+## Troubleshooting
+
+| Issue | Check |
+|-------|--------|
+| Publish auth failed | Workflow name on npm is exactly **`release.yml`**; repo/org spelling; `id-token: write`. |
+| semantic-release push failed | App has **Contents: write**; app installed on **this** repo. |
+| OIDC / exchange errors | Runner is **GitHub-hosted**; Node 24 + global **npm ≥ 11.5.1** (workflow installs it). |

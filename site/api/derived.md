@@ -63,7 +63,7 @@ fullName.get(); // 'John Doe'
 
 ## Options / Behavior Details
 
-- **Lazy STANDALONE mode:** Connection to deps is deferred until the first `get()` or `source()` call. Once connected, deps stay connected even without external subscribers, so `get()` always returns the current cached value.
+- **Lazy derived:** No computation at construction. `get()` pull-computes from deps on demand (always fresh). `source()` subscription triggers push-based connection to deps; derived disconnects from deps when the last subscriber leaves.
 - **Diamond resolution:** Multi-dep derived nodes track dirty deps via a bitmask. When multiple deps share an ancestor, DIRTY propagates immediately but recomputation waits until all dirty deps have resolved, preventing glitches.
 - **Single-dep optimization (P0):** When there is only one dependency, the bitmask is skipped entirely for direct DIRTY/DATA forwarding.
 - **Push-phase memoization:** When `equals` is provided and the recomputed value equals the cached value, a RESOLVED signal is sent instead of DATA. This lets downstream nodes skip their own recomputation (subtree skipping).

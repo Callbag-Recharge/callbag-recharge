@@ -163,23 +163,23 @@ describe("Operator output slot", () => {
 });
 
 describe("Derived output slot", () => {
-	it("STANDALONE → SINGLE → MULTI → SINGLE → STANDALONE transitions", () => {
+	it("DISCONNECTED → SINGLE → MULTI → SINGLE → DISCONNECTED transitions", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);
 		const impl = b as any;
 
-		// v4.1: lazy STANDALONE — not connected until first get()
+		// v6: lazy — not connected until first source() subscription
 		expect(impl._output).toBeNull();
-		expect(impl._flags & 16).toBeFalsy(); // D_STANDALONE not set yet
+		expect(impl._flags & 2).toBeFalsy(); // D_CONNECTED not set
 
-		// First get() triggers lazy connection → STANDALONE
+		// get() pull-computes but does NOT connect
 		expect(b.get()).toBe(2);
-		expect(impl._flags & 16).toBeTruthy(); // D_STANDALONE now set
+		expect(impl._flags & 2).toBeFalsy(); // still not connected
 
-		// SINGLE: first external subscriber
+		// SINGLE: first external subscriber triggers connection
 		const values1: number[] = [];
 		const unsub1 = subscribe(b, (v) => values1.push(v));
-		expect(impl._flags & 16).toBeFalsy(); // D_STANDALONE cleared
+		expect(impl._flags & 2).toBeTruthy(); // D_CONNECTED set
 		expect(impl._output).not.toBeNull();
 		expect(impl._output).not.toBeInstanceOf(Set);
 
@@ -200,14 +200,14 @@ describe("Derived output slot", () => {
 		expect(values1).toEqual([10, 16]);
 		expect(values2).toEqual([10]); // no longer subscribed
 
-		// SINGLE → STANDALONE
+		// SINGLE → DISCONNECTED (no STANDALONE mode)
 		unsub1();
 		expect(impl._output).toBeNull();
-		expect(impl._flags & 16).toBeTruthy(); // D_STANDALONE back
+		expect(impl._flags & 2).toBeFalsy(); // D_CONNECTED cleared
 
-		// STANDALONE: value still current
+		// Disconnected: get() pull-computes fresh value
 		a.set(9);
-		expect(b.get()).toBe(18); // still reactive
+		expect(b.get()).toBe(18); // pull-computes
 	});
 
 	it("_status full lifecycle for derived", () => {
@@ -215,17 +215,24 @@ describe("Derived output slot", () => {
 		const b = derived([a], () => a.get() * 2);
 		const impl = b as any;
 
-		// v4.1: After construction — DISCONNECTED (lazy STANDALONE)
+		// v6: After construction — DISCONNECTED
 		expect(impl._status).toBe("DISCONNECTED");
 
-		// First get() triggers lazy connection → SETTLED
+		// get() pull-computes but does NOT connect — stays DISCONNECTED
 		expect(b.get()).toBe(2);
+		expect(impl._status).toBe("DISCONNECTED");
+
+		// source() subscription connects → SETTLED
+		const unsub = subscribe(b, () => {});
 		expect(impl._status).toBe("SETTLED");
 
 		// After state change: should go through DIRTY → SETTLED
 		a.set(5);
 		expect(impl._status).toBe("SETTLED");
 		expect(b.get()).toBe(10);
+
+		unsub();
+		expect(impl._status).toBe("DISCONNECTED");
 	});
 
 	it("STANDALONE: get() returns current value with no external subscribers", () => {
@@ -310,7 +317,7 @@ describe("Derived output slot", () => {
 		unsub();
 	});
 
-	it("chain assembled once: verify no rewiring on reconnect", () => {
+	it("chain assembled once: verify reconnect recomputes", () => {
 		const a = state(1);
 		let computeCount = 0;
 		const b = derived([a], () => {
@@ -318,23 +325,23 @@ describe("Derived output slot", () => {
 			return a.get() * 2;
 		});
 
-		// v4.1: No computation at construction (lazy STANDALONE)
+		// v6: No computation at construction
 		expect(computeCount).toBe(0);
 
 		// Subscribe triggers lazy connection + computation
 		const unsub1 = subscribe(b, () => {});
 		expect(computeCount).toBe(1);
+
+		// Unsub disconnects; resub reconnects and recomputes
 		unsub1();
 		const unsub2 = subscribe(b, () => {});
+		expect(computeCount).toBe(2); // reconnect recomputes
 		unsub2();
 
-		// No extra computations from subscribe/unsubscribe
-		expect(computeCount).toBe(1);
-
-		// State change recomputes once
+		// get() pull-computes (disconnected)
 		a.set(5);
-		expect(computeCount).toBe(2);
 		expect(b.get()).toBe(10);
+		expect(computeCount).toBe(3); // pull-compute
 	});
 
 	it("DATA without prior DIRTY (raw callbag compat) still works", () => {

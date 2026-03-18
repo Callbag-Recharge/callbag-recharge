@@ -172,6 +172,30 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 
 ---
 
+### Session docs-site-patterns-streamFrom (March 17) — Docs Fixes, Single-Source Examples, switchMap Footgun → streamFrom Pattern
+**Topic:** Fix broken docs site, establish single-source example strategy, identify critical usability issue with switchMap + propose streamFrom/cancellable patterns
+
+**Key insight:** The 5-operator streaming tax (filter + switchMap + filter(undefined) + scan + filter) is a real usability problem. Even Claude got it wrong in 3 attempts. switchMap's eager initial evaluation is architecturally correct but ergonomically wrong. Higher-level patterns (`streamFrom`, `cancellable`) are required for adoption, not optional.
+
+**Also done:** Fixed empty features/primitives on homepage (variable naming bug), established 5-tier docs model (JSDoc → examples/ → recipes → pattern READMEs → llms.txt), removed bundle-size auto-update CI, cleaned preact + callbag comparison deps, created createStore recipe with VitePress snippet imports.
+
+**Rejected:** Fix switchMap eagerness (correct contract); MDX over VitePress (no benefit); blog engine (over-engineering).
+
+**Outcome:** Broken site fixed, single-source example workflow established, streamFrom/cancellable patterns designed but NOT YET IMPLEMENTED.
+
+### Session lazy-tier2-option-d3 (March 18) — Architecture Pivot: Lazy Tier 2 + Option D3
+**Topic:** Fix switchMap footgun at the root — make Tier 2 operators lazy (no eager evaluation), add TypeScript-overloaded `initial` option, disconnect derived on last unsubscribe
+
+**Key insight:** `ProducerStore<T>` already extends `Store<T | undefined>` — the "always has value" concern was a false constraint. Tier 2 operators are async by nature; `undefined` before first emission is the honest type. Option D3 (lazy + overloaded initial) matches TanStack Query / SWR / Solid `createResource` patterns that LLMs already know.
+
+**Also decided:** Derived disconnect-on-last-unsub (memory win), `resetOnTeardown` for derived, naming pivot (`cancellable` → `fromAsync`, `streamFrom` → `fromStream`), subject.ts needs review.
+
+**Rejected:** Option C hybrid (reconnection race during talkback handshake); Option B fully lazy (breaks state/derived get()); keep D_STANDALONE perpetual connection.
+
+**Outcome:** Architecture pivot approved. Implementation: lazy switchMap → derived disconnect → other Tier 2 operators → tests. Streaming example drops from 5 operators to 3.
+
+---
+
 ## Additional Sessions (Partial Coverage)
 
 - Session 269923a2 (Mar 14) — Implementation plan for two-phase push

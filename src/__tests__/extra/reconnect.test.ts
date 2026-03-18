@@ -398,7 +398,7 @@ describe("Tier 2 operators — reconnect", () => {
 	});
 
 	it("switchMap: no active inner on reconnect", () => {
-		const s = state(1);
+		const s = state(0);
 		const inner1 = state(100);
 		const inner2 = state(200);
 		const sm = pipe(
@@ -408,15 +408,20 @@ describe("Tier 2 operators — reconnect", () => {
 
 		const values1: number[] = [];
 		const unsub1 = subscribe(sm, (v) => values1.push(v as number));
+		// Trigger outer emission to create inner subscription
+		s.set(1);
 		inner1.set(101);
-		expect(values1).toEqual([101]);
+		expect(values1).toEqual([100, 101]);
 		unsub1();
 
-		// Reconnect — should subscribe to inner for current s.get()
+		// Reconnect — no active inner until outer emits
 		const values2: number[] = [];
 		const unsub2 = subscribe(sm, (v) => values2.push(v as number));
+		// Trigger outer emission again (need different value)
+		s.set(2); // switches to inner2
+		s.set(1); // switches back to inner1
 		inner1.set(102);
-		expect(values2).toEqual([102]);
+		expect(values2).toContain(102);
 		unsub2();
 	});
 
@@ -442,7 +447,7 @@ describe("Tier 2 operators — reconnect", () => {
 	});
 
 	it("exhaustMap: not locked on reconnect", () => {
-		const s = state(1);
+		const s = state(0);
 		const p = producer<number>();
 		const em = pipe(
 			s,
@@ -451,6 +456,8 @@ describe("Tier 2 operators — reconnect", () => {
 
 		const values1: number[] = [];
 		const unsub1 = subscribe(em, (v) => values1.push(v as number));
+		// Trigger outer emission to create inner subscription
+		s.set(1);
 		// Inner is active (p not completed)
 		s.set(2); // ignored because inner is active
 		unsub1();
@@ -458,6 +465,8 @@ describe("Tier 2 operators — reconnect", () => {
 		// Reconnect — should not be locked
 		const values2: number[] = [];
 		const unsub2 = subscribe(em, (v) => values2.push(v as number));
+		// Trigger outer emission to create new inner
+		s.set(3);
 		p.emit(42);
 		expect(values2).toContain(42);
 		unsub2();

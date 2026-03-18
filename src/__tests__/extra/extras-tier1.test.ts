@@ -367,7 +367,7 @@ describe("throttle", () => {
 
 describe("switchMap", () => {
 	it("reflects the latest inner store's value", () => {
-		const outer = state(1);
+		const outer = state(0);
 		const inner1 = state(10);
 		const inner2 = state(20);
 
@@ -375,16 +375,21 @@ describe("switchMap", () => {
 			outer,
 			switchMap((v) => (v === 1 ? inner1 : inner2)),
 		);
-		// switchMap is stateful — needs a sink to activate
+		// switchMap is purely reactive — no inner until outer emits
 		subscribe(mapped, () => {});
 
+		// Before outer emits, no inner subscription exists
+		expect(mapped.get()).toBeUndefined();
+
+		// Trigger outer emission to create inner subscription
+		outer.set(1);
 		expect(mapped.get()).toBe(10);
 		outer.set(2);
 		expect(mapped.get()).toBe(20);
 	});
 
 	it("unsubscribes from previous inner on outer change", () => {
-		const outer = state(1);
+		const outer = state(0);
 		const inner1 = state(10);
 		const inner2 = state(20);
 
@@ -395,12 +400,14 @@ describe("switchMap", () => {
 		const values: (number | undefined)[] = [];
 		subscribe(mapped, (v) => values.push(v));
 
+		// Trigger outer emission to create initial inner subscription
+		outer.set(1); // switches to inner1
 		inner1.set(11); // should propagate (still subscribed to inner1)
 		outer.set(2); // switches to inner2
 		inner1.set(12); // should NOT propagate (unsubscribed from inner1)
 		inner2.set(21);
 
-		expect(values).toEqual([11, 20, 21]);
+		expect(values).toEqual([10, 11, 20, 21]);
 	});
 
 	it("tears down inner when last sink disconnects", () => {
@@ -421,8 +428,8 @@ describe("switchMap", () => {
 // ---------------------------------------------------------------------------
 
 describe("concatMap", () => {
-	it("subscribes to inner for initial outer value", () => {
-		const outer = state(1);
+	it("subscribes to inner when outer emits", () => {
+		const outer = state(0);
 		const inner = state(100);
 		const mapped = pipe(
 			outer,
@@ -430,11 +437,16 @@ describe("concatMap", () => {
 		);
 		subscribe(mapped, () => {}); // activate
 
+		// Before outer emits, no inner subscription exists
+		expect(mapped.get()).toBeUndefined();
+
+		// Trigger outer emission
+		outer.set(1);
 		expect(mapped.get()).toBe(100);
 	});
 
 	it("queues outer values while inner is active", () => {
-		const outer = state("a");
+		const outer = state("");
 		// inner stores that never complete — queue accumulates
 		const innerA = state(1);
 		const innerB = state(2);
@@ -446,16 +458,18 @@ describe("concatMap", () => {
 		const values: (number | undefined)[] = [];
 		subscribe(mapped, (v) => values.push(v));
 
+		// Trigger outer emission to create initial inner
+		outer.set("a"); // creates innerA subscription
 		innerA.set(10);
 		outer.set("b"); // queued — innerA still active (no END)
 		innerB.set(20); // innerB not yet active
 
-		expect(values).toEqual([10]);
+		expect(values).toEqual([1, 10]);
 		expect(mapped.get()).toBe(10);
 	});
 
 	it("processes next queued value when inner completes", () => {
-		const outer = state("a");
+		const outer = state("");
 		const innerA = producer<number>(({ emit }) => {
 			emit(1);
 		});
@@ -470,6 +484,8 @@ describe("concatMap", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// Trigger outer emission to create initial inner
+		outer.set("a");
 		outer.set("b"); // queued
 		innerA.complete(); // innerA completes → process "b"
 
@@ -494,19 +510,25 @@ describe("concatMap", () => {
 // ---------------------------------------------------------------------------
 
 describe("exhaustMap", () => {
-	it("subscribes to inner for initial outer value", () => {
-		const outer = state("x");
+	it("subscribes to inner when outer emits", () => {
+		const outer = state("");
 		const inner = state(42);
 		const mapped = pipe(
 			outer,
 			exhaustMap(() => inner),
 		);
 		subscribe(mapped, () => {}); // activate
+
+		// Before outer emits, no inner subscription
+		expect(mapped.get()).toBeUndefined();
+
+		// Trigger outer emission
+		outer.set("x");
 		expect(mapped.get()).toBe(42);
 	});
 
 	it("ignores new outer values while inner is active", () => {
-		const outer = state("a");
+		const outer = state("");
 		const innerA = state(1);
 		const innerB = state(2);
 
@@ -517,15 +539,17 @@ describe("exhaustMap", () => {
 		const values: (number | undefined)[] = [];
 		subscribe(mapped, (v) => values.push(v));
 
+		// Trigger outer emission to create initial inner
+		outer.set("a"); // creates innerA subscription
 		innerA.set(10);
 		outer.set("b"); // ignored — innerA still active
 		innerB.set(20); // innerB is NOT active
 
-		expect(values).toEqual([10]);
+		expect(values).toEqual([1, 10]);
 	});
 
 	it("accepts new outer value once inner completes", () => {
-		const outer = state(0);
+		const outer = state(-1);
 		const innerA = producer<number>(({ emit }) => {
 			emit(1);
 		});
@@ -540,6 +564,8 @@ describe("exhaustMap", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// Trigger outer emission to create initial inner
+		outer.set(0);
 		outer.set(1); // ignored — innerA active
 		innerA.complete(); // innerA completes → innerActive = false
 		outer.set(2); // now accepted → innerB

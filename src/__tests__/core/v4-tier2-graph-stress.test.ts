@@ -188,7 +188,7 @@ describe("switchMap in complex graphs", () => {
 	});
 
 	it("switchMap chain: switchMap → switchMap → derived", () => {
-		const category = state("A");
+		const category = state("");
 		const itemA = state(1);
 		const itemB = state(100);
 
@@ -207,6 +207,8 @@ describe("switchMap in complex graphs", () => {
 		const vals: string[] = [];
 		subscribe(display, (v) => vals.push(v));
 
+		// switchMap is purely reactive — trigger outer emissions
+		category.set("A"); // triggers selectedItem → itemA(1), then detail → "detail-1"
 		expect(display.get()).toBe("detail-1");
 
 		itemA.set(2);
@@ -221,10 +223,8 @@ describe("switchMap in complex graphs", () => {
 	});
 
 	it("switchMap with inner completion: outer continues, undefined between inners", () => {
-		// switchMap is a tier 2 producer with resetOnTeardown. When an inner
-		// source completes, the value resets to undefined before the next inner
-		// subscribes. This means we see undefined emissions between each inner.
-		const trigger = state(0);
+		// switchMap is purely reactive — inner only created on outer emission.
+		const trigger = state(-1);
 		const innerEmissions: any[] = [];
 
 		const switched = pipe(
@@ -236,6 +236,8 @@ describe("switchMap in complex graphs", () => {
 
 		subscribe(switched, (v) => innerEmissions.push(v));
 
+		// Trigger outer emissions
+		trigger.set(0); // creates inner with of(0)
 		trigger.set(1);
 		trigger.set(2);
 		trigger.set(3);
@@ -539,7 +541,7 @@ describe("dynamic subscriber churn with tier 2", () => {
 	});
 
 	it("switchMap inner subscription survives output slot transitions", () => {
-		const selector = state("a");
+		const selector = state("");
 		const dataA = state(10);
 		const dataB = state(20);
 
@@ -554,6 +556,8 @@ describe("dynamic subscriber churn with tier 2", () => {
 		const unsub1 = subscribe(switched, (v) => vals1.push(v));
 		const unsub2 = subscribe(switched, (v) => vals2.push(v));
 
+		// Trigger outer emission to create inner subscription
+		selector.set("a");
 		dataA.set(11);
 		expect(vals1).toContain(11);
 		expect(vals2).toContain(11);
@@ -960,7 +964,7 @@ describe("error propagation through tier 2", () => {
 
 	it("rescue after switchMap error: graph recovers", () => {
 		let attempt = 0;
-		const trigger = state(0);
+		const trigger = state(-1);
 
 		const mapped = pipe(
 			trigger,
@@ -982,6 +986,8 @@ describe("error propagation through tier 2", () => {
 		const vals: number[] = [];
 		subscribe(mapped, (v) => vals.push(v));
 
+		// switchMap is purely reactive — first outer emission creates attempt 1
+		trigger.set(0); // attempt 1 → state(0)
 		trigger.set(1); // attempt 2 → error → rescue → of(-1)
 		expect(vals).toContain(-1);
 	});

@@ -1,3 +1,5 @@
+# Publishes via npm Trusted Publishing (OIDC). No NPM_TOKEN.
+# On npmjs: package → Trusted publisher must reference this exact filename: release.yml
 name: Release
 
 on:
@@ -8,7 +10,7 @@ permissions:
   contents: write
   issues: write
   pull-requests: write
-  id-token: write
+  id-token: write # required for npm OIDC trusted publishing
 
 jobs:
   release:
@@ -21,9 +23,11 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version-file: .node-version
-          registry-url: https://registry.npmjs.org
           cache: pnpm
           cache-dependency-path: pnpm-lock.yaml
+
+      - name: npm CLI for OIDC publish (trusted publishing)
+        run: npm install -g npm@^11.5.1
 
       - run: corepack enable
       - run: pnpm install --frozen-lockfile
@@ -34,20 +38,13 @@ jobs:
           pnpm test
           pnpm run build
 
-      # Optional: variable SEMANTIC_RELEASE_USE_GITHUB_APP=true + RELEASE_APP_* secrets
-      # — see docs/github-actions-release-setup.md (defaults to current repo only)
       - uses: actions/create-github-app-token@v3
         id: app-token
-        if: ${{ vars.SEMANTIC_RELEASE_USE_GITHUB_APP == 'true' }}
         with:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
       - name: Release
         env:
-          # PAT in SEMANTIC_RELEASE_GITHUB_TOKEN overrides default (for protected main).
-          # With USE_GITHUB_APP, installation token is used instead.
-          GITHUB_TOKEN: ${{ vars.SEMANTIC_RELEASE_USE_GITHUB_APP == 'true' && steps.app-token.outputs.token || secrets.SEMANTIC_RELEASE_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
         run: pnpm exec semantic-release

@@ -190,7 +190,7 @@ describe("tier-2: no built-in dedup", () => {
 	});
 
 	it("concatMap: sequential inners with same value both emit", () => {
-		const outer = state("a");
+		const outer = state("");
 		const innerA = producer<number>(({ emit }) => {
 			emit(42);
 		});
@@ -202,6 +202,8 @@ describe("tier-2: no built-in dedup", () => {
 		);
 		const data = observeRaw<number | undefined>(mapped);
 
+		// Trigger outer emission to create initial inner
+		outer.set("a");
 		outer.set("b");
 		innerA.complete(); // innerA completes → process "b" → innerB emits 42
 
@@ -209,7 +211,7 @@ describe("tier-2: no built-in dedup", () => {
 	});
 
 	it("exhaustMap: sequential inners with same value both emit", () => {
-		const outer = state(0);
+		const outer = state(-1);
 		const innerA = producer<number>(({ emit }) => {
 			emit(42);
 		});
@@ -221,6 +223,8 @@ describe("tier-2: no built-in dedup", () => {
 		);
 		const data = observeRaw<number | undefined>(mapped);
 
+		// Trigger outer emission to create initial inner
+		outer.set(0);
 		innerA.complete();
 		outer.set(1); // now accepted → innerB emits 42
 

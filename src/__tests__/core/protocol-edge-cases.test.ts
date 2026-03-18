@@ -325,6 +325,9 @@ describe("batch() interaction", () => {
 
 		subscribe(result, (v) => values.push(v));
 
+		// v6: switchMap is purely reactive — trigger outer emission to subscribe to inner
+		s.set(2);
+
 		batch(() => {
 			inner.set(20);
 			inner.set(30);

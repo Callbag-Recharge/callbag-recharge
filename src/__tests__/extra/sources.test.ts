@@ -403,7 +403,7 @@ describe("interval", () => {
 
 describe("of", () => {
 	it("works correctly as inner source in switchMap", () => {
-		const outer = state(0);
+		const outer = state(-1);
 		const mapped = pipe(
 			outer,
 			switchMap((v) => of(v * 10)),
@@ -413,6 +413,8 @@ describe("of", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// switchMap is purely reactive — no inner until outer emits
+		outer.set(0); // triggers inner with of(0)
 		outer.set(1);
 		outer.set(2);
 
@@ -439,7 +441,7 @@ describe("empty", () => {
 
 describe("throwError", () => {
 	it("works as inner source in switchMap — propagates error", () => {
-		const outer = state(0);
+		const outer = state(-1);
 		const mapped = pipe(
 			outer,
 			switchMap(() => throwError("inner-err")),
@@ -447,7 +449,8 @@ describe("throwError", () => {
 		let endData: unknown = "not-called";
 		subscribe(mapped, () => {}, { onEnd: (err) => (endData = err) });
 
-		// switchMap subscribes to inner immediately — inner errors
+		// switchMap is purely reactive — trigger outer emission to create inner
+		outer.set(0);
 		expect(endData).toBe("inner-err");
 	});
 });

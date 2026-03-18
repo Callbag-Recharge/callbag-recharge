@@ -6,39 +6,36 @@ onMounted(() => {
 	mounted.value = true;
 });
 
-const bundleSizeKb =
-	typeof import.meta.env.VITE_BUNDLE_SIZE_GZIP_KB !== "undefined"
-		? import.meta.env.VITE_BUNDLE_SIZE_GZIP_KB
-		: "3.7";
-
-const _features = [
-	{
-		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.24 12.24a6 6 0 0 0-8.49-8.49L5 10.5V19h8.5z"/><line x1="16" y1="8" x2="2" y2="22"/><line x1="17.5" y1="15" x2="9" y2="15"/></svg>',
-		title: "Tiny Core",
-		desc: `Zero dependencies. ~${bundleSizeKb} KB gzip core. ~376 bytes per store. Tree-shakeable extras.`,
-		color: "#4de8c2",
-	},
+// biome-ignore lint/correctness/noUnusedVariables: used in <template> v-for
+const features = [
 	{
 		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.7 10.3a2.41 2.41 0 0 0 0 3.41l7.59 7.59a2.41 2.41 0 0 0 3.41 0l7.59-7.59a2.41 2.41 0 0 0 0-3.41l-7.59-7.59a2.41 2.41 0 0 0-3.41 0Z"/></svg>',
 		title: "Diamond-Safe",
-		desc: "Two-phase push guarantees glitch-free derived values. Always correct.",
+		desc: "Two-phase push guarantees glitch-free derived values. When A \u2192 B, A \u2192 C, B+C \u2192 D \u2014 D computes exactly once.",
 		color: "#f0a858",
+	},
+	{
+		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09Z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2Z"/><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"/><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"/></svg>',
+		title: "Streaming-Native",
+		desc: "LLM chunks, WebSocket, SSE \u2014 all first-class. switchMap auto-cancels. scan accumulates. retry recovers.",
+		color: "#4de8c2",
 	},
 	{
 		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v3"/></svg>',
 		title: "60+ Operators",
-		desc: "switchMap, debounce, retry, scan, merge, combine, and more.",
+		desc: "switchMap, debounce, retry, scan, merge, combine, groupBy, window, and more \u2014 tree-shakeable.",
 		color: "#a78bfa",
 	},
 	{
 		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>',
 		title: "Inspectable",
-		desc: "Every node observable via Inspector. See your reactive graph.",
+		desc: "Every node observable via Inspector. Names, edges, dirty/resolved phases \u2014 zero runtime cost in production.",
 		color: "#f472b6",
 	},
 ];
 
-const _primitives = [
+// biome-ignore lint/correctness/noUnusedVariables: used in <template> v-for
+const primitives = [
 	{ name: "state", desc: "writable store", example: "state(0)" },
 	{ name: "derived", desc: "computed value", example: "derived([a, b], fn)" },
 	{ name: "effect", desc: "side effects", example: "effect([dep], fn)" },

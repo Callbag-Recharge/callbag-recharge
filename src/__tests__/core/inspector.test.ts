@@ -139,12 +139,14 @@ describe("Inspector", () => {
 		expect(info.status).toBe("SETTLED");
 	});
 
-	it("v4: inspect() shows derived SETTLED status at construction", () => {
+	it("v6: inspect() shows derived DISCONNECTED status before subscription", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2, { name: "b" });
 		const info = Inspector.inspect(b);
-		expect(info.status).toBe("SETTLED");
-		expect(info.value).toBe(2);
+		// v6: derived is DISCONNECTED until subscribed. get() pull-computes
+		// but does not change status.
+		expect(info.status).toBe("DISCONNECTED");
+		expect(info.value).toBe(2); // inspect calls get() which pull-computes
 	});
 
 	// -----------------------------------------------------------------------
@@ -202,7 +204,9 @@ describe("Inspector", () => {
 		expect(dump).toContain("a (state)");
 		expect(dump).toContain("b (state)");
 		expect(dump).toContain("sum (derived)");
-		expect(dump).toContain("[SETTLED]");
+		// v6: derived is DISCONNECTED until subscribed; state is DISCONNECTED
+		// without subscribers. Check that status is shown.
+		expect(dump).toContain("[DISCONNECTED]");
 	});
 
 	it("dumpGraph() shows edge info", () => {
@@ -296,7 +300,7 @@ describe("Inspector", () => {
 			name: "b",
 			kind: "derived",
 			value: 2,
-			status: "SETTLED",
+			status: "DISCONNECTED",
 		});
 
 		expect(snap.edges).toContainEqual({ from: "a", to: "b" });

@@ -86,10 +86,12 @@ describe("flat", () => {
 		const inner = producer<number>(({ error }) => {
 			error("inner-fail");
 		});
-		const outer = state<any>(inner);
+		const outer = state<any>(undefined);
 		const f = pipe(outer, flat());
 		let err: unknown;
 		subscribe(f, () => {}, { onEnd: (e) => (err = e) });
+		// Trigger outer emission to subscribe to inner (which errors)
+		outer.set(inner);
 		expect(err).toBe("inner-fail");
 	});
 
@@ -127,12 +129,13 @@ describe("flat", () => {
 		expect(values).toEqual([]);
 	});
 
-	it("get() returns current inner value without subscribers", () => {
+	it("get() returns undefined without subscribers (no eager inner)", () => {
 		const inner = state(7);
 		const outer = state<any>(inner);
 		const f = pipe(outer, flat());
-		// get() should return inner's current value even without subscribers
-		expect(f.get()).toBe(7);
+		// flat is purely reactive — no inner subscription without outer emission
+		// get() returns undefined since no inner has been established
+		expect(f.get()).toBeUndefined();
 	});
 
 	it("multiple subscribers share single outer subscription", () => {

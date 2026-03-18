@@ -396,7 +396,8 @@ describe("concat", () => {
 describe("flat", () => {
 	test("subscribes to inner store from outer", () => {
 		const inner = state(10);
-		const outer = state<ReturnType<typeof state<number>> | undefined>(inner);
+		// v6: flat is purely reactive — start with undefined, then emit inner
+		const outer = state<ReturnType<typeof state<number>> | undefined>(undefined);
 		const result = pipe(outer, flat<number>());
 		const received: number[] = [];
 
@@ -404,22 +405,29 @@ describe("flat", () => {
 			if (v !== undefined) received.push(v);
 		});
 
+		// Trigger outer to emit inner store
+		outer.set(inner);
+
 		inner.set(20);
 		inner.set(30);
 
-		expect(received).toEqual([20, 30]);
+		expect(received).toEqual([10, 20, 30]);
 	});
 
 	test("switches to new inner when outer changes", () => {
 		const inner1 = state(1);
 		const inner2 = state(100);
-		const outer = state<ReturnType<typeof state<number>> | undefined>(inner1);
+		// v6: flat is purely reactive — start with undefined, then emit inner1
+		const outer = state<ReturnType<typeof state<number>> | undefined>(undefined);
 		const result = pipe(outer, flat<number>());
 		const received: number[] = [];
 
 		subscribe(result, (v) => {
 			if (v !== undefined) received.push(v);
 		});
+
+		// Trigger outer to emit inner1
+		outer.set(inner1);
 
 		inner1.set(2);
 		// Switch to inner2
@@ -428,18 +436,22 @@ describe("flat", () => {
 		inner1.set(3);
 		inner2.set(200);
 
-		expect(received).toEqual([2, 100, 200]);
+		expect(received).toEqual([1, 2, 100, 200]);
 	});
 
 	test("handles inner completion", () => {
 		const inner = fromIter([1, 2, 3]);
-		const outer = state<ReturnType<typeof fromIter<number>> | undefined>(inner);
+		// v6: flat is purely reactive — start with undefined, then emit inner
+		const outer = state<ReturnType<typeof fromIter<number>> | undefined>(undefined);
 		const result = pipe(outer, flat<number>());
 		const received: number[] = [];
 
 		subscribe(result, (v) => {
 			if (v !== undefined) received.push(v);
 		});
+
+		// Trigger outer to emit inner store
+		outer.set(inner);
 
 		// fromIter completes synchronously — values should arrive
 		expect(received).toEqual([1, 2, 3]);

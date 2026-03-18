@@ -116,7 +116,7 @@ describe("time-based operators are cycle boundaries", () => {
 
 describe("dynamic subscription operators are cycle boundaries", () => {
 	it("switchMap does not passthrough upstream type 3 signals", () => {
-		const a = state(1);
+		const a = state(0);
 		const b = state(10);
 		// switchMap subscribes to inner — it's a cycle boundary
 		const mapped = pipe(
@@ -129,6 +129,9 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 			return (mapped.get() ?? 0) + 1;
 		});
 		subscribe(result, () => {});
+
+		// Trigger outer emission to create inner subscription
+		a.set(1);
 		computeCount = 0;
 
 		b.set(20);
@@ -138,7 +141,7 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 
 	it("flat does not passthrough upstream type 3 signals", () => {
 		const inner = state(1);
-		const outer = state<typeof inner | undefined>(inner);
+		const outer = state<typeof inner | undefined>(undefined);
 		const f = pipe(outer, flat());
 
 		let computeCount = 0;
@@ -147,6 +150,9 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 			return (f.get() ?? 0) + 1;
 		});
 		subscribe(result, () => {});
+
+		// Trigger outer emission to create inner subscription
+		outer.set(inner);
 		computeCount = 0;
 
 		inner.set(2);
@@ -155,7 +161,7 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 	});
 
 	it("concatMap does not passthrough upstream type 3 signals", () => {
-		const a = state(1);
+		const a = state(0);
 		const inner = state(10);
 		const mapped = pipe(
 			a,
@@ -168,6 +174,9 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 			return (mapped.get() ?? 0) + 1;
 		});
 		subscribe(result, () => {});
+
+		// Trigger outer emission to create inner subscription
+		a.set(1);
 		computeCount = 0;
 
 		inner.set(20);
@@ -176,7 +185,7 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 	});
 
 	it("exhaustMap does not passthrough upstream type 3 signals", () => {
-		const a = state(1);
+		const a = state(0);
 		const inner = state(10);
 		const mapped = pipe(
 			a,
@@ -189,6 +198,9 @@ describe("dynamic subscription operators are cycle boundaries", () => {
 			return (mapped.get() ?? 0) + 1;
 		});
 		subscribe(result, () => {});
+
+		// Trigger outer emission to create inner subscription
+		a.set(1);
 		computeCount = 0;
 
 		inner.set(20);
@@ -222,7 +234,7 @@ describe("diamond topology through tier 2 operator", () => {
 	});
 
 	it("switchMap in diamond — downstream computes once per inner change", () => {
-		const outer = state(1);
+		const outer = state(0);
 		const inner = state(10);
 		const mapped = pipe(
 			outer,
@@ -237,6 +249,9 @@ describe("diamond topology through tier 2 operator", () => {
 			return a.get() + b.get();
 		});
 		subscribe(c, () => {});
+
+		// Trigger outer emission to create inner subscription
+		outer.set(1);
 		computeCount = 0;
 
 		inner.set(20);

@@ -37,4 +37,4 @@ Releases on `main` use **semantic-release** with an **Angular-style** analyzer. 
 
 **Patch releases** from this repo also treat **`docs`**, **`refactor`**, and **`perf`** as releasable (see `release.config.mjs`). **`chore`**, **`test`**, **`style`** do not bump the version unless breaking.
 
-**Maintainers — one-time Actions setup:** [docs/github-actions-release-setup.md](./github-actions-release-setup.md) (`NPM_TOKEN`, optional PAT or GitHub App for pushes to protected `main`).
+**Maintainers — one-time Actions setup:** [docs/github-actions-release-setup.md](./github-actions-release-setup.md) — **npm Trusted Publishing (OIDC)** + **GitHub App** (`RELEASE_APP_ID`, `RELEASE_APP_PRIVATE_KEY`); no publish token.

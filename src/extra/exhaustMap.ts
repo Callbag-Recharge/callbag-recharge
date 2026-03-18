@@ -9,28 +9,33 @@ import { subscribe } from "./subscribe";
  * new outer values are ignored. The next outer value is accepted only after the
  * current inner completes (sends END).
  *
- * Stateful: maintains last inner value via producer. get() returns the current
- * inner store's value.
+ * v5 (Option D3): Purely reactive — does NOT eagerly evaluate fn(outer.get()).
+ * Inner subscription is only created when outer emits. get() returns `initial`
+ * (if provided) or undefined before first inner emission.
  *
- * v3: Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
+ * Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
  * each emit starts a new DIRTY+value cycle. No built-in dedup.
  * Forwards inner errors and upstream completion.
  */
-export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
+export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined>;
+export function exhaustMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts: { initial: B },
+): StoreOperator<A, B>;
+export function exhaustMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts?: { initial?: B },
+): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
-		const initialInner = fn(outer.get());
 		const store = producer<B>(
 			({ emit, error, complete }) => {
 				let innerTalkback: ((type: number) => void) | null = null;
 				let innerActive = false;
 				let outerDone = false;
 
-				let initialized = false;
-
 				function subscribeInner(innerStore: Store<B>) {
 					innerActive = true;
-					if (initialized) emit(innerStore.get());
-					initialized = true;
+					emit(innerStore.get());
 					innerStore.source(START, (type: number, data: unknown) => {
 						if (type === START) innerTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as B);
@@ -62,14 +67,13 @@ export function exhaustMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B
 						},
 					},
 				);
-				subscribeInner(initialInner);
 
 				return () => {
 					if (innerTalkback) innerTalkback(END);
 					outerUnsub();
 				};
 			},
-			{ initial: initialInner.get() },
+			opts && "initial" in opts ? { initial: opts.initial as B } : undefined,
 		);
 
 		Inspector.register(store, { kind: "exhaustMap" });

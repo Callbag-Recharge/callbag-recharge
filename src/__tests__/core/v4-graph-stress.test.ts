@@ -532,10 +532,9 @@ describe("dynamic graph topology changes", () => {
 		unsub();
 	});
 
-	it("derived wrapping operator: STANDALONE keeps operator connected, handler state persists", () => {
-		// derived is eagerly connected (STANDALONE) — it never fully disconnects
-		// from its dep operator. So the operator's init handler does NOT re-run
-		// when external subscribers leave and rejoin. Handler-local state persists.
+	it("derived wrapping operator: disconnect-on-last-unsub resets operator state", () => {
+		// v6: derived disconnects on last unsub — operator re-inits on reconnect.
+		// Handler-local state (count) resets to 0 on each reconnect.
 		const a = state(0);
 		const counted = operator([a], (actions) => {
 			let count = 0;
@@ -559,13 +558,13 @@ describe("dynamic graph topology changes", () => {
 		expect(vals1).toEqual([10, 20]); // count=1→10, count=2→20
 		unsub1();
 
-		// Derived goes back to STANDALONE but stays connected to operator.
-		// Operator handler state (count) persists — count continues from 2.
+		// Derived disconnects — operator re-inits with fresh state.
+		// Count resets to 0 on reconnect.
 		const vals2: number[] = [];
 		const unsub2 = subscribe(d, (v) => vals2.push(v));
 		a.set(3);
 		a.set(4);
-		expect(vals2).toEqual([30, 40]); // count=3→30, count=4→40 (persisted!)
+		expect(vals2).toEqual([10, 20]); // count=1→10, count=2→20 (reset!)
 		unsub2();
 	});
 
@@ -847,12 +846,17 @@ describe("status model consistency", () => {
 		const b = derived([a], () => a.get() * 2);
 		const c = derived([a, b], () => a.get() + b.get());
 
-		// v4.1: After construction — DISCONNECTED (lazy STANDALONE)
+		// After construction — DISCONNECTED
 		expect(b._status).toBe("DISCONNECTED");
 		expect(c._status).toBe("DISCONNECTED");
 
-		// First get() triggers lazy connection cascade
+		// get() pull-computes but doesn't connect (stays DISCONNECTED)
 		expect(c.get()).toBe(3); // 1 + 1*2
+		expect(b._status).toBe("DISCONNECTED");
+		expect(c._status).toBe("DISCONNECTED");
+
+		// Subscribe connects the graph
+		const unsub = subscribe(c, () => {});
 		expect(b._status).toBe("SETTLED");
 		expect(c._status).toBe("SETTLED");
 
@@ -861,20 +865,22 @@ describe("status model consistency", () => {
 		expect(b._status).toBe("SETTLED");
 		expect(c._status).toBe("SETTLED");
 		expect(c.get()).toBe(15);
+		unsub();
 	});
 
 	it("RESOLVED status: state equals guard blocks emit entirely, no DIRTY reaches derived", () => {
 		// state(1).set(1) — state's own equals guard (Object.is) blocks the
 		// entire emission. No DIRTY is sent, so derived never enters DIRTY→RESOLVED.
-		// Derived stays SETTLED from lazy connection.
 		const a = state(1);
 		const b = derived([a], () => a.get(), { equals: Object.is });
 
-		// v4.1: trigger lazy connection first
-		expect(b.get()).toBe(1);
+		// Subscribe to connect the graph
+		const unsub = subscribe(b, () => {});
+		expect(b._status).toBe("SETTLED");
 
 		a.set(1); // same value → state blocks emit entirely
 		expect(b._status).toBe("SETTLED"); // no DIRTY was ever sent
+		unsub();
 	});
 
 	it("status after error is ERRORED", () => {
@@ -905,7 +911,7 @@ describe("status model consistency", () => {
 
 describe("tier 2 cycle boundaries in complex graphs", () => {
 	it("switchMap in diamond: inner source change doesn't glitch outer diamond", () => {
-		const selector = state("a");
+		const selector = state("");
 		const sourceA = state(1);
 		const sourceB = state(100);
 
@@ -923,6 +929,8 @@ describe("tier 2 cycle boundaries in complex graphs", () => {
 		});
 		vals.length = 0;
 
+		// Trigger outer emission to create inner subscription
+		selector.set("a");
 		sourceA.set(2);
 		expect(combined.get()).toBe("2-A");
 
@@ -1057,26 +1065,28 @@ describe("correctness traps", () => {
 		expect(b.get()).toBe(10);
 	});
 
-	it("get() during derived computation returns correct value (lazy STANDALONE)", () => {
+	it("get() during derived computation returns correct value (pull-compute)", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get() * 2);
 
 		let bValueDuringC: number | undefined;
 		const c = derived([a, b], () => {
-			// During c's computation, b.get() returns its current value.
-			// With lazy STANDALONE, b may lazily connect when c first computes.
+			// During c's computation, b.get() pull-computes from a.
 			bValueDuringC = b.get();
 			return a.get() + b.get();
 		});
 
-		// v4.1: trigger lazy connection cascade via c.get()
+		// Pull-compute: c.get() triggers b.get() which pull-computes
 		expect(c.get()).toBe(3); // 1 + 2
 		expect(bValueDuringC).toBe(2);
 
+		// After subscribing, push-based updates work correctly
+		const unsub = subscribe(c, () => {});
 		a.set(5);
 		// After connection, b recomputes to 10 before c recomputes
 		expect(bValueDuringC).toBe(10);
 		expect(c.get()).toBe(15);
+		unsub();
 	});
 
 	it("many-to-one: 10 states feeding one derived — single compute per batch", () => {

@@ -1,0 +1,435 @@
+# callbag-recharge — Full Documentation
+> State that flows. Reactive state management for TypeScript.
+
+## Overview
+
+callbag-recharge is a reactive state management library where every store is a callbag source.
+5 primitives, 60+ operators, framework-agnostic, zero dependencies.
+
+Key differentiators:
+1. Glitch-free diamond resolution — two-phase push (DIRTY then values) ensures derived stores compute exactly once
+2. Streaming-native — LLM chunks, WebSocket, SSE are first-class, not bolted on
+3. Inspectable — every node in the graph is observable without runtime cost
+4. Completion semantics — stores can complete/error like streams; retry, rescue, repeat handle recovery
+
+## Install
+
+```
+npm install callbag-recharge
+```
+
+## Core API
+
+### state(initial, opts?)
+
+Creates a writable reactive store.
+
+```ts
+import { state } from 'callbag-recharge'
+
+const count = state(0)
+count.get()      // 0
+count.set(5)
+count.get()      // 5
+count.update(n => n + 1) // 6
+```
+
+Options:
+- `name: string` — debug name for Inspector
+- `equals: (a, b) => boolean` — equality check (default: Object.is). Skips emission if equal.
+
+Methods: get(), set(value), update(fn), source (callbag)
+
+### derived([deps], fn, opts?)
+
+Creates a cached computed store with explicit dependencies.
+
+```ts
+import { state, derived } from 'callbag-recharge'
+
+const a = state(1)
+const b = state(2)
+const sum = derived([a, b], () => a.get() + b.get())
+sum.get() // 3
+```
+
+Diamond-safe: when A → B, A → C, B+C → D, setting A causes D to recompute exactly once.
+
+```ts
+const base = state(1)
+const doubled = derived([base], () => base.get() * 2)
+const tripled = derived([base], () => base.get() * 3)
+const sum = derived([doubled, tripled], () => doubled.get() + tripled.get())
+base.set(2) // sum = 10, computed once
+```
+
+Options:
+- `equals: (a, b) => boolean` — push-phase memoization. Sends RESOLVED instead of DATA if unchanged.
+
+Lazy derived: no computation at construction. `get()` pull-computes from deps (always fresh). `source()` subscription triggers push-based connection; disconnects when last subscriber leaves.
+
+`derived.from(dep, opts?)` — identity mode, forwards dep value without fn().
+
+### effect([deps], fn)
+
+Side-effect runner with explicit dependencies. Runs when all dirty deps resolve.
+
+```ts
+import { state, effect } from 'callbag-recharge'
+
+const name = state('world')
+const dispose = effect([name], () => {
+  console.log(`Hello, ${name.get()}!`)
+  return () => { /* cleanup */ }
+})
+
+name.set('Alice') // logs: "Hello, Alice!"
+dispose()
+```
+
+### producer(fn?, opts?)
+
+General-purpose push source with lifecycle management.
+
+```ts
+import { producer } from 'callbag-recharge'
+
+const ticks = producer<number>(({ emit, complete, error }) => {
+  const id = setInterval(() => emit(Date.now()), 1000)
+  return () => clearInterval(id) // cleanup
+})
+```
+
+Options: initial, equals, resetOnTeardown, getter, resubscribable (allow re-subscription after complete/error)
+
+### operator([deps], init, opts?)
+
+Custom transform primitive. Building block for tier 1 operators.
+
+```ts
+import { state, operator } from 'callbag-recharge'
+
+const source = state(0)
+const doubled = operator<number>([source], (actions) => {
+  return (depIndex, type, data) => {
+    if (type === 1) actions.emit(data * 2)      // transform DATA
+    else if (type === 3) actions.signal(data)    // forward STATE
+  }
+}, { initial: 0 })
+```
+
+### pipe(source, ...operators)
+
+Compose operators into an inspectable store chain.
+
+```ts
+import { state, pipe } from 'callbag-recharge'
+import { map, filter, scan } from 'callbag-recharge/extra'
+
+const input = state(0)
+const result = pipe(
+  input,
+  map(n => n * 2),
+  filter(n => n > 0),
+  scan((acc, n) => acc + n, 0),
+)
+result.get() // accumulated value
+```
+
+### batch(fn)
+
+Defer value emissions until the outermost batch ends. DIRTY signals propagate immediately.
+
+```ts
+import { state, derived, batch } from 'callbag-recharge'
+
+const a = state(1)
+const b = state(2)
+const sum = derived([a, b], () => a.get() + b.get())
+
+batch(() => {
+  a.set(10)
+  b.set(20)
+})
+// sum recomputes once with both new values
+```
+
+### Inspector
+
+Opt-in observability. Zero per-store cost via WeakMaps.
+
+```ts
+import { Inspector } from 'callbag-recharge'
+
+Inspector.inspect(store) // { name, kind, value, status }
+Inspector.graph()        // Map of all named stores
+Inspector.getEdges()     // dependency edges
+Inspector.observe(store) // callbag sink for testing
+Inspector.spy(store)     // observe + console logging
+Inspector.trace(store, cb) // value change callback
+Inspector.dumpGraph()    // serializable graph snapshot
+```
+
+## Operators (callbag-recharge/extra)
+
+### Sources
+- `interval(ms)` — emits incrementing number every ms
+- `fromIter(iterable)` — emits each value from sync iterable
+- `fromAsyncIter(asyncIterable)` — emits each value from async iterable (SSE, fetch streams, DB cursors)
+- `fromEvent(target, eventName)` — emits DOM/Node events
+- `fromPromise(promise)` — emits resolved value, completes
+- `fromObs(observable)` — wraps RxJS/TC39 Observable
+- `of(...values)` — emits values synchronously, completes
+- `empty()` — completes immediately
+- `throwError(err)` — errors immediately
+- `never()` — never emits or completes
+
+### Filtering
+- `filter(predicate)` — pass values matching predicate
+- `take(n)` — take first n values, then complete
+- `skip(n)` — skip first n values
+- `first()` — take first value, complete
+- `last()` — take last value before completion
+- `find(predicate)` — first value matching predicate
+- `elementAt(index)` — value at specific index
+- `distinctUntilChanged(comparator?)` — skip consecutive duplicates
+- `takeUntil(notifier)` — complete when notifier emits
+
+### Transformation
+- `map(fn)` — transform each value
+- `scan(fn, seed)` — accumulate values (like Array.reduce but streaming)
+- `pairwise()` — emit [previous, current] pairs
+- `startWith(value)` — prepend initial value
+- `flat()` — flatten nested sources (purely reactive, optional `{ initial }`)
+- `switchMap(fn, opts?)` — map to inner source, auto-cancel previous (purely reactive, optional `{ initial }`)
+- `concatMap(fn, opts?)` — map to inner source, queue sequentially (purely reactive, optional `{ initial, maxBuffer }`)
+- `exhaustMap(fn, opts?)` — map to inner source, ignore while active (purely reactive, optional `{ initial }`)
+- `groupBy(keyFn)` — group into keyed sub-sources
+
+### Combination
+- `merge(...sources)` — interleave emissions from multiple sources
+- `combine(...sources)` — emit array when any source updates
+- `concat(...sources)` — emit from sources sequentially
+- `race(...sources)` — first source to emit wins
+- `withLatestFrom(...sources)` — combine with latest from other sources
+- `partition(predicate)` — split into [matching, non-matching] sources
+
+### Time
+- `debounce(ms)` — wait for silence before emitting
+- `throttle(ms)` — rate-limit emissions
+- `delay(ms)` — delay each emission
+- `timeout(ms)` — error if no emission within time
+- `sample(notifier)` — emit latest value when notifier fires
+- `audit(ms)` — like throttle but emits trailing value
+
+### Buffering
+- `buffer(notifier)` — collect values, flush when notifier emits
+- `bufferCount(size, startEvery?)` — collect n values, flush
+- `bufferTime(ms)` — collect values over time window, flush
+
+### Windowing
+- `window(notifier)` — split into sub-sources at notifier boundaries
+- `windowCount(size)` — split into sub-sources every n values
+- `windowTime(ms)` — split into sub-sources every ms
+
+### Aggregation
+- `reduce(fn, seed)` — reduce to single value on completion
+- `toArray()` — collect all values into array on completion
+
+### Error handling
+- `rescue(fn)` — catch errors, switch to fallback source
+- `retry(count)` — re-subscribe on error, up to count times
+- `repeat(count?)` — re-subscribe on completion
+
+### Utilities
+- `tap(fn)` — side-effect without transforming
+- `share()` — multicast (no-op for stores, useful for raw callbag compat)
+- `remember()` — replay last value to new subscribers
+- `subject()` — manual emit + subscribe (like RxJS Subject)
+- `wrap(source)` — RxJS/callbag interop wrapper
+
+### Piping
+- `pipeRaw(source, ...fns)` — fuse transforms into single derived (~2x throughput)
+- `SKIP` — sentinel for filter semantics in pipeRaw
+
+### Sinks
+- `forEach(source, fn)` — subscribe and run fn on each value
+- `subscribe(source, fn)` — subscribe with (value, previousValue) callback, returns unsubscribe
+
+## Data Structures (callbag-recharge/data)
+
+### reactiveMap<K, V>(opts?)
+
+Reactive key-value store. Single source of truth.
+
+```ts
+import { reactiveMap } from 'callbag-recharge/data'
+
+const users = reactiveMap<string, User>()
+users.set('alice', { name: 'Alice', age: 30 })
+users.get('alice')             // { name: 'Alice', age: 30 }
+users.select('alice')          // Store<User | undefined> — reactive, cached
+users.keysStore                // Store<string[]> — reactive
+users.sizeStore                // Store<number> — reactive
+users.update('alice', u => ({ ...u, age: 31 }))
+users.getOrSet('bob', () => ({ name: 'Bob', age: 25 }))
+```
+
+Options: maxSize, equals, eviction (fifo/lru/lfu/scored), defaultTTL, id
+Supports: TTL per key, namespaces, keyspace events, batch setMany
+
+### reactiveLog<T>(opts?)
+
+Append-only reactive log with optional bounded size (circular buffer).
+
+```ts
+import { reactiveLog } from 'callbag-recharge/data'
+
+const log = reactiveLog<string>({ maxSize: 1000 })
+log.append('event 1')
+log.lengthStore.get() // 1
+log.latest.get()      // 'event 1'
+log.tail(5)           // Store<string[]> — last 5 entries, reactive
+```
+
+### reactiveIndex<PK, IK, V>(opts?)
+
+Dual-key reactive index with O(1) reverse map.
+
+```ts
+import { reactiveIndex } from 'callbag-recharge/data'
+
+const idx = reactiveIndex<string, string>()
+idx.add('user:1', 'admin')
+idx.add('user:2', 'admin')
+idx.select('admin').get()  // Set{'user:1', 'user:2'}
+idx.keysStore.get()        // reactive list of index keys
+```
+
+### pubsub<T>()
+
+Topic-based publish/subscribe. Each topic is a lazy state store.
+
+```ts
+import { pubsub } from 'callbag-recharge/data'
+
+const bus = pubsub<{ type: string; payload: unknown }>()
+bus.publish('user-events', { type: 'login', payload: { id: 1 } })
+bus.subscribe('user-events') // Store — reactive
+```
+
+## Scheduling (callbag-recharge/orchestrate)
+
+### fromCron(schedule)
+
+Producer that emits on cron schedule. Built-in zero-dependency parser.
+
+```ts
+import { fromCron } from 'callbag-recharge/orchestrate'
+
+const daily = fromCron('0 9 * * *')      // 9am daily
+const everyFive = fromCron('*/5 * * * *') // every 5 minutes
+```
+
+### taskState<T>(opts?)
+
+Reactive task execution tracker.
+
+```ts
+import { taskState } from 'callbag-recharge/orchestrate'
+
+const task = taskState<Result>({ id: 'fetch-data' })
+await task.run(() => fetchData())
+task.get().status   // 'success'
+task.get().duration // ms
+task.get().runCount // 1
+```
+
+### dag(tasks)
+
+Acyclicity validation via Kahn's algorithm. Registers edges with Inspector.
+
+## Patterns (callbag-recharge/patterns/createStore)
+
+### createStore(fn)
+
+Zustand-compatible API with diamond-safe selectors.
+
+```ts
+import { createStore } from 'callbag-recharge/patterns/createStore'
+
+const store = createStore((set, get) => ({
+  count: 0,
+  increment: () => set({ count: get().count + 1 }),
+}))
+
+store.getState().count      // 0
+store.getState().increment()
+store.getState().count      // 1
+store.subscribe(state => console.log(state.count))
+```
+
+## Common Patterns
+
+### AI Chat with Streaming and Auto-Cancellation
+
+```ts
+import { state, derived, effect, producer } from 'callbag-recharge'
+import { switchMap, scan, subscribe } from 'callbag-recharge/extra'
+
+const prompt = state('')
+const chunks = switchMap(prompt, (p) =>
+  producer(({ emit, complete }) => {
+    const ctrl = new AbortController()
+    streamChat(p, ctrl.signal, emit, complete)
+    return () => ctrl.abort()
+  })
+)
+const response = scan(chunks, (acc, chunk) => acc + chunk, '')
+// New prompt auto-cancels previous stream
+```
+
+### Reactive Data Pipeline (ETL)
+
+```ts
+import { producer, pipe } from 'callbag-recharge'
+import { fromAsyncIter, map, filter, bufferCount, forEach } from 'callbag-recharge/extra'
+
+const rows = fromAsyncIter(db.query('SELECT * FROM events'))
+const pipeline = pipe(
+  rows,
+  filter(row => row.type === 'purchase'),
+  map(row => ({ ...row, amount: row.amount * 100 })),
+  bufferCount(100),
+)
+forEach(pipeline, batch => db.insertMany('processed', batch))
+```
+
+### Cron-triggered Pipeline (Airflow-in-TypeScript)
+
+```ts
+import { derived, effect, pipe } from 'callbag-recharge'
+import { fromCron } from 'callbag-recharge/orchestrate'
+import { exhaustMap, retry } from 'callbag-recharge/extra'
+
+const daily = fromCron('0 9 * * *')
+const fetchBank = pipe(daily, exhaustMap(() => fromPromise(plaid.sync())), retry(3))
+const fetchCards = pipe(daily, exhaustMap(() => fromPromise(stripe.charges())), retry(3))
+const aggregate = derived([fetchBank, fetchCards], () => merge(fetchBank.get(), fetchCards.get()))
+effect([aggregate], () => sendReport(aggregate.get()))
+```
+
+## Architecture Notes for AI Tools
+
+- Two-phase push: DIRTY propagates on type 3 STATE, values on type 1 DATA
+- Diamond resolution uses dirty-dep bitmask at convergence points
+- Single-dep chains skip bitmask (P0 optimization)
+- Tier 1 operators participate in diamond resolution; Tier 2 (async/timer) are cycle boundaries
+- batch() defers DATA but DIRTY propagates immediately
+- Explicit deps — no implicit tracking magic
+- Every store exposes .source (callbag) for protocol-level interop
+
+## Links
+- Docs: https://callbag-recharge.github.io/callbag-recharge/
+- GitHub: https://github.com/Callbag-Recharge/callbag-recharge
+- Architecture: https://callbag-recharge.github.io/callbag-recharge/architecture/

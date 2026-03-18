@@ -11,29 +11,29 @@ import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 
 describe("Output slot transitions", () => {
-	it("Scenario 1: A→B, add C — B transitions from STANDALONE to SINGLE", () => {
+	it("Scenario 1: A→B, add C — B transitions from DISCONNECTED to SINGLE", () => {
 		const a = state(0);
 		const b = derived([a], () => a.get() + 1);
 
-		// B is STANDALONE — output slot is null, deps connected via closures
-		expect(b.get()).toBe(1);
+		// B is DISCONNECTED — output slot is null, no upstream connection
+		expect(b.get()).toBe(1); // pull-computes
 		expect((b as any)._output).toBeNull();
-		expect((b as any)._flags & 16).toBeTruthy(); // D_STANDALONE
+		expect((b as any)._flags & 2).toBeFalsy(); // D_CONNECTED not set
 
-		// C subscribes → output slot transitions to SINGLE
+		// C subscribes → output slot transitions to SINGLE, connects upstream
 		const values: number[] = [];
 		const unsub = subscribe(b, (v) => values.push(v));
-		expect((b as any)._flags & 16).toBeFalsy(); // D_STANDALONE cleared
+		expect((b as any)._flags & 2).toBeTruthy(); // D_CONNECTED set
 
 		a.set(5);
-		expect(b.get()).toBe(6); // B still current via tap
+		expect(b.get()).toBe(6);
 		expect(values).toEqual([6]);
 
 		unsub();
-		// B back to STANDALONE
-		expect((b as any)._flags & 16).toBeTruthy();
+		// B disconnects from upstream (no STANDALONE mode)
+		expect((b as any)._flags & 2).toBeFalsy(); // D_CONNECTED cleared
 		a.set(10);
-		expect(b.get()).toBe(11); // still reactive
+		expect(b.get()).toBe(11); // pull-computes fresh value
 	});
 
 	it("Scenario 2: Diamond A→B→C, A→C — C unsubscribes cleanly", () => {
@@ -50,17 +50,14 @@ describe("Output slot transitions", () => {
 
 		unsub();
 
-		// v4: C's dep connections to A and B are permanent (eager connection).
-		// B still has C as a subscriber (C's dep connection is established at
-		// construction and never removed). B is NOT standalone — it has C as
-		// a permanent dep subscriber.
-		// C's output slot goes back to STANDALONE (no external subscribers)
-		expect((c as any)._flags & 16).toBeTruthy();
+		// v6: C disconnects from upstream when last subscriber leaves.
+		// D_CONNECTED should be cleared.
+		expect((c as any)._flags & 2).toBeFalsy(); // D_CONNECTED cleared
 
-		// All stores still reactive (eager connections are permanent)
+		// Stores still return fresh values via pull-compute
 		a.set(20);
-		expect(b.get()).toBe(40);
-		expect(c.get()).toBe(60); // 20 + 40
+		expect(b.get()).toBe(40); // pull-computes
+		expect(c.get()).toBe(60); // pull-computes: 20 + 40
 	});
 
 	it("Scenario 3: A→B→C exists, add D to B — B output slot becomes MULTI", () => {

@@ -9,22 +9,34 @@ import { subscribe } from "./subscribe";
  * New outer values are queued while an inner is active; the next queued value is
  * processed when the current inner completes (sends END).
  *
- * Stateful: maintains last inner value via producer. get() returns the current
- * inner store's value. Queue is discarded on teardown.
+ * v5 (Option D3): Purely reactive — does NOT eagerly evaluate fn(outer.get()).
+ * Inner subscription is only created when outer emits. get() returns `initial`
+ * (if provided) or undefined before first inner emission.
  *
- * v3: Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
+ * Tier 2 — dynamic subscription operator. Each inner is a cycle boundary;
  * each emit starts a new DIRTY+value cycle. No built-in dedup.
  * Forwards inner errors and upstream completion.
+ *
+ * `maxBuffer` limits queued outer values. When exceeded, oldest queued values
+ * are dropped (backpressure). Default: no limit.
  */
-export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
+export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined>;
+export function concatMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts: { initial: B; maxBuffer?: number },
+): StoreOperator<A, B>;
+export function concatMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts?: { initial?: B; maxBuffer?: number },
+): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
-		const initialInner = fn(outer.get());
 		const store = producer<B>(
 			({ emit, error, complete }) => {
 				let innerTalkback: ((type: number) => void) | null = null;
 				let innerActive = false;
 				let outerDone = false;
 				const queue: A[] = [];
+				const maxBuffer = opts?.maxBuffer ?? Infinity;
 
 				function processNext() {
 					if (queue.length === 0) {
@@ -35,12 +47,9 @@ export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 					subscribeInner(fn(queue.shift() as A));
 				}
 
-				let initialized = false;
-
 				function subscribeInner(innerStore: Store<B>) {
 					innerActive = true;
-					if (initialized) emit(innerStore.get());
-					initialized = true;
+					emit(innerStore.get());
 					innerStore.source(START, (type: number, data: unknown) => {
 						if (type === START) innerTalkback = data as (type: number) => void;
 						if (type === 1) emit(data as B);
@@ -61,6 +70,7 @@ export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 						if (!innerActive) {
 							subscribeInner(fn(v));
 						} else {
+							if (queue.length >= maxBuffer) queue.shift();
 							queue.push(v);
 						}
 					},
@@ -75,7 +85,6 @@ export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 						},
 					},
 				);
-				subscribeInner(initialInner);
 
 				return () => {
 					if (innerTalkback) innerTalkback(END);
@@ -83,7 +92,7 @@ export function concatMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 					queue.length = 0;
 				};
 			},
-			{ initial: initialInner.get() },
+			opts && "initial" in opts ? { initial: opts.initial as B } : undefined,
 		);
 
 		Inspector.register(store, { kind: "concatMap" });

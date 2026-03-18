@@ -51,6 +51,7 @@ export default defineConfig({
 			{ text: "Guide", link: "/getting-started" },
 			{ text: "API", link: "/api/state" },
 			{ text: "Extras", link: "/extras/" },
+			{ text: "Recipes", link: "/recipes/" },
 			{ text: "Architecture", link: "/architecture/" },
 		],
 
@@ -75,6 +76,20 @@ export default defineConfig({
 			{
 				text: "Extras",
 				items: [{ text: "Operator Reference", link: "/extras/" }],
+			},
+			{
+				text: "Recipes",
+				items: [
+					{ text: "Overview", link: "/recipes/" },
+					{
+						text: "AI Chat with Streaming",
+						link: "/recipes/ai-chat-streaming",
+					},
+					{
+						text: "createStore (Zustand Migration)",
+						link: "/recipes/zustand-migration",
+					},
+				],
 			},
 			{
 				text: "Architecture",

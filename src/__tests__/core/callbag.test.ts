@@ -276,25 +276,35 @@ describe("Pipe + operators", () => {
 });
 
 describe("Backpressure / pull", () => {
-	it("v4.1: derived is lazy — computes on first get() then on changes", () => {
+	it("v6: derived is lazy — pull-computes on get(), push-computes when subscribed", () => {
 		const count = state(0);
 		const computeFn = vi.fn(() => count.get() + 1);
 		const d = derived([count], computeFn);
 
-		// v4.1: not computed at construction — fully lazy
+		// v6: not computed at construction — fully lazy
 		expect(computeFn).toHaveBeenCalledTimes(0);
 
-		// First get() triggers computation + lazy STANDALONE connection
+		// get() pull-computes (no connection)
 		expect(d.get()).toBe(1); // 0 + 1
 		expect(computeFn).toHaveBeenCalledTimes(1);
 
+		// Without subscription, state changes don't push to derived
 		count.set(1);
 		count.set(2);
 		count.set(3);
-		// STANDALONE connection recomputes on each state change
-		expect(computeFn).toHaveBeenCalledTimes(4); // 1 initial + 3 sets
+		expect(computeFn).toHaveBeenCalledTimes(1); // no push recomputes
 
-		expect(d.get()).toBe(4); // 3 + 1, returns cached
-		expect(computeFn).toHaveBeenCalledTimes(4); // no extra recompute
+		// get() pull-computes with current dep values
+		expect(d.get()).toBe(4); // 3 + 1
+		expect(computeFn).toHaveBeenCalledTimes(2); // one more pull-compute
+
+		// With subscription, push-computes happen
+		const unsub = subscribe(d, () => {});
+		expect(computeFn).toHaveBeenCalledTimes(3); // lazyConnect recomputes
+		count.set(10);
+		expect(computeFn).toHaveBeenCalledTimes(4); // push recompute
+		expect(d.get()).toBe(11); // cached, no extra compute
+		expect(computeFn).toHaveBeenCalledTimes(4);
+		unsub();
 	});
 });

@@ -3,8 +3,8 @@
 
 ## What it does
 Reactive state management with 5 primitives: state, derived, effect, producer, operator.
-Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators (map, filter, debounce, switchMap, etc.).
-Framework-agnostic. Works frontend, backend, edge. ~4.75 KB gzipped core ESM, zero dependencies.
+Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators.
+Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 
 ## When to use
 - Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
@@ -13,22 +13,22 @@ Framework-agnostic. Works frontend, backend, edge. ~4.75 KB gzipped core ESM, ze
 - Derived/computed values that are always consistent (diamond-safe, cached)
 - Agentic workflows (session state, tool call lifecycle, multi-agent coordination)
 - Event pipelines with 60+ operators for transform, buffer, window, error handling
-- Full-stack TypeScript — same API for frontend state and backend streams
+- Reactive data structures (reactiveMap, reactiveLog, reactiveIndex) with near-native perf
+- Scheduled pipelines (cron triggers, task state, DAG validation)
 
 ## Core API (5 primitives)
-- `state(initial)` — readable/writable store. `.get()`, `.set(value)`, `.update(fn)`, `.source` (callbag)
-- `derived([deps], fn)` — cached computed store, recomputes when deps change. `.get()`, `.source`
-- `effect([deps], fn)` — side-effect, runs when deps change. Returns dispose function
-- `producer(fn?, opts?)` — push-based source with cleanup. Actions: `.emit(value)`, `.complete()`, `.error(err)`. Options: `initial`, `equals`, `resetOnTeardown`, `resubscribable`
-- `operator([deps], init, handler)` — custom transform node. Handler receives `(depIndex, type, data)`
+- `state(initial)` — readable/writable store. .get(), .set(value), .update(fn), .source (callbag)
+- `derived([deps], fn)` — cached computed store, recomputes when deps change. .get(), .source
+- `effect([deps], fn)` — side-effect, runs when all deps resolve. Returns dispose function
+- `producer(fn?, opts?)` — push-based source with cleanup. Actions: emit, complete, error. Options: initial, equals, resetOnTeardown, resubscribable
+- `operator([deps], init, handler)` — custom transform node. Handler receives (depIndex, type, data)
 
 ## Composition
 - `pipe(source, op1, op2, ...)` — compose operators into inspectable store chain
-- `batch(fn)` — defer emissions until outermost batch ends (DIRTY signals still propagate immediately)
-- `pipeRaw(source, fn1, fn2, ...)` — fuse transforms into single derived for ~2x throughput. `SKIP` sentinel for filter semantics
+- `batch(fn)` — defer emissions until outermost batch ends
+- `pipeRaw(source, fn1, fn2, ...)` — fuse transforms into single derived for ~2x throughput
 
 ## Operators (import from callbag-recharge/extra)
-
 Sources: interval, fromIter, fromAsyncIter, fromEvent, fromPromise, fromObs, of, empty, throwError, never
 Filtering: filter, take, skip, first, last, find, elementAt, distinctUntilChanged, takeUntil
 Transformation: map, scan, pairwise, startWith, flat, switchMap, concatMap, exhaustMap, groupBy
@@ -41,19 +41,26 @@ Error handling: rescue, retry, repeat
 Utilities: tap, share, remember, subject, wrap
 Sinks: forEach, subscribe
 
+## Data structures (import from callbag-recharge/data)
+- `reactiveMap<K,V>()` — reactive key-value store. select(), keysStore, sizeStore, events, TTL, eviction, namespaces
+- `reactiveLog<T>()` — append-only reactive log. Bounded mode (circular buffer). lengthStore, latest, tail(n)
+- `reactiveIndex<PK,IK,V>()` — dual-key reactive index. O(1) reverse map. 1.01x native Map.get reads
+- `pubsub()` — topic-based publish/subscribe. Each topic is a lazy state store
+
+## Scheduling (import from callbag-recharge/orchestrate)
+- `fromCron(schedule)` — producer that emits on cron schedule
+- `taskState<T>({ id })` — reactive task execution tracker (status, duration, error, runCount)
+- `dag(tasks)` — acyclicity validation + Inspector graph registration
+
 ## Inspectability
-- `Inspector.inspect(store)` — returns `{ name, kind, value, status }` for any store
-- `Inspector.graph()` — returns Map of all named stores and their current state
-- Signal hooks: `Inspector.onEmit`, `Inspector.onSignal`, `Inspector.onStatus`, `Inspector.onEnd`
-- `Inspector.registerEdge(source, sink)` — track dependency graph
-- Zero per-store cost: uses WeakMaps, opt-in only
+- `Inspector.inspect(store)` — { name, kind, value, status }
+- `Inspector.graph()` — Map of all named stores
+- `Inspector.getEdges()` — dependency graph
+- Zero per-store cost via WeakMaps
 
 ## Install
-```
 npm install callbag-recharge
-```
 
 ## Links
+- Docs: https://callbag-recharge.github.io/callbag-recharge/
 - GitHub: https://github.com/Callbag-Recharge/callbag-recharge
-- Architecture: docs/architecture.md
-- Benchmarks: docs/benchmarks.md

@@ -123,9 +123,8 @@ describe("tier-2: inner error forwarding", () => {
 	});
 
 	it("concatMap forwards error from inner store", () => {
-		// concatMap subscribes sequentially — initial inner must complete before
-		// the next queued inner starts. Use throwError as the initial inner directly.
-		const outer = state(1);
+		// concatMap is purely reactive — inner created on outer emission
+		const outer = state(0);
 		const cm = pipe(
 			outer,
 			concatMap((v) => throwError<number>(`err-${v}`)),
@@ -133,14 +132,15 @@ describe("tier-2: inner error forwarding", () => {
 		const obs = Inspector.observe(cm);
 		subscribe(cm, () => {});
 
-		// Initial inner = throwError("err-1") → error propagates immediately
+		// Trigger outer emission to create inner (throwError)
+		outer.set(1);
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBe("err-1");
 	});
 
 	it("exhaustMap forwards error from inner store", () => {
-		// exhaustMap's initial inner errors immediately via throwError
-		const outer = state(1);
+		// exhaustMap is purely reactive — inner created on outer emission
+		const outer = state(0);
 		const em = pipe(
 			outer,
 			exhaustMap((v) => throwError<number>(`err-${v}`)),
@@ -148,7 +148,8 @@ describe("tier-2: inner error forwarding", () => {
 		const obs = Inspector.observe(em);
 		subscribe(em, () => {});
 
-		// Initial inner = throwError("err-1") → error propagates
+		// Trigger outer emission to create inner (throwError)
+		outer.set(1);
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBe("err-1");
 	});
@@ -363,6 +364,9 @@ describe("tier-2: completion forwarding", () => {
 		);
 		const obs = Inspector.observe(sm);
 		subscribe(sm, () => {});
+
+		// Trigger outer emission to create inner subscription
+		outer.emit(1);
 
 		// Outer completes — but inner is still active
 		outer.complete();
@@ -837,7 +841,7 @@ describe("rapid switchMap inner switches", () => {
 
 describe("concatMap: queue and sequential processing", () => {
 	it("queues outer values while inner is active", () => {
-		const outer = state("a");
+		const outer = state("");
 
 		const processed: string[] = [];
 		const cm = pipe(
@@ -850,7 +854,9 @@ describe("concatMap: queue and sequential processing", () => {
 
 		subscribe(cm, () => {});
 
-		// Initial inner is created for "a".
+		// Trigger outer emission to create initial inner
+		outer.set("a");
+
 		// State-based inners never complete (no END), so all subsequent
 		// outer values get queued but never processed.
 		outer.set("b");
@@ -868,7 +874,7 @@ describe("concatMap: queue and sequential processing", () => {
 
 describe("exhaustMap: ignores outer values while inner active", () => {
 	it("drops outer values emitted while inner is active", () => {
-		const outer = state("a");
+		const outer = state("");
 
 		const processed: string[] = [];
 		const em = pipe(
@@ -880,6 +886,9 @@ describe("exhaustMap: ignores outer values while inner active", () => {
 		);
 
 		subscribe(em, () => {});
+
+		// Trigger outer emission to create initial inner
+		outer.set("a");
 
 		// Initial inner for "a" is active (never completes).
 		// All subsequent outer values are dropped.

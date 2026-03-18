@@ -4,7 +4,7 @@ outline: [2, 3]
 
 # Architecture
 
-> **Status:** Canonical design document. The output slot model, status model, and STANDALONE
+> **Status:** Canonical design document. The output slot model, status model, and disconnect-on-unsub
 > derived are implemented and shipped. This is the definitive architecture reference.
 
 ---
@@ -127,7 +127,7 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 - Maintains `_value` (last computed output) and `_status`
 - Dep subscription handlers inline state tracking, transform, value caching, and dispatch (see §5 conceptual model)
 - Exposes `get()` and `source()` — is a full store, subscribable by anything downstream
-- `derived([deps], fn)` = operator with automatic STANDALONE mode (see §6)
+- `derived([deps], fn)` = operator with disconnect-on-unsub behavior and pull-compute `get()` (see §6)
 
 ### Sink (`effect`) — terminal, no downstream
 
@@ -174,7 +174,7 @@ DATA value → B._cachedValue = value; B._status = SETTLED; dispatch to output s
 
 ### Why the tap is always active
 
-The handler closure captures `this` and always writes to `_cachedValue`/`_status`, regardless of whether `_output` has a downstream consumer. `_dispatch()` no-ops when `_output === null` (STANDALONE mode), but the state/value updates still happen. Whoever is connected — B's own STANDALONE subscription, or a downstream C, or a downstream effect — B's cached state stays current.
+When connected (has subscribers), the handler closure captures `this` and always writes to `_cachedValue`/`_status`. `_dispatch()` routes to the output slot. When disconnected (no subscribers), deps are disconnected and `get()` pull-computes from deps on demand — always returning a fresh value.
 
 ---
 
@@ -189,36 +189,34 @@ A itself is always completely unaware of what happens at the output slot.
 ### Output slot mode transitions
 
 ```
-STANDALONE ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
-    ↑                                   |                           |
-    └──[last subscriber leaves]─────────┘                           |
-    ↑                                                               |
-    └──[last subscriber leaves]─────────────────────────────────────┘
+DISCONNECTED ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
+    ↑                                      |                           |
+    └──[last subscriber leaves]────────────┘                           |
+    ↑                                                                  |
+    └──[last subscriber leaves]────────────────────────────────────────┘
 ```
 
-### Mode 0: STANDALONE
+### Mode 0: DISCONNECTED
 
-`derived` only (`operator` is lazy). When B has no external subscribers:
+When B has no external subscribers (both `derived` and `operator`):
 
 - `_output = null`
-- Dep connections are always active via closures from `_connectUpstream()`
-- The handler closure still writes to `_cachedValue`/`_status` — the tap is always active
-- `_dispatch()` no-ops (no output target)
-- `B.get()` returns `_cachedValue` — always populated, never DISCONNECTED
+- Dep connections are disconnected — no upstream subscriptions active
+- `B.get()` pull-computes: calls each dep's `.get()`, applies `fn`, returns the result (always fresh)
+- Pull-compute does NOT write to `_cachedValue` — it is a read-only on-demand computation
 
-> **Why derived auto-connects but operator doesn't:**
-> `derived([A], fn)` is user-facing sugar meant to be "always reactive." The user expects
-> `derived.get()` to return the current computed value. `operator` is a lower-level
-> building block that only activates when subscribed to.
+> **Why derived and operator behave the same when disconnected:**
+> Both disconnect from deps when the last subscriber leaves. `derived.get()` pull-computes
+> from deps on demand, so callers always get a fresh value without maintaining active
+> subscriptions. `operator` behaves similarly — lazy until subscribed to.
 
 ### Mode 1: SINGLE
 
 When the first external subscriber C subscribes to B:
 
 1. `_output = sink` (C's sink function)
-2. Clear `D_STANDALONE` flag
-3. Dep connections unchanged — they're independent of the output slot
-4. B's handler closure fires as before — `_cachedValue` and `_status` remain current
+2. Connect to deps (subscribe to upstream sources)
+3. B's handler closure fires on upstream signals — `_cachedValue` and `_status` are kept current
 
 C receives a talkback. Calling `talkback(END)` removes C from the output slot.
 
@@ -237,16 +235,14 @@ When a second subscriber D subscribes while C is already in the slot:
 
 When the last external subscriber leaves:
 
-- For `derived`: `_output = null`, set `D_STANDALONE`. Deps stay connected (back to STANDALONE)
-- For `operator`: `_output = null`, `_status = DISCONNECTED`, pipeline pauses
-
-`_cachedValue` is retained — `get()` still returns the last SETTLED value.
+- For both `derived` and `operator`: `_output = null`, `_status = DISCONNECTED`, deps disconnected
+- `_cachedValue` is retained but stale — `derived.get()` pull-computes fresh from deps instead of returning the cached value
 
 ### Why ADOPT isn't needed
 
 The ADOPT protocol (REQUEST_ADOPT/GRANT_ADOPT handshake) was designed for a model where derived nodes hold an "internal terminator" in the output slot, requiring a handoff when external subscribers arrive. The actual implementation sidesteps this:
 
-- Dep connections are always active via closures, independent of the output slot
+- Dep connections are established on first subscriber and torn down on last subscriber leaving
 - The output slot is purely a dispatch point: `null → fn → Set`
 - Subscriber arrival/departure is mechanical — no upstream awareness or signaling needed
 
@@ -256,7 +252,7 @@ The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 
 ## 7. `.get()` Semantics
 
-`.get()` returns a meaningful value at all times. When `_status` is DIRTY, `.get()` also communicates staleness — it does not silently return a stale value as if it were fresh.
+`.get()` returns a meaningful value at all times. When disconnected, `get()` pull-computes from deps (always fresh). When `_status` is DIRTY, `.get()` also communicates staleness — it does not silently return a stale value as if it were fresh.
 
 | Status | `.get()` behavior |
 |--------|-------------------|
@@ -384,21 +380,20 @@ derived([A], fn) or operator([A], init):
   2. Connect to deps:
        Single-dep: _connectSingleDep() — inline handler closure
        Multi-dep:  _connectMultiDep()  — inline handler with bitmask logic
-  3. If derived: eagerly connect to deps (STANDALONE mode)
-     If operator: wait for first external subscriber
+  3. Both derived and operator: wait for first external subscriber (lazy connection)
   4. Register with Inspector: kind, name, initial value
 ```
 
-**Connection time** — runs each time a subscriber arrives (or STANDALONE activates):
+**Connection time** — runs each time a subscriber arrives:
 - Allocate handler-local state: counters, accumulators, skip counts, flags
 - This is the equivalent of `init()` running fresh in the operator handler
 
 **Disconnection time** — runs when all subscribers leave:
 - Release handler-local state
-- For `operator`: no reconnect until next subscriber; state is gone
-- For `derived`: deps stay connected (STANDALONE), handler state preserved
+- Both `derived` and `operator`: disconnect from deps, no reconnect until next subscriber; state is gone
+- `derived.get()` pull-computes on demand when disconnected (always fresh)
 
-This split means the dep connection structure is always stable (no re-wiring on reconnect), while behavioral state (counters, queues) resets cleanly on each new subscription session.
+Behavioral state (counters, queues) resets cleanly on each new subscription session.
 
 ### Connection batching
 
@@ -410,12 +405,9 @@ This split means the dep connection structure is always stable (no re-wiring on 
 talkback(END) ← upstream from subscriber
   → remove subscriber from output slot
   → if output slot empty:
-      if derived: _output = null, set D_STANDALONE (deps stay connected)
-      if operator: _output = null, _status = DISCONNECTED
-      // _cachedValue retained — get() can still return last SETTLED value
+      _output = null, _status = DISCONNECTED, disconnect from deps
+      // _cachedValue retained but stale — derived.get() pull-computes fresh from deps
 ```
-
-Note: For derived, B does NOT disconnect from A when going back to STANDALONE. Dep connections are independent of the output slot.
 
 ### Completion/error teardown
 
@@ -435,8 +427,8 @@ complete() or error(e):
 
 ### Reconnect
 
-- **derived**: stays connected to deps in STANDALONE mode when all subscribers leave. Reconnect is transparent.
-- **operator**: reconnects when a new subscriber calls `source(START, ...)`. `init()` re-runs, handler-local state resets.
+- **derived**: disconnects from deps when all subscribers leave. Reconnects when a new subscriber calls `source(START, ...)`. `get()` pull-computes when disconnected.
+- **operator**: same as derived — reconnects when a new subscriber calls `source(START, ...)`. `init()` re-runs, handler-local state resets.
 - **producer**: `_start()` re-runs on new subscriber after last left. If `resetOnTeardown`, `_value` resets.
 - **effect**: no reconnect. Dispose and create new.
 - **Completed nodes**: reject new subscribers (immediate START + END) unless `resubscribable`.
@@ -538,7 +530,7 @@ class DerivedImpl<T> {
 
 ### Bitmask flags (unchanged)
 
-Pack booleans into `_flags: number`. `D_STANDALONE` tracks whether derived is in STANDALONE mode.
+Pack booleans into `_flags: number`.
 
 ### Method binding in constructor (unchanged)
 
@@ -660,9 +652,9 @@ Raw callbag sinks (terminal consumers, not operators) need no wrapping — they 
 
 ## 17. Open Questions
 
-### 17.1 Initial value on first connection — RESOLVED
+### 17.1 Initial value on first connection
 
-STANDALONE mode ensures `_cachedValue` is populated at construction. When C subscribes, C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. No re-trigger needed.
+When C subscribes, the derived connects to deps and computes its initial value. C gets a talkback that can pull the computed value via `talkback(DATA)`.
 
 ---
 

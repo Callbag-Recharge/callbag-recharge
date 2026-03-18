@@ -8,20 +8,27 @@ import { subscribe } from "./subscribe";
  * and unsubscribing from the previous one. The output reflects the latest inner
  * store's value.
  *
- * Stateful: maintains last inner value via producer. get() returns the current
- * inner store's value (initial + equals prevents spurious initial emission).
+ * v5 (Option D3): Purely reactive — does NOT eagerly evaluate fn(outer.get()) at
+ * construction or subscription. Inner subscription is only created when outer emits.
+ * get() returns `initial` (if provided) or undefined before first inner emission.
  *
- * v3: Tier 2 — dynamic subscription operator. Each inner switch is a cycle
+ * Tier 2 — dynamic subscription operator. Each inner switch is a cycle
  * boundary; each emit starts a new DIRTY+value cycle. No built-in dedup.
  * Forwards inner errors and upstream completion.
  */
-export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined> {
+export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B | undefined>;
+export function switchMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts: { initial: B },
+): StoreOperator<A, B>;
+export function switchMap<A, B>(
+	fn: (value: A) => Store<B>,
+	opts?: { initial?: B },
+): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
-		const initialInner = fn(outer.get());
 		const store = producer<B>(
 			({ emit, error, complete }) => {
 				let innerUnsub: (() => void) | null = null;
-				let initialized = false;
 				let outerDone = false;
 
 				function subscribeInner(innerStore: Store<B>) {
@@ -29,10 +36,7 @@ export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 						innerUnsub();
 						innerUnsub = null;
 					}
-					// Skip emit on first connect — producer's { initial } already has the value.
-					// On subsequent switches, emit the new inner's current value immediately.
-					if (initialized) emit(innerStore.get());
-					initialized = true;
+					emit(innerStore.get());
 					let innerEnded = false;
 					innerUnsub = subscribe(innerStore, (v) => emit(v), {
 						onEnd: (err) => {
@@ -45,8 +49,6 @@ export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 							}
 						},
 					});
-					// Guard: if inner completed synchronously during subscribe(),
-					// onEnd set innerUnsub=null but subscribe's return overwrote it.
 					if (innerEnded) innerUnsub = null;
 				}
 
@@ -60,14 +62,13 @@ export function switchMap<A, B>(fn: (value: A) => Store<B>): StoreOperator<A, B 
 						}
 					},
 				});
-				subscribeInner(initialInner);
 
 				return () => {
 					if (innerUnsub) innerUnsub();
 					outerUnsub();
 				};
 			},
-			{ initial: initialInner.get() },
+			opts && "initial" in opts ? { initial: opts.initial as B } : undefined,
 		);
 
 		Inspector.register(store, { kind: "switchMap" });

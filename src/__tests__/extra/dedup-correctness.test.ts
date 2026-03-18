@@ -707,13 +707,15 @@ describe("tier-2 chain dedup isolation", () => {
 		const values: (number | undefined)[] = [];
 		subscribe(distinct, (v) => values.push(v));
 
+		// Trigger outer emission to create initial inner subscription
+		selector.set("a"); // switchMap subscribes to innerA (10)
 		selector.set("b"); // switchMap emits 10 (from innerB), distinct: 10→10 suppressed
 
 		// distinctUntilChanged catches the duplicate
-		expect(values).toEqual([]);
+		expect(values).toEqual([10]); // first emission from innerA, then innerB is suppressed
 
 		innerB.set(20); // distinct: 10→20, emits
-		expect(values).toEqual([20]);
+		expect(values).toEqual([10, 20]);
 	});
 });
 

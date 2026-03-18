@@ -302,18 +302,18 @@ The output slot model introduces new topology invariants that must be verified.
 
 ### Output slot mode transitions
 
-Test that mode transitions (STANDALONE → SINGLE → MULTI → SINGLE → STANDALONE) preserve value correctness and don't leak subscriptions.
+Test that mode transitions (DISCONNECTED → SINGLE → MULTI → SINGLE → DISCONNECTED) preserve value correctness and don't leak subscriptions.
 
 ```ts
-// STANDALONE → SINGLE: derived keeps its value through adoption
+// DISCONNECTED → SINGLE: derived connects to deps on first subscriber
 const a = state(1)
 const b = derived([a], () => a.get() * 2)
-expect(b.get()).toBe(2) // STANDALONE — b drives itself
+expect(b.get()).toBe(2) // DISCONNECTED — b pull-computes from deps
 
 const values: number[] = []
-const unsub = subscribe(b, v => values.push(v)) // → SINGLE
+const unsub = subscribe(b, v => values.push(v)) // → SINGLE (connects to deps)
 a.set(5)
-expect(b.get()).toBe(10) // b still current
+expect(b.get()).toBe(10) // b current via push
 expect(values).toEqual([10])
 
 // SINGLE → MULTI: second subscriber joins without upstream reconnection
@@ -323,21 +323,22 @@ a.set(7)
 expect(values).toEqual([10, 14])
 expect(values2).toEqual([14]) // D joined mid-stream
 
-// MULTI → SINGLE → STANDALONE
+// MULTI → SINGLE → DISCONNECTED
 unsub2()
 a.set(8)
 expect(values).toEqual([10, 14, 16]) // C still works
 unsub()
-expect(b.get()).toBe(16) // back to STANDALONE, value retained
+// back to DISCONNECTED — deps disconnected, get() pull-computes
+expect(b.get()).toBe(16) // pull-computes: a.get() is still 8, so 8*2=16
 a.set(9)
-expect(b.get()).toBe(18) // STANDALONE still reactive
+expect(b.get()).toBe(18) // pull-computes fresh from deps
 ```
 
 Always verify:
 1. **A never gets extra subscribers** during SINGLE → MULTI (the output slot absorbs topology changes)
-2. **B._value stays current** across all mode transitions (tap fires regardless)
+2. **B._value stays current** while connected (push-based)
 3. **Values are not duplicated** during transition (no replay artifacts)
-4. **STANDALONE resumes correctly** when all external subscribers leave
+4. **get() pull-computes correctly** when all external subscribers leave (DISCONNECTED)
 
 ### Diamond topology with output slots
 

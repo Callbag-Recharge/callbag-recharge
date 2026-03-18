@@ -7,11 +7,11 @@ on:
       - "site/**"
       - "docs/**"
       - "src/**"
+      - "examples/**"
       - "tsup.config.ts"
       - "package.json"
       - "pnpm-lock.yaml"
       - "pnpm-workspace.yaml"
-      - "scripts/**"
   workflow_dispatch:
 
 permissions:
@@ -26,10 +26,6 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    outputs:
-      bundle_size_gzip_kb: ${{ steps.size.outputs.bundle_size_gzip_kb }}
     steps:
       - uses: actions/checkout@v4
 
@@ -45,36 +41,12 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm run build
 
-      - name: Measure bundle size
-        id: size
-        run: echo "bundle_size_gzip_kb=$(node scripts/bundle-size.mjs)" >> $GITHUB_OUTPUT
-
-      - name: Update README with bundle size
-        run: |
-          SIZE="${{ steps.size.outputs.bundle_size_gzip_kb }}"
-          sed -i "s/\*\*~[0-9.]* KB\*\* gzipped/**~${SIZE} KB** gzipped/g" README.md
-          sed -i "s/\*\*~[0-9.]* KB\*\* (core, gzip)/**~${SIZE} KB** (core, gzip)/g" README.md
-
-      - name: Update site/public/llms.txt with bundle size
-        run: |
-          SIZE="${{ steps.size.outputs.bundle_size_gzip_kb }}"
-          sed -i "s/~[0-9.]* KB gzipped/~${SIZE} KB gzipped/g" site/public/llms.txt
-
       - name: Build site
-        env:
-          VITE_BUNDLE_SIZE_GZIP_KB: ${{ steps.size.outputs.bundle_size_gzip_kb }}
         run: pnpm --dir site run build
 
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/.vitepress/dist
-
-      - name: Commit README and llms.txt if changed
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add README.md site/public/llms.txt
-          git diff --staged --quiet || (git commit -m "chore: update bundle size in README and llms.txt" && git push)
 
   deploy:
     needs: build

@@ -157,7 +157,7 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 - Store creation (Inspector ON): 1.3M ops/sec
 - Throughput: wins in most benchmarks except diamond patterns and state write (see [benchmarks](./benchmarks.md))
 
-**STANDALONE overhead:** Derived nodes eagerly connect to deps at construction, maintaining active output slots and talkback references even without external subscribers. This ensures `get()` always returns a current cached value but adds per-store cost vs a lazy model. The tradeoff is correctness and API simplicity over memory.
+**Disconnect-on-unsub:** Derived nodes disconnect from deps when the last subscriber leaves and reconnect when a new subscriber arrives. `get()` pull-computes from deps when disconnected (always fresh, zero ongoing cost). This eliminates the per-store cost of maintaining active connections for unsubscribed derived stores.
 
 **Class + prototype methods:** Methods live on the prototype and are shared across all instances. Public API methods (`source`, `emit`, `signal`, `complete`, `error`, `set`) are bound in the constructor so they work when detached (callbag interop, destructuring). `ProducerImpl._start()` passes `this` directly to the user-supplied `fn`, eliminating the actions wrapper object allocation per start.
 
@@ -165,7 +165,7 @@ This is more general than `equals` — it compares *inputs* rather than *outputs
 
 **Output slot (null -> fn -> Set):** All classes use a lazy output slot instead of a `_sinks` Set. The slot starts as `null` (no subscribers), becomes a single function reference on first subscriber (SINGLE mode), and only allocates a Set on the second subscriber (MULTI mode). Nodes with <=1 subscriber never allocate a Set (~200 bytes saved per node).
 
-**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags, and no STANDALONE connections. Handler closure assembly, STANDALONE talkback references, and Inspector registration (WeakRef/WeakMap) are the primary costs.
+**Remaining gap vs Preact (~6x):** Preact's ~121 bytes/store reflects its simpler model — no per-instance bound functions, bitfield flags. Handler closure assembly and Inspector registration (WeakRef/WeakMap) are the primary costs.
 
 ### 8. `endDeferredStart()` O(n) drain
 
@@ -308,13 +308,13 @@ The MULTI output slot uses `Set<any>`. Set iteration allocates an iterator objec
 
 **Estimated gain:** ~30-40% on fan-out benchmarks. Negligible for 1-2 subscribers (stays in SINGLE mode).
 
-### 6. Elide STANDALONE-to-SINGLE transition overhead in derived.source()
+### 6. Streamline DISCONNECTED-to-SINGLE transition in derived.source()
 
 **Status:** Not implemented. **Impact:** Low-medium. **Scenarios:** Diamond, derived after dep change.
 
-When a derived node transitions from STANDALONE to SINGLE (first external subscriber), `source()` clears `D_STANDALONE` and sets `_output = sink`. But the STANDALONE → SINGLE transition also means the dep connections were already active and the cached value is already current. The talkback closure still checks all the flags on every unsubscribe.
+When a derived node transitions from DISCONNECTED to SINGLE (first external subscriber), `source()` connects to deps and sets `_output = sink`. The talkback closure still checks all the flags on every unsubscribe.
 
-**Approach:** Simplify the talkback closure for the common case (SINGLE → STANDALONE revert). Avoid the flag dance when the output slot goes back to null — just null the output and set STANDALONE in one atomic step.
+**Approach:** Simplify the talkback closure for the common case (SINGLE → DISCONNECTED revert). Avoid the flag dance when the output slot goes back to null — just null the output and disconnect deps in one atomic step.
 
 ---
 
@@ -327,6 +327,8 @@ When a derived node transitions from STANDALONE to SINGLE (first external subscr
 
 - **~~Lazy method binding:~~** V8 hidden class transitions from getter→own-property (via `defineProperty` on first access) cause inline cache invalidation. All bound methods (`source`, `set`, `emit`, `signal`, `complete`, `error`) are legitimately detached in callbag interop and destructuring patterns. Savings (~40-50 bytes/instance) don't offset the hidden class pollution and first-access latency.
 - **~~WeakRef-free Inspector:~~** `FinalizationRegistry` alone cannot support `graph()` iteration — it only fires callbacks on GC, it cannot query "what's alive". The only alternative (strong refs + registry cleanup) is more complex with no meaningful memory reduction. Inspector is disabled in production anyway, so the ~60-80 bytes/store WeakRef cost only applies in dev.
+
+Note: The previous STANDALONE overhead concern (derived eagerly connecting to deps at construction) is no longer applicable — derived now disconnects from deps when unsubscribed and pull-computes on `get()`.
 
 ### ~~2. Diamond pattern — topological sort / output bypass~~
 
@@ -359,7 +361,7 @@ When a derived node transitions from STANDALONE to SINGLE (first external subscr
 | Raw callbag interop | Built-in | ~4.6x for pure streaming | Hot paths, no store needed |
 | Memoized derived (userland) | Userland pattern | Skip expensive recomputation | Heavy computation functions |
 | Class + output slot model | Built-in | V8 hidden class optimization, lazy output slot (null -> fn -> Set) | All stores and effects |
-| Lazy STANDALONE derived | Built-in | `get()` always returns current cached value; zero overhead for unused derived | All derived stores |
+| Lazy derived (disconnect-on-unsub) | Built-in | `get()` pull-computes from deps when disconnected (always fresh); zero ongoing cost for unsubscribed derived | All derived stores |
 | `endDeferredStart()` O(n) drain | Built-in | Faster connection batching | Effects/derived with many deps |
 | Integer bitmask dirty tracking | Built-in | ~10x faster dirty ops vs Set, eliminates Set allocation | Effects and derived with <=32 deps |
 | `Inspector.enabled` getter caching | Built-in | Avoid repeated try/catch | Bulk store creation |

@@ -230,7 +230,7 @@ describe("derived.from()", () => {
 // ---------------------------------------------------------------------------
 
 describe("lazy STANDALONE", () => {
-	test("derived not connected until first get()", () => {
+	test("derived not connected until first source() subscription", () => {
 		let started = false;
 		const p = producer<number>(
 			({ emit }) => {
@@ -244,10 +244,17 @@ describe("lazy STANDALONE", () => {
 		const d = derived([p], () => p.get() + 1);
 		expect(started).toBe(false);
 
-		// First get() triggers lazy connection. Producer starts during
-		// endDeferredStart(), emits 1 → derived recomputes to 1+1=2.
-		expect(d.get()).toBe(2);
+		// v6: get() pull-computes but does NOT connect upstream.
+		// p.get() returns initial value 0, so d = 0+1 = 1
+		expect(d.get()).toBe(1);
+		expect(started).toBe(false);
+
+		// source() subscription connects and starts the producer
+		const unsub = subscribe(d, () => {});
 		expect(started).toBe(true);
+		// Producer emitted 1 during start → d recomputes to 1+1=2
+		expect(d.get()).toBe(2);
+		unsub();
 	});
 
 	test("derived connects on first source() subscription", () => {
@@ -321,23 +328,23 @@ describe("lazy STANDALONE", () => {
 		expect(c.get()).toBe(18); // ((3+1)*2)+10 = 18
 	});
 
-	test("subscriber unsub returns to STANDALONE, stays connected", () => {
+	test("subscriber unsub disconnects, get() pull-computes", () => {
 		const s = state(1);
 		const d = derived([s], () => s.get() * 2);
 
-		// get() to trigger lazy connection
+		// get() pull-computes (no connection)
 		expect(d.get()).toBe(2);
 
-		// Add subscriber
+		// Add subscriber — connects
 		const values: number[] = [];
 		const unsub = subscribe(d, (v) => values.push(v));
 		s.set(2);
 		expect(values).toEqual([4]);
 
-		// Remove subscriber — back to STANDALONE
+		// Remove subscriber — disconnects from upstream
 		unsub();
 
-		// Changes still tracked (STANDALONE keeps deps connected)
+		// get() still returns fresh value via pull-compute
 		s.set(3);
 		expect(d.get()).toBe(6);
 	});

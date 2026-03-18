@@ -3,11 +3,12 @@
 **State that flows.** Reactive state management for TypeScript — from simple atoms to streaming pipelines, in one library.
 
 - **5 primitives** — `state`, `derived`, `effect`, `producer`, `operator`
-- **58 operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
+- **60+ operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
 - **Glitch-free** — two-phase push resolves diamonds correctly, every time
+- **Streaming-native** — LLM chunks, WebSocket, SSE are first-class, not bolted on
 - **Inspectable** — every node in the graph is observable via `Inspector` — names, edges, phases, values
 - **Framework-agnostic** — no providers, no wrappers, works anywhere JS runs
-- **~4.75 KB** gzipped core, zero dependencies
+- Zero dependencies
 
 ```ts
 import { state, derived, effect } from 'callbag-recharge'
@@ -100,7 +101,7 @@ Inspector.graph()
 
 ---
 
-## 58 operators, tree-shakeable
+## 60+ operators, tree-shakeable
 
 Import only what you need from `callbag-recharge/extra`.
 
@@ -135,7 +136,7 @@ Import only what you need from `callbag-recharge/extra`.
 1. **Stores are plain objects** — `{ get, set?, source }`, no classes, no property descriptors
 2. **Two-phase push** — DIRTY propagates on type 3, then values flow on type 1; glitch-free diamonds without pull
 3. **Explicit deps** — `derived` and `effect` declare dependencies upfront; callbag protocol is the sole connection mechanism
-4. **Cached derived stores** — lazy STANDALONE mode: no computation until first `get()` or `source()`; then cached
+4. **Lazy derived** — no computation at construction. `get()` pull-computes from deps (always fresh). `source()` subscription triggers push-based connection; disconnects when last subscriber leaves
 5. **`undefined` means empty** — no special symbols, no `.ready` flag
 6. **Observability is external** — Inspector singleton with WeakMaps, zero per-store cost
 
@@ -230,9 +231,11 @@ store.source(0, (type, data) => {
 
 ## Documentation
 
+- **[Docs site](https://callbag-recharge.github.io/callbag-recharge/)** — getting started, API reference, recipes
 - [Architecture](./docs/architecture.md) — layers, design principles, how each primitive works
-- [State Management Strategy](./docs/state-management.md) — positioning, comparisons, GEO strategy
-- [Extras](./docs/extras.md) — 58 operators, sources, and sinks
+- [Extras](./docs/extras.md) — 60+ operators, sources, and sinks
+- [Recipes](https://callbag-recharge.github.io/callbag-recharge/recipes/) — AI chat streaming, data pipelines, and more
+- [llms.txt](./llms.txt) / [llms-full.txt](./llms-full.txt) — AI-readable documentation
 - [Benchmarks](./docs/benchmarks.md) — Vitest + tinybench (`pnpm run bench`)
 
 ---

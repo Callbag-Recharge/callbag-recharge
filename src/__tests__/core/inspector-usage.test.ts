@@ -300,7 +300,8 @@ describe("Example 9: dumpGraph() for console/CLI", () => {
 		expect(dump).toContain("count (state) = 42");
 		expect(dump).toContain("doubled (derived) = 84");
 		expect(dump).toContain('label (derived) = "value=84"');
-		expect(dump).toContain("[SETTLED]");
+		// v6: derived nodes are DISCONNECTED without subscribers
+		expect(dump).toContain("[DISCONNECTED]");
 
 		// Edges show dependency graph
 		const edges = Inspector.getEdges();

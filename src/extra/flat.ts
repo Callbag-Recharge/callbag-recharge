@@ -8,20 +8,23 @@ import { subscribe } from "./subscribe";
  * emits a new inner store, unsubscribes from the previous inner and
  * subscribes to the new one.
  *
- * Stateful: maintains last inner value via producer. get() returns the
- * current inner store's value, or undefined if outer is undefined.
+ * v5 (Option D3): Purely reactive — does NOT eagerly evaluate outer.get()
+ * at construction. Inner subscription is only created when outer emits.
+ * get() returns undefined before first inner emission.
  *
- * v3: Tier 2 — dynamic subscription operator. Each inner switch is a cycle
+ * Tier 2 — dynamic subscription operator. Each inner switch is a cycle
  * boundary; each emit starts a new DIRTY+value cycle. No built-in dedup.
  * Forwards inner errors and upstream completion.
  */
-export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
+export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined>;
+export function flat<T>(opts: { initial: T }): StoreOperator<Store<T> | undefined, T>;
+export function flat<T>(opts?: {
+	initial?: T;
+}): StoreOperator<Store<T> | undefined, T | undefined> {
 	return (outer: Store<Store<T> | undefined>) => {
-		const initialInner = outer.get();
 		const store = producer<T>(
 			({ emit, error, complete }) => {
 				let innerUnsub: (() => void) | null = null;
-				let initialized = false;
 				let outerDone = false;
 
 				function subscribeInner(innerStore: Store<T>) {
@@ -29,8 +32,7 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 						innerUnsub();
 						innerUnsub = null;
 					}
-					if (initialized) emit(innerStore.get());
-					initialized = true;
+					emit(innerStore.get());
 					let innerEnded = false;
 					innerUnsub = subscribe(innerStore, (v) => emit(v), {
 						onEnd: (err) => {
@@ -43,8 +45,6 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 							}
 						},
 					});
-					// Guard: if inner completed synchronously during subscribe(),
-					// onEnd set innerUnsub=null but subscribe's return overwrote it.
 					if (innerEnded) innerUnsub = null;
 				}
 
@@ -73,16 +73,12 @@ export function flat<T>(): StoreOperator<Store<T> | undefined, T | undefined> {
 					},
 				);
 
-				if (initialInner !== undefined) {
-					subscribeInner(initialInner);
-				}
-
 				return () => {
 					if (innerUnsub) innerUnsub();
 					outerUnsub();
 				};
 			},
-			{ initial: initialInner?.get() },
+			opts && "initial" in opts ? { initial: opts.initial as T } : undefined,
 		);
 
 		Inspector.register(store, { kind: "flat" });

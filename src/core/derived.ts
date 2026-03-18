@@ -2,7 +2,11 @@
  * Computed store with dirty tracking and caching. Recomputes fn() when
  * all dirty deps have resolved, emitting the new value on type 1 DATA.
  *
- * v5: _status packed into _flags bits 7-9 for hot-path performance.
+ * v6 (Option D3): Disconnect on last subscriber leaving. get() pull-computes
+ * from deps when disconnected (always fresh). source() subscription triggers
+ * connection; last unsubscribe triggers disconnect.
+ *
+ * _status packed into _flags bits 7-9 for hot-path performance.
  * String status exposed via getter for Inspector/test backward compat.
  *
  * Class-based for V8 hidden class optimization and prototype method sharing.
@@ -37,7 +41,7 @@ const D_HAS_CACHED = 1;
 const D_CONNECTED = 2;
 const D_ANY_DATA = 4;
 const D_COMPLETED = 8;
-const D_STANDALONE = 16;
+// bit 4 unused (was D_STANDALONE, then D_RESET — removed: derived get() always pull-computes)
 const D_MULTI = 32;
 const D_IDENTITY = 64;
 
@@ -280,7 +284,7 @@ export class DerivedImpl<T> {
 			(this._flags & ~_STATUS_MASK) | (errorData !== undefined ? _S_ERRORED : _S_COMPLETED);
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
-		this._flags &= ~(D_CONNECTED | D_STANDALONE);
+		this._flags &= ~D_CONNECTED;
 		this._dirtyDeps.reset();
 		const output = this._output;
 		const wasMulti = this._flags & D_MULTI;
@@ -302,18 +306,27 @@ export class DerivedImpl<T> {
 	_disconnectUpstream(): void {
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
-		this._flags &= ~D_CONNECTED;
+		this._flags &= ~(D_CONNECTED | D_ANY_DATA);
+		this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
 		this._dirtyDeps.reset();
 	}
 
+	/**
+	 * v6: Pull-compute when disconnected (always fresh). When connected,
+	 * returns push-updated cache (fast path).
+	 */
 	get(): T {
-		if (!(this._flags & (D_CONNECTED | D_COMPLETED))) {
-			this._lazyConnect();
-			if (this._flags & D_CONNECTED) {
-				this._flags |= D_STANDALONE;
-			}
+		if (this._flags & D_CONNECTED) {
+			return this._cachedValue as T;
 		}
-		return this._cachedValue as T;
+		if (this._flags & D_COMPLETED) {
+			return this._cachedValue as T;
+		}
+		// Disconnected: pull-compute from deps
+		const result = this._fn();
+		this._cachedValue = result;
+		this._flags |= D_HAS_CACHED;
+		return result;
 	}
 
 	source(type: number, payload?: any): void {
@@ -334,10 +347,7 @@ export class DerivedImpl<T> {
 				}
 			}
 
-			if (this._flags & D_STANDALONE) {
-				this._output = sink;
-				this._flags &= ~D_STANDALONE;
-			} else if (this._output === null) {
+			if (this._output === null) {
 				this._output = sink;
 			} else if (!(this._flags & D_MULTI)) {
 				const set = new Set<any>();
@@ -361,11 +371,12 @@ export class DerivedImpl<T> {
 							this._flags &= ~D_MULTI;
 						} else if (set.size === 0) {
 							this._output = null;
-							this._flags |= D_STANDALONE;
+							this._flags &= ~D_MULTI;
+							this._disconnectUpstream();
 						}
 					} else if (this._output === sink) {
 						this._output = null;
-						this._flags |= D_STANDALONE;
+						this._disconnectUpstream();
 					}
 				}
 			});

@@ -384,11 +384,16 @@ describe("flat", () => {
 	it("switches to latest inner store", () => {
 		const inner1 = state(10);
 		const inner2 = state(20);
-		const outer = state<typeof inner1 | undefined>(inner1);
+		const outer = state<typeof inner1 | undefined>(undefined);
 
 		const f = pipe(outer, flat());
 		subscribe(f, () => {});
 
+		// flat is purely reactive — no inner until outer emits
+		expect(f.get()).toBeUndefined();
+
+		// Trigger outer emission to create inner subscription
+		outer.set(inner1);
 		expect(f.get()).toBe(10);
 
 		outer.set(inner2);
@@ -397,30 +402,34 @@ describe("flat", () => {
 
 	it("tracks changes on the current inner store", () => {
 		const inner = state(1);
-		const outer = state<typeof inner | undefined>(inner);
+		const outer = state<typeof inner | undefined>(undefined);
 		const f = pipe(outer, flat());
 		const values: (number | undefined)[] = [];
 		subscribe(f, (v) => values.push(v));
 
+		// Trigger outer emission to create inner subscription
+		outer.set(inner);
 		inner.set(2);
 		inner.set(3);
 
-		expect(values).toEqual([2, 3]);
+		expect(values).toEqual([1, 2, 3]);
 	});
 
 	it("disconnects previous inner when outer changes", () => {
 		const inner1 = state(10);
 		const inner2 = state(20);
-		const outer = state<typeof inner1 | undefined>(inner1);
+		const outer = state<typeof inner1 | undefined>(undefined);
 
 		const f = pipe(outer, flat());
 		const values: (number | undefined)[] = [];
 		subscribe(f, (v) => values.push(v));
 
+		// Trigger outer emission to subscribe to inner1, then switch
+		outer.set(inner1);
 		outer.set(inner2); // switch to inner2
 		inner1.set(99); // should NOT propagate
 
-		expect(values).toEqual([20]);
+		expect(values).toEqual([10, 20]);
 	});
 
 	it("tears down on last sink disconnect", () => {
@@ -598,7 +607,7 @@ describe("share", () => {
 
 describe("switchMap teardown verification", () => {
 	it("inner subscription is actually torn down (verified via DIRTY propagation)", () => {
-		const outer = state(1);
+		const outer = state(0);
 		const inner1 = state(10);
 		const inner2 = state(20);
 
@@ -611,8 +620,10 @@ describe("switchMap teardown verification", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// Trigger outer emission to create inner subscription
+		outer.set(1);
 		inner1.set(11);
-		expect(values).toEqual([11]);
+		expect(values).toEqual([10, 11]);
 
 		// Switch to inner2
 		outer.set(2);
@@ -638,7 +649,7 @@ describe("switchMap teardown verification", () => {
 
 describe("concatMap teardown verification", () => {
 	it("queue and inner are fully torn down on unsub", () => {
-		const outer = state("a");
+		const outer = state("");
 		const inner = state(1);
 
 		const mapped = pipe(
@@ -650,8 +661,10 @@ describe("concatMap teardown verification", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// Trigger outer emission to create inner subscription
+		outer.set("a");
 		inner.set(2);
-		expect(values).toEqual([2]);
+		expect(values).toEqual([1, 2]);
 
 		unsub();
 
@@ -665,7 +678,7 @@ describe("concatMap teardown verification", () => {
 
 describe("exhaustMap teardown verification", () => {
 	it("inner is fully torn down on unsub", () => {
-		const outer = state("x");
+		const outer = state("");
 		const inner = state(1);
 
 		const mapped = pipe(
@@ -677,8 +690,10 @@ describe("exhaustMap teardown verification", () => {
 			if (v !== undefined) values.push(v);
 		});
 
+		// Trigger outer emission to create inner subscription
+		outer.set("x");
 		inner.set(2);
-		expect(values).toEqual([2]);
+		expect(values).toEqual([1, 2]);
 
 		unsub();
 
