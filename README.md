@@ -7,7 +7,7 @@
 - **Glitch-free** — two-phase push resolves diamonds correctly, every time
 - **Inspectable** — every node in the graph is observable via `Inspector` — names, edges, phases, values
 - **Framework-agnostic** — no providers, no wrappers, works anywhere JS runs
-- **~3.7 KB** gzipped core, zero dependencies
+- **~4.75 KB** gzipped core, zero dependencies
 
 ```ts
 import { state, derived, effect } from 'callbag-recharge'

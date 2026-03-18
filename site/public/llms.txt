@@ -4,7 +4,7 @@
 ## What it does
 Reactive state management with 5 primitives: state, derived, effect, producer, operator.
 Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators (map, filter, debounce, switchMap, etc.).
-Framework-agnostic. Works frontend, backend, edge. ~3.7 KB gzipped core ESM, zero dependencies.
+Framework-agnostic. Works frontend, backend, edge. ~4.75 KB gzipped core ESM, zero dependencies.
 
 ## When to use
 - Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
