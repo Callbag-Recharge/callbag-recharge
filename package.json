@@ -38,6 +38,66 @@
 				"default": "./dist/patterns/createStore/index.cjs"
 			}
 		},
+		"./patterns/chatStream": {
+			"import": {
+				"types": "./dist/patterns/chatStream/index.d.ts",
+				"default": "./dist/patterns/chatStream/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/chatStream/index.d.cts",
+				"default": "./dist/patterns/chatStream/index.cjs"
+			}
+		},
+		"./patterns/memoryStore": {
+			"import": {
+				"types": "./dist/patterns/memoryStore/index.d.ts",
+				"default": "./dist/patterns/memoryStore/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/memoryStore/index.d.cts",
+				"default": "./dist/patterns/memoryStore/index.cjs"
+			}
+		},
+		"./patterns/rateLimiter": {
+			"import": {
+				"types": "./dist/patterns/rateLimiter/index.d.ts",
+				"default": "./dist/patterns/rateLimiter/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/rateLimiter/index.d.cts",
+				"default": "./dist/patterns/rateLimiter/index.cjs"
+			}
+		},
+		"./patterns/undoRedo": {
+			"import": {
+				"types": "./dist/patterns/undoRedo/index.d.ts",
+				"default": "./dist/patterns/undoRedo/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/undoRedo/index.d.cts",
+				"default": "./dist/patterns/undoRedo/index.cjs"
+			}
+		},
+		"./patterns/pagination": {
+			"import": {
+				"types": "./dist/patterns/pagination/index.d.ts",
+				"default": "./dist/patterns/pagination/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/pagination/index.d.cts",
+				"default": "./dist/patterns/pagination/index.cjs"
+			}
+		},
+		"./patterns/formField": {
+			"import": {
+				"types": "./dist/patterns/formField/index.d.ts",
+				"default": "./dist/patterns/formField/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/formField/index.d.cts",
+				"default": "./dist/patterns/formField/index.cjs"
+			}
+		},
 		"./memory": {
 			"import": {
 				"types": "./dist/memory/index.d.ts",
@@ -66,6 +126,16 @@
 			"require": {
 				"types": "./dist/orchestrate/index.d.cts",
 				"default": "./dist/orchestrate/index.cjs"
+			}
+		},
+		"./utils": {
+			"import": {
+				"types": "./dist/utils/index.d.ts",
+				"default": "./dist/utils/index.js"
+			},
+			"require": {
+				"types": "./dist/utils/index.d.cts",
+				"default": "./dist/utils/index.cjs"
 			}
 		},
 		"./extra/*": {
