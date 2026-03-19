@@ -375,7 +375,7 @@ AI coding tools prefer libraries that:
 - Have **predictable naming** (`state`, `derived`, `effect` — self-documenting)
 - **Work without framework-specific setup** (AI doesn't have to guess React vs Vue)
 
-callbag-recharge already checks all of these. The API is 5 primitives with obvious names. An AI can confidently generate `state(0)`, `derived([a, b], (x, y) => x + y)`, `effect([s], (v) => console.log(v))` without worrying about context, providers, or framework-specific hooks. That's a genuine advantage over Zustand (needs `create` ceremony), Jotai (needs React context), and Redux (needs store + dispatch + selectors).
+callbag-recharge already checks all of these. The API is 6 primitives with obvious names. An AI can confidently generate `state(0)`, `derived([a, b], (x, y) => x + y)`, `effect([s], (v) => console.log(v))` without worrying about context, providers, or framework-specific hooks. That's a genuine advantage over Zustand (needs `create` ceremony), Jotai (needs React context), and Redux (needs store + dispatch + selectors).
 
 ### `llms.txt` draft outline
 
@@ -384,7 +384,7 @@ callbag-recharge already checks all of these. The API is 5 primitives with obvio
 > State that flows. Reactive state management for TypeScript.
 
 ## What it does
-Reactive state management with 5 primitives: state, derived, effect, producer, operator.
+Reactive state management with 6 primitives: state, derived, effect, producer, operator.
 Glitch-free diamond resolution. Built-in operators (map, filter, debounce, switchMap).
 Framework-agnostic. Works frontend, backend, edge.
 
@@ -395,7 +395,7 @@ Framework-agnostic. Works frontend, backend, edge.
 - Derived/computed values that are always consistent (diamond-safe)
 - Agentic workflows (session state, tool call lifecycle, multi-agent)
 
-## Core API (5 primitives)
+## Core API (6 primitives)
 - state(initial) — readable/writable store (.get(), .set(), .subscribe())
 - derived([deps], fn) — computed store, recomputes when deps change
 - effect([deps], fn) — side-effect, runs when deps change
@@ -469,7 +469,7 @@ npm install callbag-recharge
 ### Recommended import tiers (for docs, README, llms.txt)
 
 ```ts
-// Tier 0: The 5 primitives — always the starting point
+// Tier 0: The 6 primitives — always the starting point
 import { state, derived, effect, producer, operator } from 'callbag-recharge'
 
 // Tier 1: "State that flows" — the operators that differentiate us
@@ -484,7 +484,7 @@ import { retry, rescue, timeout } from 'callbag-recharge/extra'
 
 ### The narrative for AI tools and developers
 
-**"Start with 5 primitives. When you need flow, the operators are already there."**
+**"Start with 6 primitives. When you need flow, the operators are already there."**
 
 AI tools see the full menu in `llms.txt`, pick the right operator, generate correct code. Developers add one import line. No second library. No building from scratch. That's the no-brainer experience.
 
@@ -552,7 +552,7 @@ See [docs/extras.md](extras.md) for full roadmap of each layer.
 
 ### No new contract — the primitives are the contract
 
-Other libraries invented contracts (`create()`, `atom()`, `createSlice()`) because they had to — their cores were too limited to be user-facing. Our 5 primitives already ARE the contract:
+Other libraries invented contracts (`create()`, `atom()`, `createSlice()`) because they had to — their cores were too limited to be user-facing. Our 6 primitives already ARE the contract:
 
 - `state(0)` replaces Zustand's `create()`, Jotai's `atom()`, Nano's `atom()`
 - `derived([a, b], fn)` replaces Jotai's derived atom, Nano's `computed()`
@@ -562,7 +562,7 @@ Other libraries invented contracts (`create()`, `atom()`, `createSlice()`) becau
 
 Adding a `createStore()` or `defineAtom()` wrapper would add a concept without adding capability. The 4 layers (extra → patterns → compat → adapters) provide progressive capability without adding abstraction. The `.get()/.set()/.subscribe()` store interface is the public contract, and it already matches TC39 Signals and Nanostores.
 
-**"5 primitives, 50+ operators, zero ceremony."**
+**"6 primitives, 50+ operators, zero ceremony."**
 
 ---
 
@@ -581,7 +581,7 @@ The world is entering an era where everything flows:
 - Real-time data arrives from WebSockets, Kafka, Redis, gRPC — all need the same operators
 - Frontends, backends, and edge runtimes all need reactive state — not three different solutions
 
-callbag-recharge is the glue. One `npm install`. Five primitives. Fifty operators. Connect anything to the graph. Take what you need from the flow. What you observe is always correct (diamond-safe) and always visible (inspectable).
+callbag-recharge is the glue. One `npm install`. Six primitives. Sixty operators. Connect anything to the graph. Take what you need from the flow. What you observe is always correct (diamond-safe) and always visible (inspectable).
 
 **"State that flows."**
 
@@ -626,7 +626,7 @@ To start the flywheel:
 - Not replacing Kafka/Redis/PostgreSQL — we're the reactive layer on top
 - Not another RxJS — we have first-class state with `.get()/.set()`, not just streams
 - Not React-only — framework-agnostic, works anywhere JS runs
-- Not adding abstraction — 5 primitives, 4 layers, no ceremony
+- Not adding abstraction — 6 primitives, 4 layers, no ceremony
 
 ### Performance reality (March 2026 benchmarks)
 

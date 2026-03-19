@@ -2,7 +2,7 @@
 
 **State that flows.** Reactive state management for TypeScript — from simple atoms to streaming pipelines, in one library.
 
-- **5 primitives** — `state`, `derived`, `effect`, `producer`, `operator`
+- **6 primitives** — `state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`
 - **60+ operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
 - **Glitch-free** — two-phase push resolves diamonds correctly, every time
 - **Streaming-native** — LLM chunks, WebSocket, SSE are first-class, not bolted on

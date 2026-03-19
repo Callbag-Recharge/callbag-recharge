@@ -4,7 +4,7 @@
 >
 > **Vision:** 川流不息，唯取一瓢 — "State that flows."
 > The universal reactive layer: state management, streaming, orchestration, agentic memory —
-> one library, five primitives, one graph. Frontend, backend, edge, browser.
+> one library, six primitives, one graph. Frontend, backend, edge, browser.
 
 ---
 
@@ -14,7 +14,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 
 | Level | What | Import | Status |
 |-------|------|--------|--------|
-| **1** | 5 primitives + protocol + inspector + pipe + batch | `callbag-recharge/core` | **Shipped** |
+| **1** | 6 primitives + protocol + inspector + pipe + batch | `callbag-recharge/core` | **Shipped** |
 | **2** | 59 operators, sources, sinks | `callbag-recharge/extra` | **Shipped** |
 | **3** | Data structures + memory + orchestration + utils | `/data`, `/memory`, `/orchestrate`, `/utils` | **Shipped** (orchestrate partial) |
 | **4** | Persistence, sync, distribution, content addressing | `/persist`, `/sync`, `/caps` | **Planned** |
@@ -28,10 +28,11 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 
 ## What's Shipped
 
-### Level 1: Core — 5 Primitives
+### Level 1: Core — 6 Primitives
 
 - [x] `state(initial)` — writable store (.get/.set/.update)
 - [x] `derived([deps], fn)` — diamond-safe computed, lazy connection, disconnect-on-unsub
+- [x] `dynamicDerived(fn)` — computed with runtime dep tracking, rewires on recompute
 - [x] `producer(fn, opts?)` — general-purpose async/stream source
 - [x] `operator([deps], init, handler)` — low-level transform primitive
 - [x] `effect([deps], fn)` — side-effect runner with dirty-dep tracking
@@ -129,6 +130,14 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 **Deliverable:** Rewrite the airflow demo with zero `async/await`.
 
+### Backlog: Extra Operators
+
+> **Goal:** Fill remaining gaps in Level 2 operator coverage. Independent of phased work.
+
+| # | Operator | What | Effort |
+|---|----------|------|--------|
+| B1 | `takeWhile(pred)` | Passes values while predicate is true, then completes. Complement to `takeUntil` (predicate vs signal). | S |
+
 ### Phase 2: Workflow Engine + Adapters
 
 > **Goal:** Compose Phase 1 operators into a declarative workflow builder. Ship the first
@@ -171,8 +180,9 @@ Within each phase, items are roughly ordered by effort (small → large).
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
 | 4a | Token/cost tracking operator | Track token consumption per pipeline step. | S |
-| 4b | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
-| 4c | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
+| 4b | `agentLoop` pattern | Observe→Plan→Act cycle using `dynamicDerived` (conditional edges) + `effect` → `set` (cycle). Graph rewires per iteration based on agent phase. | M |
+| 4c | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
+| 4d | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
 
 ### Phase 5: Deep Memory
 
@@ -231,7 +241,7 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 ```
 src/
-├── core/          ← Level 1: 5 primitives + protocol + inspector + pipe      [SHIPPED]
+├── core/          ← Level 1: 6 primitives + protocol + inspector + pipe      [SHIPPED]
 ├── extra/         ← Level 2: 59 operators, sources, sinks                    [SHIPPED]
 ├── utils/         ← Level 3: 12 pure strategies                              [SHIPPED]
 ├── data/          ← Level 3: 4 reactive data structures                      [SHIPPED]

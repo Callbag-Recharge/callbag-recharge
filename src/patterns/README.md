@@ -1,6 +1,6 @@
 # Patterns
 
-Composed recipes built on callbag-recharge's core primitives (`state`, `derived`, `effect`, `producer`, `operator`), extras, and utils. Each pattern is a self-contained module in its own subfolder with documentation, implementation, and tests.
+Composed recipes built on callbag-recharge's core primitives (`state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`), extras, and utils. Each pattern is a self-contained module in its own subfolder with documentation, implementation, and tests.
 
 ## Available Patterns
 
@@ -16,7 +16,7 @@ Composed recipes built on callbag-recharge's core primitives (`state`, `derived`
 
 ## How Patterns Differ from Core, Extras, and Utils
 
-- **Core** (`callbag-recharge`) — The five primitives: `state`, `derived`, `effect`, `producer`, `operator`. Minimal, protocol-level building blocks.
+- **Core** (`callbag-recharge`) — The six primitives: `state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`. Minimal, protocol-level building blocks.
 - **Extras** (`callbag-recharge/extra`) — Operators and sources (map, filter, switchMap, debounce, etc.). Single-purpose, composable via `pipe()`.
 - **Utils** (`callbag-recharge/utils`) — Reusable building blocks: backoff, circuit breaker, rate limiter, cancellable action/stream, state machine, batch writer, connection health. Can be used standalone or by patterns.
 - **Patterns** (`callbag-recharge/patterns/<name>`) — Opinionated, higher-level recipes that compose core + extras + utils into ready-to-use solutions for common use cases.

@@ -53,7 +53,7 @@ src/
 │   ├── dynamicDerived.ts ← derived with runtime dep tracking + rewiring
 │   ├── effect.ts    ← sink role — imports protocol + types
 │   └── pipe.ts      ← map/filter/scan sugar via derived
-├── extra/           ← operators, sources, sinks — import from core + utils only
+├── extra/           ← operators, sources, sinks — import from core (all 6 primitives) + utils only
 ├── utils/           ← pure utilities — zero reactive deps (except reactiveEviction)
 │   ├── backoff.ts   ← BackoffStrategy: constant, linear, exponential, fibonacci, decorrelatedJitter
 │   ├── eviction.ts  ← EvictionPolicy: fifo, lru, lfu, scored, random
@@ -79,7 +79,7 @@ src/
 
 **Strict rules** (unchanged):
 - `core/` never imports from `extra/`, `utils/`, `data/`, or `memory/`
-- `extra/` imports from `core/` and `utils/` only, never from each other
+- `extra/` imports from `core/` (all 6 primitives allowed) and `utils/` only, never from each other
 - `utils/` never imports from `extra/`, `data/`, or `memory/` (except `reactiveEviction.ts` which imports `core/effect`)
 - `data/` imports from `core/` and `utils/` only
 - `memory/` imports from `core/`, `utils/`, and `data/`

@@ -4,7 +4,7 @@
 ## Overview
 
 callbag-recharge is a reactive state management library where every store is a callbag source.
-5 primitives, 60+ operators, framework-agnostic, zero dependencies.
+6 primitives, 60+ operators, framework-agnostic, zero dependencies.
 
 Key differentiators:
 1. Glitch-free diamond resolution — two-phase push (DIRTY then values) ensures derived stores compute exactly once
@@ -69,6 +69,28 @@ Options:
 Lazy derived: no computation at construction. `get()` pull-computes from deps (always fresh). `source()` subscription triggers push-based connection; disconnects when last subscriber leaves.
 
 `derived.from(dep, opts?)` — identity mode, forwards dep value without fn().
+
+### dynamicDerived(fn)
+
+Like `derived()` but dependencies are discovered at runtime via a tracking `get` function and can change between recomputations. Tier 1: participates in diamond resolution.
+
+```ts
+import { state, dynamicDerived } from 'callbag-recharge'
+
+const flag = state(true)
+const a = state(1)
+const b = state(2)
+
+const result = dynamicDerived((get) => {
+  return get(flag) ? get(a) : get(b)
+})
+
+result.get() // 1
+flag.set(false)
+result.get() // 2 — deps rewired from [flag, a] to [flag, b]
+```
+
+Same lifecycle as derived: fully lazy, disconnect-on-unsub, pull-compute when disconnected.
 
 ### effect([deps], fn)
 

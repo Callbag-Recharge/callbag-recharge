@@ -92,7 +92,7 @@ const primitives = [
         </h1>
         <p class="hero-chinese">川流不息，唯取一瓢</p>
         <p class="hero-sub">
-          5 primitives. 60+ operators. Diamond-safe. Framework-agnostic.
+          6 primitives. 60+ operators. Diamond-safe. Framework-agnostic.
           <br />From atoms to streams in one library.
         </p>
         <div class="hero-actions">

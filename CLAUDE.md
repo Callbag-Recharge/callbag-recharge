@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 callbag-recharge is a reactive state management library where **every store is a callbag source**. The callbag protocol (START=0, DATA=1, END=2) is the internal wiring; users interact through a simple `Store` interface (`get()`, `set()`, `source()`).
 
-### Core primitives (src/core/ — 12 files)
+### Core primitives (src/core/ — 6 primitives, 12 files)
 
 - **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()), `resubscribable` (allow re-subscription after error/complete — enables retry/rescue/repeat). Actions: `emit`, `signal`, `complete`, `error`.
 - **`state(initial)`** — thin wrapper over `producer()`. `set()` inlines emit logic (fast path — skips bound method call). `equals` defaults to `Object.is`. `update(fn)` is sugar over `set`.
@@ -128,7 +128,7 @@ src/
 
 **Strict import rules:**
 - `core/` never imports from `extra/`, `utils/`, `data/`, or `memory/`
-- `extra/` imports from `core/` and `utils/` only, never from each other
+- `extra/` imports from `core/` (all 6 primitives allowed) and `utils/` only, never from each other
 - `utils/` never imports from `extra/`, `data/`, or `memory/` (except `reactiveEviction.ts` → `core/effect`)
 - `data/` imports from `core/` and `utils/` only
 - `memory/` imports from `core/`, `utils/`, and `data/`

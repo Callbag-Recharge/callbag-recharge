@@ -2,7 +2,7 @@
 > State that flows. Reactive state management for TypeScript.
 
 ## What it does
-Reactive state management with 5 primitives: state, derived, effect, producer, operator.
+Reactive state management with 6 primitives: state, derived, dynamicDerived, effect, producer, operator.
 Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators.
 Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 
@@ -16,9 +16,10 @@ Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 - Reactive data structures (reactiveMap, reactiveLog, reactiveIndex) with near-native perf
 - Scheduled pipelines (cron triggers, task state, DAG validation)
 
-## Core API (5 primitives)
+## Core API (6 primitives)
 - `state(initial)` — readable/writable store. .get(), .set(value), .update(fn), .source (callbag)
 - `derived([deps], fn)` — cached computed store, recomputes when deps change. .get(), .source
+- `dynamicDerived(fn)` — like derived but deps discovered at runtime via tracking get function. Deps can change between recomputations
 - `effect([deps], fn)` — side-effect, runs when all deps resolve. Returns dispose function
 - `producer(fn?, opts?)` — push-based source with cleanup. Actions: emit, complete, error. Options: initial, equals, resetOnTeardown, resubscribable
 - `operator([deps], init, handler)` — custom transform node. Handler receives (depIndex, type, data)

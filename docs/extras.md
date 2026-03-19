@@ -48,7 +48,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `withLatestFrom(...others, fn)` | When source emits, grabs current values from others; primary+secondary dep pattern (see architecture §4) |
 | `subject` | Multicast primitive; both a source and manual emitter |
 
-### Tier 2 operators (cycle boundaries, built on `producer()`)
+### Tier 2 operators (cycle boundaries, built on core primitives)
 
 | Module | Description |
 |--------|-------------|
@@ -324,3 +324,5 @@ import { fromKafka }                 from 'callbag-recharge/adapters/kafka'
 ```
 
 Each layer builds on the one below. `patterns/` imports from `extra/` + core. `compat/` wraps core. `adapters/` produce/consume via core. Everything tree-shakes independently.
+
+**Note:** Extras may use any of the 6 core primitives (`state`, `derived`, `dynamicDerived`, `producer`, `operator`, `effect`) — whichever makes the implementation cleanest.
