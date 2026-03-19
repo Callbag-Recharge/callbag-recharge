@@ -1,5 +1,5 @@
 // ---------------------------------------------------------------------------
-// Orchestrate module — Level 3E scheduling primitives
+// Orchestrate module — Level 3E scheduling + workflow primitives
 // ---------------------------------------------------------------------------
 
 export type { CronSchedule } from "./cron";
@@ -10,10 +10,23 @@ export type { DagNode, DagResult } from "./dag";
 export { dag } from "./dag";
 export type { FromCronOptions } from "./fromCron";
 export { fromCron } from "./fromCron";
+// Phase 1: Orchestration Operators
+export type { TriggerStore } from "./fromTrigger";
+export { fromTrigger } from "./fromTrigger";
+export type { GatedStore, GateOptions } from "./gate";
+export { gate } from "./gate";
+export { route } from "./route";
 export { taskState } from "./taskState";
+export type { TrackedStore, TrackMeta, TrackStatus } from "./track";
+export { track } from "./track";
 export type {
 	TaskMeta,
 	TaskState,
 	TaskStateSnapshot,
 	TaskStatus,
 } from "./types";
+export type { BreakerLike, WithBreakerOptions } from "./withBreaker";
+export { CircuitOpenError, withBreaker } from "./withBreaker";
+export type { DelayStrategy, RetryMeta, WithRetryOptions } from "./withRetry";
+export { withRetry } from "./withRetry";
+export { TimeoutError, withTimeout } from "./withTimeout";
