@@ -20,9 +20,9 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 | **4** | Persistence, sync, distribution, content addressing | `/persist`, `/sync`, `/caps` | **Planned** |
 
 **Cross-cutting modules:**
-- `src/patterns/` — 7 composed recipes (shipped)
+- `src/patterns/` — 10 composed recipes (shipped)
 - `src/compat/` — 4 drop-in API wrappers (shipped)
-- `src/adapters/` — 4 external system connectors (shipped: webhook, websocket, sse, http)
+- `src/adapters/` — 6 external system connectors (shipped: webhook, websocket, sse, http, llm, mcp)
 
 ---
 
@@ -48,6 +48,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 **Tier 1:** map, filter, scan, take, skip, first, last, find, elementAt, partition, merge, combine, concat, flat, share, distinctUntilChanged, startWith, tap, pairwise, remember, buffer, withLatestFrom, takeUntil, takeWhile, subject
 **Tier 2:** debounce, throttle, delay, bufferTime, bufferCount, timeout, sample, audit, switchMap, concatMap, exhaustMap, rescue, retry, repeat, reduce, toArray, groupBy, race, window, windowCount, windowTime
 **Sinks:** subscribe, forEach
+**Streaming:** streamParse
 **Interop:** wrap, pipeRaw, SKIP
 
 ### Level 3: Data Structures
@@ -76,7 +77,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `cancellableStream` — stream with AbortController, fromAbortable() interop
 - [x] `connectionHealth` — monitors connection status with backoff + threshold
 
-### Level 3: Orchestrate — 19 modules
+### Level 3: Orchestrate — 20 modules
 
 - [x] `fromCron(expr)` — cron schedule source (zero-dep parser)
 - [x] `taskState()` — reactive task tracker (status, duration, runCount, error)
@@ -97,15 +98,18 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `indexedDBAdapter(opts)` — IndexedDB checkpoint persistence (browser)
 - [x] `executionLog(opts)` — reactive execution history with pipeline auto-connect
 - [x] `memoryLogAdapter()` — in-memory execution log persistence
+- [x] `tokenTracker()` — pipe operator tracking token consumption per stream value
 
-### Adapters — 4 modules
+### Adapters — 6 modules
 
 - [x] `fromWebhook(opts?)` — HTTP trigger source (Node.js/edge), standalone or embedded
 - [x] `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge (browser-native, no deps)
 - [x] `toSSE(source, opts?)` — Server-Sent Events sink, streams store values to browser clients
 - [x] `fromHTTP(url, opts?)` — fetch-based HTTP source with polling, headers, custom transform
+- [x] `fromLLM(opts)` — unified LLM inference source (OpenAI, Ollama, custom), fetch + SSE, no hard deps
+- [x] `fromMCP(client)` — reactive MCP bridge, per-tool stores with status/error/duration tracking
 
-### Patterns (7 recipes, all shipped)
+### Patterns (10 recipes, all shipped)
 
 - [x] `createStore` — Zustand-compatible API with diamond-safe selectors (186 lines)
 - [x] `chatStream` — LLM streaming with history, cancel, retry, rate limiting (276 lines)
@@ -114,6 +118,9 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `undoRedo` — state with undo/redo history (173 lines)
 - [x] `pagination` — paginated data fetching with auto-cancel (151 lines)
 - [x] `formField` — form field with sync + async validation (219 lines)
+- [x] `toolCallState` — reactive tool call lifecycle state machine (159 lines)
+- [x] `hybridRoute` — confidence-based local/cloud LLM routing with fallback (155 lines)
+- [x] `agentLoop` — Observe→Plan→Act agent cycle with async phases (170 lines)
 
 ### Compat Layers (4 wrappers, all shipped)
 
@@ -122,7 +129,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `compat/jotai` — atom() with dynamic dep tracking via dynamicDerived (155 lines)
 - [x] `compat/zustand` — create() matching StoreApi, setState, subscribe (119 lines)
 
-### Build: 80+ tree-shakeable entry points (ESM + CJS + .d.ts)
+### Build: 90+ tree-shakeable entry points (ESM + CJS + .d.ts)
 
 ---
 
@@ -184,7 +191,7 @@ Within each phase, items are roughly ordered by effort (small → large).
 - "manage conversation state for browser-based AI"
 - "tool calling state machine for local LLMs"
 
-### Phase 5: AI Agent Orchestration + Edge LLM
+### Phase 5: AI Agent Orchestration + Edge LLM — **Shipped**
 
 > **Goal:** First-class AI agent support — token tracking, reasoning traces, MCP integration,
 > and edge/local LLM orchestration. The edge LLM trend (March 2026) creates a wide-open
@@ -194,16 +201,18 @@ Within each phase, items are roughly ordered by effort (small → large).
 >
 > **Depends on:** Phases 1-2 (orchestration operators + pipeline).
 
-| # | Deliverable | What | Effort |
+| # | Deliverable | What | Status |
 |---|-------------|------|--------|
-| 5a | Token/cost tracking operator | Track token consumption per pipeline step. | S |
-| 5b | `agentLoop` pattern | Observe→Plan→Act cycle using `dynamicDerived` (conditional edges) + `effect` → `set` (cycle). Graph rewires per iteration based on agent phase. | M |
-| 5c | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
-| 5d | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
-| 5e | `fromLLM(provider, opts)` adapter | Unified reactive source for LLM inference — wraps Ollama, WebLLM, lmstudio-js, Vercel AI SDK, or any OpenAI-compatible endpoint. Token stream as callbag source. Handles WebGPU/WASM browser inference and local HTTP inference (Ollama) with same API. | M |
-| 5f | `toolCallState` pattern | Reactive state machine for tool call lifecycle: LLM requests tool → tool executes → result feeds back → LLM continues. Currently hand-wired everywhere. Uses `stateMachine` util + `producer`. | M |
-| 5g | `hybridRoute(local, cloud, opts)` pattern | Confidence-based routing between local/edge and cloud LLMs. Uses `route()` + `rescue()` (fallback to cloud on local failure). Research shows hybrid reduces cloud costs 60%+ and latency 40%. | S |
-| 5h | Structured streaming parser | Reactive partial JSON parser for streaming structured output from LLMs. `scan()` + incremental parse + type-safe extraction. | M |
+| 5a | Token/cost tracking operator | `tokenTracker()` — pipe operator tracking prompt/completion/total tokens and cost per stream. | **Shipped** |
+| 5b | `agentLoop` pattern | Observe→Plan→Act cycle with reactive phase tracking, iteration limits, async phases, history. | **Shipped** |
+| 5c | Reasoning trace in Inspector | `Inspector.annotate()`, `traceLog()`, `clearTrace()` — capture *why* a path was taken. Included in `snapshot()`. | **Shipped** |
+| 5d | MCP adapter | `fromMCP(client)` — reactive bridge to Model Context Protocol. Per-tool stores with status, error, duration tracking. | **Shipped** |
+| 5e | `fromLLM(provider, opts)` adapter | Unified reactive source for LLM inference — wraps any OpenAI-compatible endpoint (OpenAI, Ollama, custom). Token stream via fetch + SSE parsing. No hard deps. | **Shipped** |
+| 5f | `toolCallState` pattern | Reactive state machine for tool call lifecycle: idle → pending → executing → completed/errored. Tracks args, result, error, duration, history. | **Shipped** |
+| 5g | `hybridRoute(local, cloud, opts)` pattern | Confidence-based routing between local/edge and cloud LLMs with auto-fallback on error. Reactive route/count tracking. | **Shipped** |
+| 5h | `streamParse` operator | Reactive partial JSON parser for streaming structured output. Incremental repair of incomplete JSON. Type-safe extraction. | **Shipped** |
+
+**Deliverable:** Full AI agent orchestration toolkit — token tracking, tool call state machines, agent loops, LLM adapters, MCP integration, hybrid routing, streaming structured output parsing.
 
 ### Phase 6: Deep Memory
 
@@ -267,9 +276,9 @@ src/
 ├── data/          ← Level 3: 4 reactive data structures                      [SHIPPED]
 ├── memory/        ← Level 3: agent memory primitives                         [SHIPPED]
 ├── orchestrate/   ← Level 3E: 19 orchestration + workflow primitives         [SHIPPED]
-├── patterns/      ← Cross-cutting: 7 composed recipes                       [SHIPPED]
+├── patterns/      ← Cross-cutting: 10 composed recipes                      [SHIPPED]
 ├── compat/        ← Cross-cutting: 4 drop-in API wrappers                   [SHIPPED]
-├── adapters/      ← Cross-cutting: 4 external system connectors              [SHIPPED → Phase 7 for more]
+├── adapters/      ← Cross-cutting: 6 external system connectors              [SHIPPED → Phase 7 for more]
 └── persist/       ← Level 4: persistence, sync, distribution                 [PLANNED → Phase 7]
 ```
 

@@ -50,6 +50,8 @@ export { scan } from "./scan";
 export { share } from "./share";
 export { skip } from "./skip";
 export { startWith } from "./startWith";
+export type { StreamParseOptions } from "./streamParse";
+export { streamParse } from "./streamParse";
 export { subject } from "./subject";
 export { subscribe } from "./subscribe";
 export { switchMap } from "./switchMap";

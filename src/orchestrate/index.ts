@@ -47,6 +47,8 @@ export type {
 export { pipeline, step } from "./pipeline";
 export { route } from "./route";
 export { taskState } from "./taskState";
+export type { TokenMeta, TokenTrackedStore, TokenUsage } from "./tokenTracker";
+export { tokenTracker } from "./tokenTracker";
 export type { TrackedStore, TrackMeta, TrackStatus } from "./track";
 export { track } from "./track";
 export type {

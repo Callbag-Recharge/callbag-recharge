@@ -10,6 +10,7 @@
 // - inspect/graph/dumpGraph/snapshot: read-only graph queries
 // - observe/spy/trace: callbag sinks for debugging (subscribe externally)
 // - tap: transparent passthrough wrapper for graph visualization
+// - annotate/traceLog/clearTrace: reasoning trace for AI agent observability
 // ---------------------------------------------------------------------------
 
 import type { NodeStatus, Signal } from "./protocol";
@@ -22,6 +23,15 @@ export interface StoreInfo<T = unknown> {
 	value: T;
 	/** v4: node lifecycle status */
 	status: NodeStatus | undefined;
+}
+
+export interface TraceEntry {
+	/** Node key (from Inspector registration). */
+	node: string;
+	/** Reasoning annotation — *why* a decision was made. */
+	reason: string;
+	/** Timestamp (ms since epoch). */
+	timestamp: number;
 }
 
 export interface ObserveResult<T> {
@@ -77,6 +87,13 @@ export class Inspector {
 	private static _explicitEnabled: boolean | null = null;
 	private static _cachedDefault: boolean | null = null;
 
+	// Reasoning trace — annotations keyed by node, plus chronological log
+	private static _annotations = new WeakMap<object, string>();
+	private static _traceLog: TraceEntry[] = [];
+	private static _traceHead = 0;
+	private static _traceFull = false;
+	static maxTraceEntries = 1000;
+
 	static get enabled(): boolean {
 		if (Inspector._explicitEnabled !== null) return Inspector._explicitEnabled;
 		if (Inspector._cachedDefault !== null) return Inspector._cachedDefault;
@@ -100,9 +117,14 @@ export class Inspector {
 		return joined.length > 40 ? `${joined.slice(0, 37)}...` : joined;
 	}
 
-	/** Resolve a node to its unique graph key */
+	/** Resolve a node to its unique graph key. Unregistered nodes get a stable unique key. */
 	private static _resolveKey(node: object): string {
-		return Inspector._keys.get(node) ?? Inspector._names.get(node) ?? "anonymous";
+		const existing = Inspector._keys.get(node) ?? Inspector._names.get(node);
+		if (existing) return existing;
+		// Assign a stable unique key so multiple calls for the same unregistered node are consistent
+		const key = `anonymous_${Inspector._nextId++}`;
+		Inspector._keys.set(node, key);
+		return key;
 	}
 
 	/** Register a graph node (store, effect, etc.) with the inspector */
@@ -360,19 +382,51 @@ export class Inspector {
 	}
 
 	/**
-	 * JSON-serializable snapshot of the entire graph — nodes + edges.
+	 * JSON-serializable snapshot of the entire graph — nodes + edges + trace.
 	 * Designed for AI consumption during debugging sessions.
 	 */
 	static snapshot(): {
-		nodes: Array<{ name: string; kind: string; value: unknown; status: string | undefined }>;
+		nodes: Array<{
+			name: string;
+			kind: string;
+			value: unknown;
+			status: string | undefined;
+			annotation?: string;
+		}>;
 		edges: Array<{ from: string; to: string }>;
+		trace: TraceEntry[];
 	} {
 		const g = Inspector.graph();
 		const edgeMap = Inspector.getEdges();
-		const nodes: Array<{ name: string; kind: string; value: unknown; status: string | undefined }> =
-			[];
+
+		// Build key→annotation lookup from living nodes
+		const keyAnnotations = new Map<string, string>();
+		for (const ref of Inspector._stores) {
+			const node = ref.deref();
+			if (!node) continue;
+			const ann = Inspector._annotations.get(node);
+			if (ann !== undefined) {
+				keyAnnotations.set(Inspector._resolveKey(node), ann);
+			}
+		}
+
+		const nodes: Array<{
+			name: string;
+			kind: string;
+			value: unknown;
+			status: string | undefined;
+			annotation?: string;
+		}> = [];
 		for (const [key, info] of g) {
-			nodes.push({ name: key, kind: info.kind, value: info.value, status: info.status });
+			const entry: (typeof nodes)[0] = {
+				name: key,
+				kind: info.kind,
+				value: info.value,
+				status: info.status,
+			};
+			const ann = keyAnnotations.get(key);
+			if (ann !== undefined) entry.annotation = ann;
+			nodes.push(entry);
 		}
 		const edges: Array<{ from: string; to: string }> = [];
 		for (const [parent, children] of edgeMap) {
@@ -380,7 +434,7 @@ export class Inspector {
 				edges.push({ from: parent, to: child });
 			}
 		}
-		return { nodes, edges };
+		return { nodes, edges, trace: Inspector.traceLog() };
 	}
 
 	/**
@@ -517,6 +571,52 @@ export class Inspector {
 		return lines.join("\n");
 	}
 
+	/**
+	 * Annotate a node with a reasoning trace — captures *why* a decision was made.
+	 * Stored both on the node (latest annotation) and in the chronological trace log.
+	 */
+	static annotate(node: object, reason: string): void {
+		if (!Inspector.enabled) return;
+		Inspector._annotations.set(node, reason);
+		const entry: TraceEntry = {
+			node: Inspector._resolveKey(node),
+			reason,
+			timestamp: Date.now(),
+		};
+		const max = Inspector.maxTraceEntries;
+		if (max <= 0) return;
+		if (Inspector._traceLog.length < max) {
+			Inspector._traceLog.push(entry);
+		} else {
+			Inspector._traceLog[Inspector._traceHead] = entry;
+			Inspector._traceFull = true;
+		}
+		Inspector._traceHead = (Inspector._traceHead + 1) % max;
+	}
+
+	/** Get the latest annotation for a node, if any. */
+	static getAnnotation(node: object): string | undefined {
+		return Inspector._annotations.get(node);
+	}
+
+	/** Get the full chronological trace log of all annotations. */
+	static traceLog(): TraceEntry[] {
+		if (!Inspector._traceFull)
+			return Inspector._traceLog.slice(0, Inspector._traceHead || Inspector._traceLog.length);
+		// Ring buffer is full — return in chronological order: [head..end, 0..head)
+		return [
+			...Inspector._traceLog.slice(Inspector._traceHead),
+			...Inspector._traceLog.slice(0, Inspector._traceHead),
+		];
+	}
+
+	/** Clear the trace log (keeps per-node annotations in WeakMap). */
+	static clearTrace(): void {
+		Inspector._traceLog = [];
+		Inspector._traceHead = 0;
+		Inspector._traceFull = false;
+	}
+
 	/** Reset all state (for testing) */
 	static _reset(): void {
 		Inspector._names = new WeakMap<object, string>();
@@ -528,5 +628,10 @@ export class Inspector {
 		Inspector._nextId = 0;
 		Inspector._explicitEnabled = null;
 		Inspector._cachedDefault = null;
+		Inspector._annotations = new WeakMap<object, string>();
+		Inspector._traceLog = [];
+		Inspector._traceHead = 0;
+		Inspector._traceFull = false;
+		Inspector.maxTraceEntries = 1000;
 	}
 }

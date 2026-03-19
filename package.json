@@ -98,6 +98,36 @@
 				"default": "./dist/patterns/formField/index.cjs"
 			}
 		},
+		"./patterns/toolCallState": {
+			"import": {
+				"types": "./dist/patterns/toolCallState/index.d.ts",
+				"default": "./dist/patterns/toolCallState/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/toolCallState/index.d.cts",
+				"default": "./dist/patterns/toolCallState/index.cjs"
+			}
+		},
+		"./patterns/hybridRoute": {
+			"import": {
+				"types": "./dist/patterns/hybridRoute/index.d.ts",
+				"default": "./dist/patterns/hybridRoute/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/hybridRoute/index.d.cts",
+				"default": "./dist/patterns/hybridRoute/index.cjs"
+			}
+		},
+		"./patterns/agentLoop": {
+			"import": {
+				"types": "./dist/patterns/agentLoop/index.d.ts",
+				"default": "./dist/patterns/agentLoop/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/agentLoop/index.d.cts",
+				"default": "./dist/patterns/agentLoop/index.cjs"
+			}
+		},
 		"./memory": {
 			"import": {
 				"types": "./dist/memory/index.d.ts",
@@ -206,6 +236,26 @@
 			"require": {
 				"types": "./dist/adapters/websocket.d.cts",
 				"default": "./dist/adapters/websocket.cjs"
+			}
+		},
+		"./adapters/llm": {
+			"import": {
+				"types": "./dist/adapters/llm.d.ts",
+				"default": "./dist/adapters/llm.js"
+			},
+			"require": {
+				"types": "./dist/adapters/llm.d.cts",
+				"default": "./dist/adapters/llm.cjs"
+			}
+		},
+		"./adapters/mcp": {
+			"import": {
+				"types": "./dist/adapters/mcp.d.ts",
+				"default": "./dist/adapters/mcp.js"
+			},
+			"require": {
+				"types": "./dist/adapters/mcp.d.cts",
+				"default": "./dist/adapters/mcp.cjs"
 			}
 		},
 		"./extra/*": {
