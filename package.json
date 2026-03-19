@@ -306,7 +306,7 @@
 	"bugs": {
 		"url": "https://github.com/Callbag-Recharge/callbag-recharge/issues"
 	},
-	"homepage": "https://github.com/Callbag-Recharge/callbag-recharge#readme",
+	"homepage": "https://callbag-recharge.github.io/callbag-recharge/",
 	"license": "MIT",
 	"devDependencies": {
 		"@biomejs/biome": "2.4.6",
