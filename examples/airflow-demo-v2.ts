@@ -1,0 +1,197 @@
+/**
+ * Airflow-style workflow v2 — using pipeline() + gate() + track()
+ *
+ * Demonstrates the Phase 2 declarative workflow builder alongside Phase 1
+ * orchestration operators. Same payment processing pipeline as v1, but
+ * composed using pipeline() for declarative step wiring.
+ *
+ * Compare with airflow-demo.ts (v1) which uses manual pipe() composition.
+ *
+ * "n8n in 50 lines" — trigger → parallel fetch → gate → conditional routing → sinks.
+ *
+ * Run: npx tsx examples/airflow-demo-v2.ts
+ */
+import { pipe, producer } from "callbag-recharge";
+import { map, subscribe, switchMap } from "callbag-recharge/extra";
+import {
+	checkpoint,
+	fromTrigger,
+	gate,
+	memoryAdapter,
+	pipeline,
+	route,
+	step,
+	track,
+	withBreaker,
+	withRetry,
+	withTimeout,
+} from "callbag-recharge/orchestrate";
+import { circuitBreaker } from "callbag-recharge/utils";
+
+// ---------------------------------------------------------------------------
+// Shared resources
+// ---------------------------------------------------------------------------
+const breaker = circuitBreaker({ failureThreshold: 3, cooldownMs: 5000 });
+const adapter = memoryAdapter();
+let fraudCallCount = 0;
+
+// ---------------------------------------------------------------------------
+// Pipeline definition — declarative step wiring
+// ---------------------------------------------------------------------------
+const wf = pipeline({
+	// Step 1: Manual trigger
+	trigger: step(fromTrigger<{ userId: string; amount: number }>({ name: "payment:trigger" })),
+
+	// Step 2: Validate — route valid vs invalid
+	validate: step(
+		(trigger) => {
+			const [valid, invalid] = route(
+				trigger,
+				(v) => v !== undefined && (v as any).amount > 0 && (v as any).amount < 10_000,
+				{ name: "payment:validate" },
+			);
+			// Side-effect: log invalid payments
+			subscribe(invalid, (v) => {
+				console.log(`[REJECTED] Invalid payment: $${v?.amount} for ${v?.userId}`);
+			});
+			return valid;
+		},
+		["trigger"],
+	),
+
+	// Step 3: Fraud check — external API with retry + timeout + breaker + checkpoint
+	fraudCheck: step(
+		(validated) =>
+			pipe(
+				validated,
+				switchMap((payment) =>
+					producer<{ userId: string; amount: number; risk: string }>(
+						({ emit, complete, error }) => {
+							fraudCallCount++;
+							const timer = setTimeout(() => {
+								if (fraudCallCount % 5 === 0) {
+									error(new Error("Fraud API unavailable"));
+									return;
+								}
+								const risk = (payment?.amount ?? 0) > 5000 ? "high" : "low";
+								emit({ ...(payment as any), risk });
+								complete();
+							}, 50);
+							return () => clearTimeout(timer);
+						},
+					),
+				),
+				withRetry({ count: 2 }),
+				withTimeout(5000),
+				withBreaker(breaker),
+				checkpoint("fraud-check", adapter),
+				track({ name: "fraud-check" }),
+			),
+		["validate"],
+	),
+
+	// Step 4: Route by risk level
+	riskRoute: step(
+		(fraudChecked) => {
+			const [highRisk, lowRisk] = route(fraudChecked, (v: any) => v?.risk === "high", {
+				name: "risk:route",
+			});
+			// Attach both outputs — pipeline tracks the high-risk branch
+			(highRisk as any)._lowRisk = lowRisk;
+			return highRisk;
+		},
+		["fraudCheck"],
+	),
+
+	// Step 5: Gate — human approval for high-risk
+	approval: step((highRisk) => pipe(highRisk, gate({ name: "approval" })), ["riskRoute"]),
+
+	// Step 6a: Process approved high-risk
+	processHigh: step(
+		(approved) =>
+			pipe(
+				approved,
+				map((v: any) => ({ ...v, status: "approved:manual" })),
+				track({ name: "process:high" }),
+			),
+		["approval"],
+	),
+});
+
+// ---------------------------------------------------------------------------
+// Low-risk branch (outside pipeline — accessed via riskRoute step)
+// ---------------------------------------------------------------------------
+const lowRisk = (wf.steps.riskRoute as any)._lowRisk;
+const processedLow = pipe(
+	lowRisk,
+	map((v: any) => ({ ...v, status: "approved:auto" })),
+	track({ name: "process:low" }),
+);
+
+// ---------------------------------------------------------------------------
+// Aggregate results
+// ---------------------------------------------------------------------------
+const results: any[] = [];
+
+subscribe(processedLow, (v) => {
+	console.log(`[PROCESSED] ${v?.userId} $${v?.amount} → ${v?.status}`);
+	results.push(v);
+});
+
+subscribe(wf.steps.processHigh, (v) => {
+	console.log(`[PROCESSED] ${v?.userId} $${v?.amount} → ${v?.status}`);
+	results.push(v);
+});
+
+// Monitor overall pipeline status
+subscribe(wf.status, (s) => {
+	console.log(`[PIPELINE] status: ${s}`);
+});
+
+// ---------------------------------------------------------------------------
+// Run the workflow
+// ---------------------------------------------------------------------------
+console.log("=== Airflow Demo v2: Pipeline-based Payment Processing ===\n");
+
+const trigger = wf.steps.trigger as ReturnType<typeof fromTrigger>;
+
+// Low risk payments — auto-approved
+trigger.fire({ userId: "alice", amount: 100 });
+trigger.fire({ userId: "bob", amount: 250 });
+
+// Invalid payment — rejected at validation
+trigger.fire({ userId: "charlie", amount: -50 });
+
+// High risk payment — needs human approval
+trigger.fire({ userId: "dave", amount: 7500 });
+
+// Check gate and approve
+setTimeout(() => {
+	const gated = wf.steps.approval as any;
+	console.log(`\n[GATE] Pending approvals: ${gated.pending.get().length}`);
+	const pending = gated.pending.get();
+	if (pending.length > 0) {
+		console.log(`[GATE] Reviewing: ${JSON.stringify(pending[0])}`);
+		gated.approve();
+	}
+
+	setTimeout(() => {
+		console.log(`\n=== Results: ${results.length} payments processed ===`);
+		for (const r of results) {
+			console.log(`  ${r.userId}: $${r.amount} (${r.status})`);
+		}
+
+		// Show pipeline step metadata
+		console.log("\n=== Step Metadata ===");
+		for (const name of wf.order) {
+			const meta = wf.stepMeta[name as keyof typeof wf.stepMeta]?.get();
+			if (meta) {
+				console.log(`  ${name}: ${meta.status} (${meta.count} values)`);
+			}
+		}
+
+		// Cleanup
+		wf.destroy();
+		console.log("\n--- done ---");
+	}, 200);
+}, 500);

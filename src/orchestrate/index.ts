@@ -2,6 +2,13 @@
 // Orchestrate module — Level 3E scheduling + workflow primitives
 // ---------------------------------------------------------------------------
 
+// Phase 2: Checkpoint
+export type {
+	CheckpointAdapter,
+	CheckpointedStore,
+	CheckpointMeta,
+} from "./checkpoint";
+export { checkpoint, memoryAdapter } from "./checkpoint";
 export type { CronSchedule } from "./cron";
 // Internal — exported for advanced users / testing
 export { matchesCron, parseCron } from "./cron";
@@ -15,6 +22,14 @@ export type { TriggerStore } from "./fromTrigger";
 export { fromTrigger } from "./fromTrigger";
 export type { GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
+// Phase 2: Pipeline
+export type {
+	PipelineResult,
+	PipelineStatus,
+	StepDef,
+	StepMeta,
+} from "./pipeline";
+export { pipeline, step } from "./pipeline";
 export { route } from "./route";
 export { taskState } from "./taskState";
 export type { TrackedStore, TrackMeta, TrackStatus } from "./track";

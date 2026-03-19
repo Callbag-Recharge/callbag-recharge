@@ -1,8 +1,67 @@
 # Orchestration Strategy: Reactive Workflow Engine
 
-> **Status:** Strategic plan. Based on research of user pain points across n8n, Airflow, Jenkins,
+> **Status:** Phase 1+2 fully shipped (March 19, 2026). All 7 orchestration operators, `pipeline()`,
+> `checkpoint()`, adapters (webhook, websocket), and airflow demo v2 implemented.
+> Gap analysis below identifies what's needed next to compete with n8n in production.
+>
+> **Original research:** Based on user pain points across n8n, Airflow, Jenkins,
 > Dify, Coze, LangGraph, CrewAI, Temporal, Inngest, and emerging AI agent orchestration patterns
 > (March 2026).
+
+---
+
+## 0-A. Implementation Status (March 19, 2026)
+
+### What shipped
+
+**Phase 1 — Orchestration Operators (all 7):**
+- `fromTrigger()` — manual trigger source
+- `gate()` — human-in-the-loop (approve/reject/modify, reactive pending/isOpen stores)
+- `track()` — pipe-native task tracking (status, duration, count, error as reactive meta store)
+- `route(source, pred)` — conditional routing → `[matching, notMatching]` (Tier 1)
+- `withBreaker(breaker)` — circuit breaker operator (Tier 2, accepts BreakerLike interface)
+- `withRetry(config)` — retry + backoff with observable retry state (Tier 2)
+- `withTimeout(ms)` — timeout guard (Tier 2, throws TimeoutError)
+
+**Phase 2 — Workflow Engine + Adapters:**
+- `pipeline(steps)` — declarative workflow builder with topological sort, per-step metadata, destroy()
+- `step(factory, deps?)` — step definition for pipeline()
+- `checkpoint(id, adapter)` — durable step boundary with pluggable adapter
+- `memoryAdapter()` — in-memory checkpoint adapter
+- `fromWebhook(opts?)` — HTTP trigger source (standalone or embedded, configurable)
+- `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge (browser-native)
+- `examples/airflow-demo-v2.ts` — payment processing with route, gate, track, retry, breaker, checkpoint
+
+**Test coverage:** `src/__tests__/orchestrate/` (phase1-operators, pipeline, checkpoint, taskState, cron, dag, fromCron) + `src/__tests__/adapters/` (webhook, websocket).
+
+### Gap analysis: callbag-recharge vs n8n (honest assessment)
+
+| Gap | Why it matters | Severity |
+|-----|---------------|----------|
+| **No persistent checkpoint adapters** | `memoryAdapter()` is in-memory only. Real workflows need SQLite/Redis/S3. Without this, `checkpoint()` is a demo. | **High** |
+| **No scheduling runner** | `fromCron()` emits on schedule, but no process manager. n8n runs 24/7 and retries failed workflows. You keep a Node process alive yourself. | **High** |
+| **No visual builder / UI** | n8n's killer feature is drag-and-drop. Code-first is our positioning, but no React/Vue component to even visualize the DAG. Inspector has the data but no renderer. | **Medium** |
+| **No integration library** | n8n has 400+ integrations. We have 2 adapters. Every integration is DIY `fromPromise(() => fetch(...))`. | **Medium** |
+| **No execution history / logs** | n8n stores every execution with inputs/outputs per node. We have `track()` metadata in memory but nothing persisted. Can't debug yesterday's failed run. | **Medium** |
+| **No webhook management** | n8n auto-registers webhook URLs, handles auth. Our `fromWebhook()` is bare HTTP — no auth, no TLS, no routing. | **Medium** |
+| **No credential/secret management** | n8n encrypts and manages API keys. We have nothing — users pass secrets in code. | **Low** (code-first is fine) |
+| **No multi-tenant / team features** | n8n has workspaces, permissions. We're a library. | **Low** (different tier) |
+
+### What to build next (ordered by "unblocks real usage")
+
+1. **Persistence adapters for checkpoint** (SQLite, IndexedDB, file-based) — without this, `checkpoint()` is just a demo. Pull forward from Phase 7a.
+2. **Execution log** — `reactiveLog`-backed execution history that `pipeline()` writes automatically. Combine with persistence to survive restarts.
+3. **3-4 key integration adapters** (Redis pub/sub, SSE sink, fetch/HTTP client source) — covers 80% of real workflow triggers and sinks.
+4. **DAG visualization** — `Inspector.dumpGraph()` → Mermaid/D2 output, or a React Flow adapter.
+5. **`llms.txt`** — cheap, high-leverage for GEO. If Claude/GPT can't recommend the library, nobody discovers it.
+
+### Positioning (confirmed by implementation)
+
+n8n solves "I need a workflow running in 30 minutes with Slack + Google Sheets + Stripe." We don't compete there.
+
+callbag-recharge solves "I need a reactive pipeline **embedded in my app** — browser, edge, or server — with diamond-safe state, human-in-the-loop, and full observability, without deploying infrastructure." The thesis from Section 0 holds: **coordination is the scarce resource**, and we're the only library that treats orchestration as reactive state management.
+
+The gap isn't in primitives anymore. It's in **persistence** (making `checkpoint()` production-ready) and **discoverability** (GEO/docs so AI tools recommend us).
 
 ---
 

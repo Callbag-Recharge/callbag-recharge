@@ -216,14 +216,14 @@ Implemented dual error semantics for derived computation functions: push path ca
 
 **Outcome:** 50% dispatch reduction for single-dep unbatched paths. `cached()` extra with factory + pipe forms. All 1316 tests passing.
 
-### Session orchestration-strategy (March 18) — Reactive Workflow Engine Strategy
-**Topic:** Research user pain points across n8n, Airflow, Jenkins, Dify, Coze, LangGraph, CrewAI, Temporal, Inngest — design reactive orchestration primitives
+### Session orchestration-strategy (March 18–19) — Reactive Workflow Engine Strategy → Fully Shipped
+**Topic:** Research user pain points across n8n, Airflow, Jenkins, Dify, Coze, LangGraph, CrewAI, Temporal, Inngest — design and implement reactive orchestration primitives
 
 **Key insight:** The airflow demo fell back to imperative async/await because higher-level pipe wiring doesn't exist. The original Level 3 vision (pure reactive pipes) was correct but unimplemented. "workflowTask" config-object pattern rejected as unintuitive — everything should be a composable pipe operator.
 
 **Rejected:** Monolithic `workflowTask({ retries, timeout, breaker })` config; DAG executor as separate engine (derived() IS the executor); static DAGs only (AI era demands dynamic/cyclic graphs).
 
-**Outcome:** 7 new orchestration operators designed: `gate()` (human-in-the-loop), `track()` (pipe-native task tracking), `route()` (conditional branching), `withBreaker()`, `withRetry()`, `withTimeout()`, `fromTrigger()`. `pipeline()` declarative builder. `checkpoint()` for durable execution. All consolidated into `docs/roadmap.md`.
+**Outcome (Phase 1+2 shipped):** All 7 orchestration operators implemented: `gate()`, `track()`, `route()`, `withBreaker()`, `withRetry()`, `withTimeout()`, `fromTrigger()`. Plus `pipeline()` declarative builder, `checkpoint()` with pluggable adapters, `fromWebhook()`/`fromWebSocket()`/`toWebSocket()` adapters, and `airflow-demo-v2.ts` proving "n8n in 50 lines." Gap analysis identified persistence adapters and execution logging as the next priorities to move from demo to production.
 
 ---
 
@@ -297,4 +297,4 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session b5498ba2
+**Archive Status:** Complete through Session orchestration-strategy (Phase 1+2 shipped)

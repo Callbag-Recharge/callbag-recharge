@@ -110,15 +110,41 @@ Many of the original `callbag-*` repos (e.g., `callbag-take-until`, `callbag-deb
 
 ---
 
-## Orchestrate (`src/orchestrate/`) — Level 3E Scheduling
+## Orchestrate (`src/orchestrate/`) — Level 3E Workflow Engine
 
-Lightweight scheduling primitives that compose with core to build DAG-based task pipelines. Import from `callbag-recharge/orchestrate`.
+Orchestration primitives that compose with core to build reactive workflow pipelines. Import from `callbag-recharge/orchestrate`.
 
 ### Sources
 
 | Module | Description |
 |--------|-------------|
 | `fromCron(expr, opts?)` | Tier 2 source that emits a `Date` on each cron schedule match. 5-field standard cron. Built-in parser (no external deps). |
+| `fromTrigger<T>(opts?)` | Manual trigger source. `.fire(value)` emits into the stream. No dedup (always emits). |
+
+### Orchestration operators
+
+| Module | Description |
+|--------|-------------|
+| `gate<A>(opts?)` | Human-in-the-loop: pause stream, inspect pending, approve/reject/modify, resume. Reactive `pending` and `isOpen` stores. Tier 2. |
+| `track<A>(opts?)` | Pipe-native task tracking. Observable metadata (status, duration, count, error) via reactive `meta` store. Tier 2. |
+| `route<T>(source, pred, opts?)` | Dynamic conditional routing → `[matching, notMatching]` both as stores. Tier 1 (participates in diamond resolution). |
+| `withBreaker<A>(breaker, opts?)` | Circuit breaker as pipe operator. Blocks when open, trials on half-open. Accepts `BreakerLike` interface. Observable `breakerState`. Tier 2. |
+| `withRetry<A>(config)` | Retry + backoff as operator with observable retry state (attempt, lastError, pending). Accepts `DelayStrategy` or simple count. Tier 2. |
+| `withTimeout<A>(ms)` | Timeout as pipe operator. Throws `TimeoutError` if no value arrives within `ms`. Tier 2. |
+
+### Workflow builder
+
+| Module | Description |
+|--------|-------------|
+| `pipeline<S>(steps, opts?)` | Declarative workflow builder. Steps declare deps, auto-wires via topological sort (Kahn's). Reactive status per step. `destroy()` for cleanup. |
+| `step<T>(factory, deps?, opts?)` | Step definition for `pipeline()`. Factory receives dep stores in declared order. |
+
+### Durable execution
+
+| Module | Description |
+|--------|-------------|
+| `checkpoint(id, adapter, opts?)` | Durable step boundary. Persists values on emit, skips on recovery. Pluggable `CheckpointAdapter`. Tier 2. |
+| `memoryAdapter()` | In-memory `CheckpointAdapter` implementation (for testing / non-durable use). |
 
 ### Task tracking
 
@@ -138,6 +164,18 @@ Lightweight scheduling primitives that compose with core to build DAG-based task
 |--------|-------------|
 | `parseCron(expr)` | Parse a 5-field cron expression into a `CronSchedule` object |
 | `matchesCron(schedule, date)` | Check if a `Date` matches a parsed cron schedule |
+
+---
+
+## Adapters (`src/adapters/`) — External System Connectors
+
+Thin source/sink wrappers for external systems. Import from `callbag-recharge/adapters`.
+
+| Module | Description |
+|--------|-------------|
+| `fromWebhook<T>(opts?)` | HTTP trigger source (Node.js/edge). Creates a POST endpoint that emits parsed request bodies. Standalone (`listen()`) or embedded (`handler` property). Configurable path, port, body parser, max body size (default 1MB). Observable `requestCount` store. |
+| `fromWebSocket<T>(url, opts?)` | Reactive WebSocket source. Observable `status` store ("connecting", "open", "closing", "closed"). Optional auto-reconnect with configurable delay. No external deps (browser-native WebSocket API). Works in Node.js 21+ and all modern browsers. |
+| `toWebSocket<T>(ws, source, opts?)` | WebSocket sink. Sends store values to a WebSocket connection. Buffers messages until connection opens. Returns dispose function. |
 
 ---
 

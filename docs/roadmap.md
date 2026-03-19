@@ -16,13 +16,13 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 |-------|------|--------|--------|
 | **1** | 6 primitives + protocol + inspector + pipe + batch | `callbag-recharge/core` | **Shipped** |
 | **2** | 59 operators, sources, sinks | `callbag-recharge/extra` | **Shipped** |
-| **3** | Data structures + memory + orchestration + utils | `/data`, `/memory`, `/orchestrate`, `/utils` | **Shipped** (orchestrate partial) |
+| **3** | Data structures + memory + orchestration + utils | `/data`, `/memory`, `/orchestrate`, `/utils` | **Shipped** |
 | **4** | Persistence, sync, distribution, content addressing | `/persist`, `/sync`, `/caps` | **Planned** |
 
 **Cross-cutting modules:**
 - `src/patterns/` — 7 composed recipes (shipped)
 - `src/compat/` — 4 drop-in API wrappers (shipped)
-- `src/adapters/` — external system connectors (planned)
+- `src/adapters/` — 2 external system connectors (shipped: webhook, websocket)
 
 ---
 
@@ -76,11 +76,27 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `cancellableStream` — stream with AbortController, fromAbortable() interop
 - [x] `connectionHealth` — monitors connection status with backoff + threshold
 
-### Level 3: Orchestrate (partial)
+### Level 3: Orchestrate — 15 modules
 
 - [x] `fromCron(expr)` — cron schedule source (zero-dep parser)
 - [x] `taskState()` — reactive task tracker (status, duration, runCount, error)
 - [x] `dag(nodes)` — acyclicity validation + Inspector registration
+- [x] `fromTrigger()` — manual trigger source (`.fire(value)` emits into stream)
+- [x] `gate()` — human-in-the-loop: pause stream, inspect pending, approve/reject/modify, resume
+- [x] `track()` — pipe-native task tracking (status, duration, count, error as reactive stores)
+- [x] `route(source, pred)` — dynamic conditional routing → `[matching, notMatching]` (Tier 1)
+- [x] `withBreaker(breaker)` — circuit breaker as pipe operator (Tier 2)
+- [x] `withRetry(config)` — retry + backoff with observable retry state (Tier 2)
+- [x] `withTimeout(ms)` — timeout as pipe operator (Tier 2)
+- [x] `checkpoint(id, adapter)` — durable step boundary, persist on emit, skip on recovery
+- [x] `pipeline(steps)` — declarative workflow builder, auto-wires via topological sort
+- [x] `step(factory, deps?)` — step definition for pipeline()
+- [x] `memoryAdapter()` — in-memory checkpoint adapter
+
+### Adapters — 2 modules
+
+- [x] `fromWebhook(opts?)` — HTTP trigger source (Node.js/edge), standalone or embedded
+- [x] `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge (browser-native, no deps)
 
 ### Patterns (7 recipes, all shipped)
 
@@ -99,7 +115,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `compat/jotai` — atom() with dynamic dep tracking via dynamicDerived (155 lines)
 - [x] `compat/zustand` — create() matching StoreApi, setState, subscribe (119 lines)
 
-### Build: 68 tree-shakeable entry points (ESM + CJS + .d.ts)
+### Build: 80+ tree-shakeable entry points (ESM + CJS + .d.ts)
 
 ---
 
@@ -109,27 +125,6 @@ Phases are ordered by **dependency and foundation** — foundational primitives 
 then compositions that build on them, then larger efforts that depend on those compositions.
 Within each phase, items are roughly ordered by effort (small → large).
 
-### Phase 1: Orchestration Operators (Foundation)
-
-> **Goal:** The pipe-native operators that make workflow composition possible.
-> These are the building blocks everything else depends on — `pipeline()`, the airflow demo
-> rewrite, and AI agent orchestration all need these operators to exist first.
->
-> **Why first:** Without these, every workflow falls back to imperative async/await.
-> `gate()` alone is a novel primitive no other lightweight library has.
-
-| # | Primitive | What | Effort |
-|---|-----------|------|--------|
-| 1a | `fromTrigger()` | Manual trigger source. `.fire(value)` emits into the stream. | S |
-| 1b | `route(source, pred)` | Dynamic conditional routing → `[matching, notMatching]` both as stores. | S |
-| 1c | `withTimeout(ms)` | Timeout as pipe operator. Composes existing `timeout()`. | S |
-| 1d | `withBreaker(opts)` | Circuit breaker as pipe operator. Blocks when open, trials on half-open. | S |
-| 1e | `withRetry(n, backoff)` | Retry + backoff as operator with observable retry state. | S |
-| 1f | `track()` | Pipe-native task tracking. Observable metadata (status, duration, runCount, error). | M |
-| 1g | `gate()` | Human-in-the-loop: pause stream, inspect pending, approve/reject/modify, resume. | M-L |
-
-**Deliverable:** Rewrite the airflow demo with zero `async/await`.
-
 ### Backlog: Extra Operators
 
 > **Goal:** Fill remaining gaps in Level 2 operator coverage. Independent of phased work.
@@ -138,40 +133,42 @@ Within each phase, items are roughly ordered by effort (small → large).
 |---|----------|------|--------|
 | B1 | `takeWhile(pred)` | Passes values while predicate is true, then completes. Complement to `takeUntil` (predicate vs signal). | S |
 
-### Phase 2: Workflow Engine + Adapters
+### Phase 3: Production Hardening
 
-> **Goal:** Compose Phase 1 operators into a declarative workflow builder. Ship the first
-> adapters so workflows can connect to external systems.
+> **Goal:** Make orchestration production-ready. Gap analysis (March 19) found that Phase 1+2
+> shipped the right primitives, but `checkpoint()` is demo-only without real persistence, and
+> workflows can't survive restarts without execution logging.
 >
-> **Depends on:** Phase 1 (operators are the building blocks for `pipeline()`).
+> **Why before GEO:** Can't recommend a workflow engine that loses state on restart.
+> Pulling persistence forward from Phase 7a.
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 2a | `fromWebhook()` | HTTP trigger source (Node.js/edge). | S |
-| 2b | WebSocket adapter | `fromWebSocket(url)` / `toWebSocket(ws)`. No deps (browser native). | S |
-| 2c | `checkpoint(id, adapter)` | Durable step boundary. Persist on emit, skip on recovery. Pluggable adapter. | M |
-| 2d | `pipeline()` | Declarative workflow builder. Steps declare deps, auto-wires derived + operators. Reactive status per step. | L |
-| 2e | Airflow demo v2 | Rewrite using `pipeline()` + `gate()` + `track()`. Side-by-side with v1. | M |
+| 3a | Checkpoint persistence adapters | SQLite, IndexedDB, file-based adapters for `checkpoint()`. | M |
+| 3b | Execution log | `reactiveLog`-backed execution history. `pipeline()` auto-writes step events. Pluggable persistence. | M |
+| 3c | DAG visualization export | `Inspector.toMermaid()` / `Inspector.toD2()` — graph-as-text for docs/dashboards. | S |
+| 3d | SSE sink adapter | Server-Sent Events sink. Stream pipeline status to browser clients. | S |
+| 3e | HTTP client source | `fromHTTP(url, opts)` — fetch-based source with polling, headers, transform. | S |
 
-**Deliverable:** "n8n in 50 lines" — trigger → parallel fetch → gate → conditional routing → sinks.
+**Deliverable:** A pipeline that persists checkpoint state to SQLite, logs every step execution, and serves live status over SSE. Restartable workflows.
 
-### Phase 3: GEO + Documentation
+### Phase 4: GEO + Documentation
 
 > **Goal:** Make AI tools recommend callbag-recharge. First mover in "state management for AI."
 >
-> **Depends on:** Phases 1-2 (need orchestration story to tell). Patterns/compat already shipped.
+> **Depends on:** Phases 1-3 (need orchestration + production story to tell).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 3a | `llms.txt` + `llms-full.txt` | AI-readable library documentation at docs site root. | S |
-| 3b | npm description + README rewrite | Keyword-rich "When to use" section. | S |
-| 3c | Migration guides | "From Zustand", "From Jotai", "From Nanostores" — compat layers already exist. | M |
-| 3d | 5 recipe pages (titled as AI prompts) | "How to build AI chat with cancellation", "How to manage agentic workflow state", etc. | M |
-| 3e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n. | M |
+| 4a | `llms.txt` + `llms-full.txt` | AI-readable library documentation at docs site root. | S |
+| 4b | npm description + README rewrite | Keyword-rich "When to use" section. | S |
+| 4c | Migration guides | "From Zustand", "From Jotai", "From Nanostores" — compat layers already exist. | M |
+| 4d | 5 recipe pages (titled as AI prompts) | "How to build AI chat with cancellation", "How to manage agentic workflow state", etc. | M |
+| 4e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n. | M |
 
 **Deliverable:** GEO flywheel started — AI tools see full operator menu, recommend us for streaming/agentic prompts.
 
-### Phase 4: AI Agent Orchestration
+### Phase 5: AI Agent Orchestration
 
 > **Goal:** First-class AI agent support — token tracking, reasoning traces, MCP integration.
 >
@@ -179,12 +176,12 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 4a | Token/cost tracking operator | Track token consumption per pipeline step. | S |
-| 4b | `agentLoop` pattern | Observe→Plan→Act cycle using `dynamicDerived` (conditional edges) + `effect` → `set` (cycle). Graph rewires per iteration based on agent phase. | M |
-| 4c | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
-| 4d | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
+| 5a | Token/cost tracking operator | Track token consumption per pipeline step. | S |
+| 5b | `agentLoop` pattern | Observe→Plan→Act cycle using `dynamicDerived` (conditional edges) + `effect` → `set` (cycle). Graph rewires per iteration based on agent phase. | M |
+| 5c | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
+| 5d | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
 
-### Phase 5: Deep Memory
+### Phase 6: Deep Memory
 
 > **Goal:** Reactive agentic memory that no other library offers — vector search, knowledge
 > graphs, memory lifecycle. Builds on shipped memoryNode/collection/decay + memoryStore pattern.
@@ -193,24 +190,24 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 5a | Session transport adapters | SSE sink, WebSocket sink, HTTP sink. Same graph, different edge. | M |
-| 5b | In-process vector index | HNSW-based semantic search. ~1-10 μs vs Redis ~50-500 μs. | L |
-| 5c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
-| 5d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control. | L |
+| 6a | Session transport adapters | WebSocket sink, HTTP sink. Same graph, different edge. | M |
+| 6b | In-process vector index | HNSW-based semantic search. ~1-10 μs vs Redis ~50-500 μs. | L |
+| 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
+| 6d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control. | L |
 
-### Phase 6: More Adapters
+### Phase 7: More Adapters
 
 > **Goal:** Connect any external system with thin (~20-50 line) adapters.
 >
-> **Depends on:** Phase 2a-2b (adapter pattern established).
+> **Depends on:** Adapter pattern established (webhook + websocket shipped).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 6a | Redis adapter | `fromRedis(sub, channel)` / `toRedis(pub, channel)`. Peer dep: ioredis. | S |
-| 6b | PostgreSQL adapter | `fromPgNotify(pool, channel)`. Peer dep: pg. | S |
-| 6c | Kafka adapter | `fromKafka(consumer, topic)` / `toKafka(producer, topic)`. Peer dep: kafkajs. | M |
+| 7a | Redis adapter | `fromRedis(sub, channel)` / `toRedis(pub, channel)`. Peer dep: ioredis. | S |
+| 7b | PostgreSQL adapter | `fromPgNotify(pool, channel)`. Peer dep: pg. | S |
+| 7c | Kafka adapter | `fromKafka(consumer, topic)` / `toKafka(producer, topic)`. Peer dep: kafkajs. | M |
 
-### Phase 7: Level 4 — Persistence + Distribution
+### Phase 8: Level 4 — Persistence + Distribution
 
 > **Goal:** Durable, verifiable, distributed reactive state. The long-term play.
 >
@@ -218,11 +215,10 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 7a | Persistence adapters | SQLite, IndexedDB, S3 via `effect()`. For `checkpoint()` + `memoryStore`. | M |
-| 7b | NodeV1 (CID + prev) | Content-addressed nodes. Lazy CID computation. | L |
-| 7c | RBAC wrapper | Capability-based access control. Audit via `effect()`. | L |
-| 7d | Multi-agent distribution | Cross-process bridges (SharedArrayBuffer, Unix socket, TCP, Redis Streams). | XL |
-| 7e | NodeV2 (caps + refs + encoding) | Full capability tokens, CBOR encoding, reference tracking. | L |
+| 8a | NodeV1 (CID + prev) | Content-addressed nodes. Lazy CID computation. | L |
+| 8b | RBAC wrapper | Capability-based access control. Audit via `effect()`. | L |
+| 8c | Multi-agent distribution | Cross-process bridges (SharedArrayBuffer, Unix socket, TCP, Redis Streams). | XL |
+| 8d | NodeV2 (caps + refs + encoding) | Full capability tokens, CBOR encoding, reference tracking. | L |
 
 ---
 
@@ -246,10 +242,10 @@ src/
 ├── utils/         ← Level 3: 12 pure strategies                              [SHIPPED]
 ├── data/          ← Level 3: 4 reactive data structures                      [SHIPPED]
 ├── memory/        ← Level 3: agent memory primitives                         [SHIPPED]
-├── orchestrate/   ← Level 3E: scheduling + workflow engine                   [PARTIAL → Phase 1+2]
+├── orchestrate/   ← Level 3E: 15 orchestration + workflow primitives         [SHIPPED]
 ├── patterns/      ← Cross-cutting: 7 composed recipes                       [SHIPPED]
 ├── compat/        ← Cross-cutting: 4 drop-in API wrappers                   [SHIPPED]
-├── adapters/      ← Cross-cutting: external system connectors                [PLANNED → Phase 2+6]
+├── adapters/      ← Cross-cutting: 2 external system connectors              [SHIPPED → Phase 6 for more]
 └── persist/       ← Level 4: persistence, sync, distribution                 [PLANNED → Phase 7]
 ```
 

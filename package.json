@@ -178,6 +178,36 @@
 				"default": "./dist/compat/zustand/index.cjs"
 			}
 		},
+		"./adapters": {
+			"import": {
+				"types": "./dist/adapters/index.d.ts",
+				"default": "./dist/adapters/index.js"
+			},
+			"require": {
+				"types": "./dist/adapters/index.d.cts",
+				"default": "./dist/adapters/index.cjs"
+			}
+		},
+		"./adapters/webhook": {
+			"import": {
+				"types": "./dist/adapters/webhook.d.ts",
+				"default": "./dist/adapters/webhook.js"
+			},
+			"require": {
+				"types": "./dist/adapters/webhook.d.cts",
+				"default": "./dist/adapters/webhook.cjs"
+			}
+		},
+		"./adapters/websocket": {
+			"import": {
+				"types": "./dist/adapters/websocket.d.ts",
+				"default": "./dist/adapters/websocket.js"
+			},
+			"require": {
+				"types": "./dist/adapters/websocket.d.cts",
+				"default": "./dist/adapters/websocket.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",
