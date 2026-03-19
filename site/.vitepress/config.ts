@@ -1,4 +1,7 @@
 import { defineConfig } from "vitepress";
+import { resolve } from "node:path";
+
+const root = resolve(__dirname, "../..");
 
 export default defineConfig({
 	title: "callbag-recharge",
@@ -6,6 +9,14 @@ export default defineConfig({
 	base: "/callbag-recharge/",
 
 	appearance: false,
+
+	vite: {
+		resolve: {
+			alias: {
+				"@lib": resolve(root, "src"),
+			},
+		},
+	},
 
 	markdown: {
 		theme: "material-theme-palenight",
@@ -52,6 +63,7 @@ export default defineConfig({
 			{ text: "API", link: "/api/state" },
 			{ text: "Extras", link: "/extras/" },
 			{ text: "Recipes", link: "/recipes/" },
+			{ text: "Demos", link: "/demos/airflow" },
 			{ text: "Architecture", link: "/architecture/" },
 		],
 
@@ -95,6 +107,12 @@ export default defineConfig({
 						text: "createStore (Zustand Migration)",
 						link: "/recipes/zustand-migration",
 					},
+				],
+			},
+			{
+				text: "Demos",
+				items: [
+					{ text: "Airflow in TypeScript", link: "/demos/airflow" },
 				],
 			},
 			{
