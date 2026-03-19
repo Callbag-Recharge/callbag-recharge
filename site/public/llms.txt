@@ -101,7 +101,7 @@ Sinks: forEach, subscribe
 - Zero per-store cost via WeakMaps
 
 ## Install
-npm install callbag-recharge
+npm i @callbag-recharge/callbag-recharge
 
 ## Links
 - Docs: https://callbag-recharge.github.io/callbag-recharge/

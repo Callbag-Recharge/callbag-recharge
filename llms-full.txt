@@ -17,7 +17,7 @@ Key differentiators:
 ## Install
 
 ```
-npm install callbag-recharge
+npm i @callbag-recharge/callbag-recharge
 ```
 
 ## Core API

@@ -413,7 +413,7 @@ Framework-agnostic. Works frontend, backend, edge.
 - concatMap, exhaustMap — sequential / exclusive async
 
 ## Install
-npm install callbag-recharge
+npm i @callbag-recharge/callbag-recharge
 ```
 
 ---
@@ -518,7 +518,7 @@ AI tools see the full menu in `llms.txt`, pick the right operator, generate corr
 ### Decision: One repo, one npm package, subpath exports
 
 **Why not separate packages:**
-- One `npm install` = one AI recommendation. Split packages = split discoverability.
+- One `npm i @callbag-recharge/callbag-recharge` = one AI recommendation. Split packages = split discoverability.
 - Tree-shaking already works via subpath exports — no bundle cost for unused code.
 - Nanostores does exactly this successfully.
 - Multiple packages = version alignment hell.
@@ -581,7 +581,7 @@ The world is entering an era where everything flows:
 - Real-time data arrives from WebSockets, Kafka, Redis, gRPC — all need the same operators
 - Frontends, backends, and edge runtimes all need reactive state — not three different solutions
 
-callbag-recharge is the glue. One `npm install`. Six primitives. Sixty operators. Connect anything to the graph. Take what you need from the flow. What you observe is always correct (diamond-safe) and always visible (inspectable).
+callbag-recharge is the glue. One `npm i @callbag-recharge/callbag-recharge`. Six primitives. Sixty operators. Connect anything to the graph. Take what you need from the flow. What you observe is always correct (diamond-safe) and always visible (inspectable).
 
 **"State that flows."**
 

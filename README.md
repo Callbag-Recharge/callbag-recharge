@@ -247,7 +247,7 @@ store.source(0, (type, data) => {
 ## Install
 
 ```bash
-npm install callbag-recharge
+npm i @callbag-recharge/callbag-recharge
 ```
 
 ---

@@ -24,7 +24,7 @@ Both orchestrate data pipelines with DAG semantics. callbag-recharge is lightwei
 
 ## The Key Difference
 
-Airflow is a platform — you deploy it, manage it, and build on it. callbag-recharge is a library — `npm install` and compose pipelines in your existing TypeScript codebase.
+Airflow is a platform — you deploy it, manage it, and build on it. callbag-recharge is a library — `npm i @callbag-recharge/callbag-recharge` and compose pipelines in your existing TypeScript codebase.
 
 ```ts
 // Airflow (Python)

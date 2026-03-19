@@ -104,7 +104,7 @@ const primitives = [
             GitHub
           </a>
           <div class="install-cmd">
-            <code>npm install callbag-recharge</code>
+            <code>npm i @callbag-recharge/callbag-recharge</code>
           </div>
         </div>
       </div>
@@ -272,7 +272,7 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
     <section class="cta-section">
       <div class="section-inner">
         <h2 class="cta-heading">Start flowing.</h2>
-        <p class="cta-sub">npm install callbag-recharge</p>
+        <p class="cta-sub">npm i @callbag-recharge/callbag-recharge</p>
         <div class="cta-actions">
           <a href="/callbag-recharge/getting-started" class="btn btn-primary btn-lg">
             Read the Guide

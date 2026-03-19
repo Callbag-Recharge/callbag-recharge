@@ -7,7 +7,7 @@ outline: [2, 3]
 ## Installation
 
 ```bash
-npm install callbag-recharge
+npm i @callbag-recharge/callbag-recharge
 ```
 
 ## Your First State
