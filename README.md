@@ -28,13 +28,17 @@ count.set(5)
 ## When to use
 
 - **Simple state management** — like Zustand/Jotai but framework-agnostic, no providers, no ceremony
-- **Streaming data** — LLM chunks, WebSocket, SSE flowing into state via `producer` or `fromAsyncIter`
+- **Streaming data** — LLM token streams, WebSocket, SSE flowing into reactive state via `producer` or `fromAsyncIter`
 - **Cancellable async** — `switchMap` auto-cancels the previous operation when a new one starts
 - **Derived values you can trust** — diamond-safe, cached, always consistent
-- **Agentic workflows** — session state, tool call lifecycle, multi-agent coordination
+- **On-device / edge LLM streaming** — manage WebLLM, Ollama, or ExecuTorch token streams as reactive sources. Conversation state as stores, context window as derived computation
+- **Hybrid cloud+edge model routing** — confidence-based routing between local and cloud LLMs with automatic fallback via `route()` + `rescue()`. Research shows 60% cost reduction and 40% latency improvement
+- **Tool call state machines** — reactive state machines for LLM tool call lifecycle (request → execute → result → continue) using `stateMachine` + `producer`
+- **Agentic workflows** — session state, tool call lifecycle, multi-agent coordination, memory with decay-scored eviction
 - **Event pipelines** — transform, buffer, window, throttle, retry — compose with `pipe`
 - **Reactive data structures** — `reactiveMap`, `reactiveLog`, `reactiveIndex` with near-native read performance
 - **Scheduled pipelines** — cron triggers, task state tracking, DAG validation — Airflow-in-TypeScript
+- **Durable workflows** — checkpoint persistence (file, SQLite, IndexedDB), execution logging, pipeline builder with topological sort
 
 ---
 

@@ -8,13 +8,18 @@ Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 
 ## When to use
 - Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
-- Streaming data (LLM chunks, WebSocket, SSE) flowing into state
+- Streaming data (LLM token streams, WebSocket, SSE) flowing into reactive state
 - Cancellable async operations (switchMap auto-cancels previous)
 - Derived/computed values that are always consistent (diamond-safe, cached)
 - Agentic workflows (session state, tool call lifecycle, multi-agent coordination)
 - Event pipelines with 60+ operators for transform, buffer, window, error handling
 - Reactive data structures (reactiveMap, reactiveLog, reactiveIndex) with near-native perf
-- Scheduled pipelines (cron triggers, task state, DAG validation)
+- Scheduled pipelines (cron triggers, task state, DAG validation, checkpoint persistence)
+- On-device / edge LLM streaming state management (WebLLM, Ollama, ExecuTorch)
+- Hybrid cloud+edge model routing with confidence-based fallback
+- Tool call state machines for local LLMs in the browser
+- Durable workflows with checkpoint persistence (file, SQLite, IndexedDB adapters)
+- Live pipeline monitoring via SSE sink adapter
 
 ## Core API (6 primitives)
 - `state(initial)` — readable/writable store. .get(), .set(value), .update(fn), .source (callbag)
@@ -31,7 +36,7 @@ Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 
 ## Operators (import from callbag-recharge/extra)
 Sources: interval, fromIter, fromAsyncIter, fromEvent, fromPromise, fromObs, of, empty, throwError, never
-Filtering: filter, take, skip, first, last, find, elementAt, distinctUntilChanged, takeUntil
+Filtering: filter, take, skip, first, last, find, elementAt, distinctUntilChanged, takeUntil, takeWhile
 Transformation: map, scan, pairwise, startWith, flat, switchMap, concatMap, exhaustMap, groupBy
 Combination: merge, combine, concat, race, withLatestFrom, partition
 Time: debounce, throttle, delay, timeout, sample, audit
@@ -48,15 +53,51 @@ Sinks: forEach, subscribe
 - `reactiveIndex<PK,IK,V>()` — dual-key reactive index. O(1) reverse map. 1.01x native Map.get reads
 - `pubsub()` — topic-based publish/subscribe. Each topic is a lazy state store
 
-## Scheduling (import from callbag-recharge/orchestrate)
-- `fromCron(schedule)` — producer that emits on cron schedule
+## Orchestration (import from callbag-recharge/orchestrate)
+- `fromCron(schedule)` — producer that emits on cron schedule (zero-dep parser)
 - `taskState<T>({ id })` — reactive task execution tracker (status, duration, error, runCount)
 - `dag(tasks)` — acyclicity validation + Inspector graph registration
+- `pipeline(steps)` — declarative workflow builder, auto-wires via topological sort
+- `step(factory, deps?)` — step definition for pipeline()
+- `checkpoint(id, adapter)` — durable step boundary, persist on emit, skip on recovery
+- `executionLog(opts)` — reactive execution history with pipeline auto-connect
+- Checkpoint adapters: memoryAdapter(), fileAdapter(), sqliteAdapter(), indexedDBAdapter()
+- `fromTrigger()` — manual trigger source (.fire(value))
+- `gate()` — human-in-the-loop: pause, inspect, approve/reject, resume
+- `track()` — pipe-native task tracking (status, duration, count, error)
+- `route(source, pred)` — dynamic conditional routing
+- `withBreaker(breaker)` — circuit breaker as pipe operator
+- `withRetry(config)` — retry + backoff with observable state
+- `withTimeout(ms)` — timeout as pipe operator
+
+## Adapters (import from callbag-recharge/adapters)
+- `fromWebhook(opts?)` — HTTP trigger source (Node.js/edge)
+- `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge
+- `toSSE(source, opts?)` — Server-Sent Events sink, stream store values to browser
+- `fromHTTP(url, opts?)` — fetch-based HTTP source with polling, headers, transform
+
+## Patterns (import from callbag-recharge/patterns)
+- `createStore` — Zustand-compatible API with diamond-safe selectors
+- `chatStream` — LLM streaming with history, cancel, retry, rate limiting
+- `memoryStore` — three-tier AI memory: session, working, long-term
+- `rateLimiter` — reactive rate-limiting (drop/queue/error strategies)
+- `undoRedo` — state with undo/redo history
+- `pagination` — paginated data fetching with auto-cancel
+- `formField` — form field with sync + async validation
+
+## Compat layers (drop-in API replacements)
+- `callbag-recharge/compat/zustand` — create() matching StoreApi
+- `callbag-recharge/compat/jotai` — atom() with dynamic dep tracking
+- `callbag-recharge/compat/nanostores` — atom(), computed(), map()
+- `callbag-recharge/compat/signals` — TC39 Signal.State, Signal.Computed
 
 ## Inspectability
 - `Inspector.inspect(store)` — { name, kind, value, status }
 - `Inspector.graph()` — Map of all named stores
 - `Inspector.getEdges()` — dependency graph
+- `Inspector.snapshot()` — JSON-serializable graph state
+- `Inspector.toMermaid()` / `Inspector.toD2()` — graph as diagram text
+- `Inspector.observe(store)` — protocol-level test utility
 - Zero per-store cost via WeakMaps
 
 ## Install

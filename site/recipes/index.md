@@ -11,6 +11,17 @@ Practical patterns that show how to solve real problems with callbag-recharge. E
 | Recipe | What it shows |
 |--------|--------------|
 | [AI Chat with Streaming](./ai-chat-streaming) | producer + switchMap + scan for streaming LLM responses with auto-cancellation |
+| [Reactive Data Pipeline](./data-pipeline) | fromIter/fromAsyncIter + pipe operators for streaming ETL |
+| [Cron Pipeline (Airflow Alternative)](./cron-pipeline) | fromCron + exhaustMap + retry for scheduled pipelines |
+| [Real-Time Dashboard](./real-time-dashboard) | state + derived + batch for diamond-safe metrics |
+
+## Edge AI & LLM
+
+| Recipe | What it shows |
+|--------|--------------|
+| [On-Device LLM Streaming](./on-device-llm-streaming) | Manage WebLLM/Ollama token streams with auto-cancel and derived metrics |
+| [Hybrid Cloud+Edge Routing](./hybrid-routing) | Confidence-based routing between local and cloud LLMs with fallback |
+| [Tool Calls for Local LLMs](./tool-calls) | Reactive state machine for tool call lifecycle |
 
 ## State Management
 
@@ -18,9 +29,10 @@ Practical patterns that show how to solve real problems with callbag-recharge. E
 |--------|--------------|
 | [createStore (Zustand Migration)](./zustand-migration) | Zustand-compatible API with diamond-safe selectors and push-phase memoization |
 
-## Coming Soon
+## Migration Guides
 
-- **Reactive Data Pipeline** — fromAsyncIter + operators for ETL
-- **Real-time Dashboard** — fromEvent + combine + throttle
-- **Form Validation** — derived + debounce + effect
-- **Cron Pipeline** — fromCron + exhaustMap + retry (Airflow-in-TypeScript)
+| Guide | What it covers |
+|-------|---------------|
+| [From Zustand](./zustand-migration) | Drop-in compat layer + native API migration |
+| [From Jotai](./jotai-migration) | atom() compat + diamond resolution benefits |
+| [From Nanostores](./nanostores-migration) | atom/computed/map compat + per-key reactivity via reactiveMap |

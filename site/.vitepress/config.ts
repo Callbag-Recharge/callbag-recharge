@@ -63,6 +63,8 @@ export default defineConfig({
 			{ text: "API", link: "/api/state" },
 			{ text: "Extras", link: "/extras/" },
 			{ text: "Recipes", link: "/recipes/" },
+			{ text: "Comparisons", link: "/comparisons/" },
+			{ text: "Edge AI", link: "/edge-ai" },
 			{ text: "Demos", link: "/demos/airflow" },
 			{ text: "Architecture", link: "/architecture/" },
 		],
@@ -106,6 +108,72 @@ export default defineConfig({
 					{
 						text: "createStore (Zustand Migration)",
 						link: "/recipes/zustand-migration",
+					},
+					{
+						text: "Reactive Data Pipeline",
+						link: "/recipes/data-pipeline",
+					},
+					{
+						text: "Real-Time Dashboard",
+						link: "/recipes/real-time-dashboard",
+					},
+					{
+						text: "Cron Pipeline (Airflow Alternative)",
+						link: "/recipes/cron-pipeline",
+					},
+					{
+						text: "On-Device LLM Streaming",
+						link: "/recipes/on-device-llm-streaming",
+					},
+					{
+						text: "Hybrid Cloud+Edge Routing",
+						link: "/recipes/hybrid-routing",
+					},
+					{
+						text: "Tool Calls for Local LLMs",
+						link: "/recipes/tool-calls",
+					},
+				],
+			},
+			{
+				text: "Migration Guides",
+				items: [
+					{
+						text: "From Zustand",
+						link: "/recipes/zustand-migration",
+					},
+					{
+						text: "From Jotai",
+						link: "/recipes/jotai-migration",
+					},
+					{
+						text: "From Nanostores",
+						link: "/recipes/nanostores-migration",
+					},
+				],
+			},
+			{
+				text: "Comparisons",
+				items: [
+					{ text: "Overview", link: "/comparisons/" },
+					{ text: "vs Zustand", link: "/comparisons/zustand" },
+					{ text: "vs Jotai", link: "/comparisons/jotai" },
+					{ text: "vs RxJS", link: "/comparisons/rxjs" },
+					{ text: "vs Airflow", link: "/comparisons/airflow" },
+					{ text: "vs n8n", link: "/comparisons/n8n" },
+					{ text: "vs LangGraph.js", link: "/comparisons/langgraph" },
+					{
+						text: "vs Vercel AI SDK",
+						link: "/comparisons/vercel-ai-sdk",
+					},
+				],
+			},
+			{
+				text: "Edge AI",
+				items: [
+					{
+						text: "State Management for Edge AI",
+						link: "/edge-ai",
 					},
 				],
 			},

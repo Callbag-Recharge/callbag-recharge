@@ -15,7 +15,7 @@ import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
-import type { Store, StoreOperator } from "../core/types";
+import type { Store } from "../core/types";
 
 export interface CheckpointAdapter {
 	/** Save a value for the given checkpoint id. May be sync or async. */
@@ -89,8 +89,8 @@ export function checkpoint<A>(
 	id: string,
 	adapter: CheckpointAdapter,
 	opts?: { name?: string },
-): StoreOperator<A, A> {
-	return (input: Store<A>) => {
+): (input: Store<A>) => CheckpointedStore<A> {
+	return (input: Store<A>): CheckpointedStore<A> => {
 		const baseName = opts?.name ?? `checkpoint:${id}`;
 
 		const meta = state<CheckpointMeta>(

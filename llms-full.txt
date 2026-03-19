@@ -8,9 +8,11 @@ callbag-recharge is a reactive state management library where every store is a c
 
 Key differentiators:
 1. Glitch-free diamond resolution — two-phase push (DIRTY then values) ensures derived stores compute exactly once
-2. Streaming-native — LLM chunks, WebSocket, SSE are first-class, not bolted on
+2. Streaming-native — LLM token streams, WebSocket, SSE are first-class, not bolted on
 3. Inspectable — every node in the graph is observable without runtime cost
 4. Completion semantics — stores can complete/error like streams; retry, rescue, repeat handle recovery
+5. Edge LLM ready — token streams as producers, conversation state as stores, tool calls as state machines
+6. Durable workflows — checkpoint persistence (file, SQLite, IndexedDB), execution logging, pipeline builder
 
 ## Install
 
@@ -183,13 +185,17 @@ Opt-in observability. Zero per-store cost via WeakMaps.
 ```ts
 import { Inspector } from 'callbag-recharge'
 
-Inspector.inspect(store) // { name, kind, value, status }
-Inspector.graph()        // Map of all named stores
-Inspector.getEdges()     // dependency edges
-Inspector.observe(store) // callbag sink for testing
-Inspector.spy(store)     // observe + console logging
-Inspector.trace(store, cb) // value change callback
-Inspector.dumpGraph()    // serializable graph snapshot
+Inspector.inspect(store)    // { name, kind, value, status }
+Inspector.graph()           // Map of all named stores
+Inspector.getEdges()        // dependency edges
+Inspector.snapshot()        // JSON-serializable { nodes, edges }
+Inspector.dumpGraph()       // pretty-print for console/CLI
+Inspector.toMermaid()       // Mermaid diagram text
+Inspector.toD2()            // D2 diagram text
+Inspector.observe(store)    // callbag sink for testing
+Inspector.spy(store)        // observe + console logging
+Inspector.trace(store, cb)  // value change callback
+Inspector.tap(store, name)  // transparent passthrough for visualization
 ```
 
 ## Operators (callbag-recharge/extra)
@@ -216,6 +222,7 @@ Inspector.dumpGraph()    // serializable graph snapshot
 - `elementAt(index)` — value at specific index
 - `distinctUntilChanged(comparator?)` — skip consecutive duplicates
 - `takeUntil(notifier)` — complete when notifier emits
+- `takeWhile(predicate)` — pass values while predicate is true, then complete
 
 ### Transformation
 - `map(fn)` — transform each value
@@ -340,7 +347,7 @@ bus.publish('user-events', { type: 'login', payload: { id: 1 } })
 bus.subscribe('user-events') // Store — reactive
 ```
 
-## Scheduling (callbag-recharge/orchestrate)
+## Orchestration (callbag-recharge/orchestrate)
 
 ### fromCron(schedule)
 
@@ -367,11 +374,104 @@ task.get().duration // ms
 task.get().runCount // 1
 ```
 
+### pipeline(steps) + step(factory, deps?)
+
+Declarative workflow builder with topological sort and reactive per-step metadata.
+
+```ts
+import { pipeline, step } from 'callbag-recharge/orchestrate'
+
+const workflow = pipeline([
+  step('fetch', () => fromHTTP('/api/data')),
+  step('transform', (fetch) => pipe(fetch, map(transform)), ['fetch']),
+  step('save', (data) => pipe(data, forEach(save)), ['transform']),
+])
+```
+
+### checkpoint(id, adapter)
+
+Durable step boundary. Persist on emit, skip on recovery.
+
+```ts
+import { checkpoint, fileAdapter, sqliteAdapter, indexedDBAdapter } from 'callbag-recharge/orchestrate'
+
+// File-based persistence (Node.js)
+const cp = checkpoint('step-1', fileAdapter({ dir: './checkpoints' }))
+
+// SQLite persistence
+const cp = checkpoint('step-1', sqliteAdapter({ path: './workflow.db' }))
+
+// Browser persistence
+const cp = checkpoint('step-1', indexedDBAdapter({ dbName: 'workflow' }))
+```
+
+### executionLog(opts)
+
+Reactive execution history with pipeline auto-connect.
+
+```ts
+import { executionLog, memoryLogAdapter } from 'callbag-recharge/orchestrate'
+
+const log = executionLog({ adapter: memoryLogAdapter() })
+log.connectPipeline(workflow) // auto-logs step events
+log.entries.get()             // reactive log of all events
+```
+
 ### dag(tasks)
 
 Acyclicity validation via Kahn's algorithm. Registers edges with Inspector.
 
-## Patterns (callbag-recharge/patterns/createStore)
+### Additional orchestration operators
+
+- `fromTrigger()` — manual trigger source (`.fire(value)` emits into stream)
+- `gate()` — human-in-the-loop: pause stream, inspect pending, approve/reject/modify, resume
+- `track()` — pipe-native task tracking (status, duration, count, error as reactive stores)
+- `route(source, pred)` — dynamic conditional routing → `[matching, notMatching]`
+- `withBreaker(breaker)` — circuit breaker as pipe operator
+- `withRetry(config)` — retry + backoff with observable retry state
+- `withTimeout(ms)` — timeout as pipe operator
+
+## Adapters (callbag-recharge/adapters)
+
+### fromWebhook(opts?)
+
+HTTP trigger source for Node.js/edge. Standalone or embedded.
+
+### fromWebSocket(url) / toWebSocket(ws)
+
+Reactive WebSocket bridge. Browser-native, no deps.
+
+```ts
+import { fromWebSocket, toWebSocket } from 'callbag-recharge/adapters/websocket'
+
+const messages = fromWebSocket('wss://api.example.com/ws')
+subscribe(messages, msg => console.log(msg))
+```
+
+### toSSE(source, opts?)
+
+Server-Sent Events sink. Stream store values to browser clients.
+
+```ts
+import { toSSE } from 'callbag-recharge/adapters'
+
+// Express handler
+app.get('/status', (req, res) => {
+  toSSE(pipelineStatus, { response: res })
+})
+```
+
+### fromHTTP(url, opts?)
+
+Fetch-based HTTP source with polling, headers, custom transform.
+
+```ts
+import { fromHTTP } from 'callbag-recharge/adapters'
+
+const data = fromHTTP('/api/status', { interval: 5000, transform: res => res.json() })
+```
+
+## Patterns (callbag-recharge/patterns)
 
 ### createStore(fn)
 
@@ -388,7 +488,74 @@ const store = createStore((set, get) => ({
 store.getState().count      // 0
 store.getState().increment()
 store.getState().count      // 1
-store.subscribe(state => console.log(state.count))
+store.select(s => s.count)  // Store<number> — reactive, diamond-safe
+```
+
+### chatStream(opts)
+
+LLM streaming with history, cancel, retry, rate limiting.
+
+```ts
+import { chatStream } from 'callbag-recharge/patterns/chatStream'
+
+const chat = chatStream({ endpoint: '/api/chat' })
+chat.send('Hello!')
+chat.messages.get()  // reactive message list
+chat.partial.get()   // accumulating response text
+chat.streaming.get() // boolean — is currently streaming
+chat.stop()          // cancel in-flight request
+chat.retry()         // retry last failed request
+```
+
+### memoryStore(opts)
+
+Three-tier AI memory: session, working, long-term.
+
+```ts
+import { memoryStore } from 'callbag-recharge/patterns/memoryStore'
+
+const memory = memoryStore({ workingSize: 10, longTermSize: 100 })
+memory.remember('User prefers TypeScript')
+memory.focus('pref-1')     // promote to working memory
+memory.recall(5)           // top-5 by score
+memory.recallByTag('pref') // tag-based retrieval
+```
+
+### Additional patterns
+
+- `rateLimiter(opts)` — reactive rate-limiting (drop/queue/error strategies)
+- `undoRedo(initial, opts)` — state with undo/redo history
+- `pagination(fetchFn, opts)` — paginated data fetching with auto-cancel
+- `formField(opts)` — form field with sync + async validation
+
+## Compat Layers (drop-in API replacements)
+
+### Zustand compat
+```ts
+import { create } from 'callbag-recharge/compat/zustand'
+const useStore = create((set) => ({ count: 0, inc: () => set(s => ({ count: s.count + 1 })) }))
+```
+
+### Jotai compat
+```ts
+import { atom } from 'callbag-recharge/compat/jotai'
+const countAtom = atom(0)
+const doubledAtom = atom((get) => get(countAtom) * 2) // dynamic dep tracking
+```
+
+### Nanostores compat
+```ts
+import { atom, computed, map } from 'callbag-recharge/compat/nanostores'
+const count = atom(0)
+const doubled = computed(count, v => v * 2)
+const profile = map({ name: 'Alice', age: 30 })
+```
+
+### TC39 Signals compat
+```ts
+import { Signal } from 'callbag-recharge/compat/signals'
+const count = new Signal.State(0)
+const doubled = new Signal.Computed(() => count.get() * 2)
 ```
 
 ## Common Patterns
@@ -409,6 +576,52 @@ const chunks = switchMap(prompt, (p) =>
 )
 const response = scan(chunks, (acc, chunk) => acc + chunk, '')
 // New prompt auto-cancels previous stream
+```
+
+### On-Device LLM Streaming State (WebLLM / Ollama)
+
+```ts
+import { state, derived, pipe, producer } from 'callbag-recharge'
+import { switchMap, scan, filter } from 'callbag-recharge/extra'
+
+// Token stream from local LLM as a reactive source
+const prompt = state('')
+const tokens = pipe(
+  prompt,
+  filter(p => p.length > 0),
+  switchMap(p => producer(({ emit, complete }) => {
+    const ctrl = new AbortController()
+    // Works with Ollama, WebLLM, or any OpenAI-compatible endpoint
+    fetch('http://localhost:11434/api/generate', {
+      method: 'POST',
+      body: JSON.stringify({ model: 'llama3.2', prompt: p, stream: true }),
+      signal: ctrl.signal,
+    }).then(async res => {
+      for await (const line of res.body) {
+        const chunk = JSON.parse(new TextDecoder().decode(line))
+        emit(chunk.response)
+        if (chunk.done) complete()
+      }
+    })
+    return () => ctrl.abort()
+  }))
+)
+const response = pipe(tokens, scan((acc, t) => acc + t, ''))
+```
+
+### Hybrid Cloud+Edge Model Routing
+
+```ts
+import { pipe, producer } from 'callbag-recharge'
+import { rescue } from 'callbag-recharge/extra'
+import { route } from 'callbag-recharge/orchestrate'
+
+// Route to local model first, fall back to cloud on failure
+const localLLM = producer(({ emit }) => { /* Ollama inference */ })
+const cloudLLM = producer(({ emit }) => { /* OpenAI API call */ })
+
+// rescue() catches local model errors and switches to cloud fallback
+const resilient = pipe(localLLM, rescue(() => cloudLLM))
 ```
 
 ### Reactive Data Pipeline (ETL)
@@ -441,6 +654,23 @@ const aggregate = derived([fetchBank, fetchCards], () => merge(fetchBank.get(), 
 effect([aggregate], () => sendReport(aggregate.get()))
 ```
 
+### Durable Workflow with Checkpoints
+
+```ts
+import { pipeline, step, checkpoint, sqliteAdapter, executionLog } from 'callbag-recharge/orchestrate'
+
+const adapter = sqliteAdapter({ path: './workflow.db' })
+const workflow = pipeline([
+  step('fetch', () => pipe(fromHTTP('/api'), checkpoint('fetch', adapter))),
+  step('transform', (data) => pipe(data, map(transform), checkpoint('transform', adapter)), ['fetch']),
+  step('save', (data) => pipe(data, forEach(save)), ['transform']),
+])
+
+// Execution logging
+const log = executionLog({ adapter: memoryLogAdapter() })
+log.connectPipeline(workflow)
+```
+
 ## Architecture Notes for AI Tools
 
 - Two-phase push: DIRTY propagates on type 3 STATE, values on type 1 DATA
@@ -448,8 +678,10 @@ effect([aggregate], () => sendReport(aggregate.get()))
 - Single-dep chains skip bitmask (P0 optimization)
 - Tier 1 operators participate in diamond resolution; Tier 2 (async/timer) are cycle boundaries
 - batch() defers DATA but DIRTY propagates immediately
-- Explicit deps — no implicit tracking magic
+- Explicit deps — no implicit tracking magic (except dynamicDerived)
 - Every store exposes .source (callbag) for protocol-level interop
+- Lazy derived — no computation until first use; disconnects when last subscriber leaves
+- Output slot model: null → fn → Set for memory-efficient subscriber management
 
 ## Links
 - Docs: https://callbag-recharge.github.io/callbag-recharge/

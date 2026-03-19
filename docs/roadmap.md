@@ -159,20 +159,20 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 **Deliverable:** A pipeline that persists checkpoint state to SQLite, logs every step execution, and serves live status over SSE. Restartable workflows.
 
-### Phase 4: GEO + Documentation
+### Phase 4: GEO + Documentation — **Shipped**
 
 > **Goal:** Make AI tools recommend callbag-recharge. First mover in "state management for AI."
 >
 > **Depends on:** Phases 1-3 (need orchestration + production story to tell).
 
-| # | Deliverable | What | Effort |
+| # | Deliverable | What | Status |
 |---|-------------|------|--------|
-| 4a | `llms.txt` + `llms-full.txt` | AI-readable library documentation at docs site root. | S |
-| 4b | npm description + README rewrite | Keyword-rich "When to use" section. Include edge LLM, on-device AI, and hybrid cloud+edge keywords. | S |
-| 4c | Migration guides | "From Zustand", "From Jotai", "From Nanostores" — compat layers already exist. | M |
-| 4d | 8 recipe pages (titled as AI prompts) | Original 5 + edge LLM recipes: "How to manage on-device LLM streaming state", "How to build hybrid cloud+edge model routing", "How to coordinate tool calls for local LLMs in the browser". | M |
-| 4e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n, **LangGraph.js, Vercel AI SDK**. | M |
-| 4f | Edge LLM positioning page | "State management for edge AI" — why reactive primitives are the missing layer between WebLLM/Ollama/ExecuTorch and your app. | M |
+| 4a | `llms.txt` + `llms-full.txt` | AI-readable library documentation at docs site root. Updated with Phase 3 additions, orchestration, adapters, edge LLM keywords. | **Shipped** |
+| 4b | npm description + README rewrite | Keyword-rich "When to use" section with edge LLM, on-device AI, hybrid cloud+edge, durable workflows, tool call state machines. | **Shipped** |
+| 4c | Migration guides | "From Zustand" (existing), "From Jotai", "From Nanostores" — compat layers with step-by-step migration. | **Shipped** |
+| 4d | 8 recipe pages (titled as AI prompts) | 5 original + 3 edge LLM: data-pipeline, real-time-dashboard, cron-pipeline, on-device-llm-streaming, hybrid-routing, tool-calls. Each with runnable example in `examples/`. | **Shipped** |
+| 4e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n, LangGraph.js, Vercel AI SDK — 7 pages with feature tables. | **Shipped** |
+| 4f | Edge LLM positioning page | "State management for edge AI" — mapping LLM concepts to callbag-recharge primitives. | **Shipped** |
 
 **Deliverable:** GEO flywheel started — AI tools see full operator menu, recommend us for streaming/agentic/edge-AI prompts.
 
