@@ -1,5 +1,4 @@
-import { operator } from "../core/operator";
-import { DATA, END, STATE } from "../core/protocol";
+import { derived } from "../core/derived";
 import type { Store, StoreOperator, StoreOptions } from "../core/types";
 
 /**
@@ -14,34 +13,16 @@ import type { Store, StoreOperator, StoreOptions } from "../core/types";
  */
 export function startWith<A>(initial: A, opts?: StoreOptions): StoreOperator<A | undefined, A> {
 	return (input: Store<A | undefined>) => {
-		return operator<A>(
-			[input] as Store<unknown>[],
-			({ emit, signal, complete, error }) => {
-				return (_dep, type, data) => {
-					if (type === STATE) {
-						signal(data);
-					}
-					if (type === DATA) {
-						const v = data as A | undefined;
-						emit(v !== undefined ? v : initial);
-					}
-					if (type === END) {
-						if (data !== undefined) error(data);
-						else complete();
-					}
-				};
+		return derived<A>(
+			[input as Store<unknown>],
+			() => {
+				const v = input.get();
+				return v !== undefined ? v : initial;
 			},
 			{
 				kind: "startWith",
 				name: opts?.name ?? "startWith",
-				initial: (() => {
-					const v = input.get();
-					return v !== undefined ? v : initial;
-				})(),
-				getter: () => {
-					const v = input.get();
-					return v !== undefined ? v : initial;
-				},
+				equals: opts?.equals,
 			},
 		);
 	};

@@ -6,6 +6,7 @@ import { concat } from "../../extra/concat";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
 import { delay } from "../../extra/delay";
+import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
 import { exhaustMap } from "../../extra/exhaustMap";
 import { filter } from "../../extra/filter";
 import { flat } from "../../extra/flat";
@@ -609,6 +610,69 @@ describe("combine: error from any source", () => {
 
 		expect(obs.ended).toBe(true);
 		expect(obs.endError).toBe("combine-err");
+	});
+
+	it("combine terminates when any source completes (fail-fast)", () => {
+		const a = errorableProducer(1);
+		const b = state(2);
+		const c = combine(a.store, b);
+
+		const obs = Inspector.observe(c);
+		subscribe(c, () => {});
+
+		a.complete();
+
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBeUndefined();
+	});
+
+	it("combine emits last tuple before completion", () => {
+		const a = errorableProducer(1);
+		const b = state(2);
+		const c = combine(a.store, b);
+
+		const values: unknown[] = [];
+		subscribe(c, (v) => values.push(v));
+
+		b.set(10);
+		expect(values).toEqual([[1, 10]]);
+
+		a.complete();
+		// No further emissions after completion
+		b.set(20);
+		expect(values).toEqual([[1, 10]]);
+	});
+});
+
+// ===========================================================================
+// 8b. distinctUntilChanged: completion/error forwarding
+// ===========================================================================
+
+describe("distinctUntilChanged: completion/error forwarding", () => {
+	it("forwards error from upstream", () => {
+		const s = errorableProducer(1);
+		const d = pipe(s.store, distinctUntilChanged());
+
+		const obs = Inspector.observe(d);
+		subscribe(d, () => {});
+
+		s.error("duc-err");
+
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBe("duc-err");
+	});
+
+	it("forwards completion from upstream", () => {
+		const s = errorableProducer(1);
+		const d = pipe(s.store, distinctUntilChanged());
+
+		const obs = Inspector.observe(d);
+		subscribe(d, () => {});
+
+		s.complete();
+
+		expect(obs.ended).toBe(true);
+		expect(obs.endError).toBeUndefined();
 	});
 });
 

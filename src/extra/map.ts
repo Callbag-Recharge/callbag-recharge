@@ -1,5 +1,4 @@
-import { operator } from "../core/operator";
-import { DATA, END, RESOLVED, STATE } from "../core/protocol";
+import { derived } from "../core/derived";
 import type { Store, StoreOperator, StoreOptions } from "../core/types";
 
 /**
@@ -61,39 +60,11 @@ import type { Store, StoreOperator, StoreOptions } from "../core/types";
  * @category extra
  */
 export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperator<A, B> {
-	return (input) => {
-		const eqFn = opts?.equals;
-		const initialValue = fn(input.get());
-		return operator<B>(
-			[input] as Store<unknown>[],
-			({ emit, signal, complete, error }) => {
-				let prev: B = initialValue;
-
-				return (_dep, type, data) => {
-					if (type === STATE) {
-						signal(data);
-					}
-					if (type === DATA) {
-						const mapped = fn(data as A);
-						if (eqFn?.(prev, mapped)) {
-							signal(RESOLVED);
-							return;
-						}
-						prev = mapped;
-						emit(mapped);
-					}
-					if (type === END) {
-						if (data !== undefined) error(data);
-						else complete();
-					}
-				};
-			},
-			{
-				kind: "map",
-				name: opts?.name ?? "map",
-				initial: initialValue,
-				getter: () => fn(input.get()),
-			},
-		);
+	return (input: Store<A>) => {
+		return derived<B>([input as Store<unknown>], () => fn(input.get()), {
+			kind: "map",
+			name: opts?.name ?? "map",
+			equals: opts?.equals,
+		});
 	};
 }

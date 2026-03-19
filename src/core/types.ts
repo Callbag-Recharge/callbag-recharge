@@ -29,6 +29,8 @@ export interface ProducerStore<T> extends Store<T | undefined> {
 export interface StoreOptions<T = unknown> {
 	name?: string;
 	equals?: (a: T, b: T) => boolean;
+	/** Inspector kind override (default: "derived" for derived nodes). */
+	kind?: string;
 }
 
 // ---------------------------------------------------------------------------
