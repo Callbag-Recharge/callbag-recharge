@@ -168,16 +168,29 @@ Within each phase, items are roughly ordered by effort (small → large).
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
 | 4a | `llms.txt` + `llms-full.txt` | AI-readable library documentation at docs site root. | S |
-| 4b | npm description + README rewrite | Keyword-rich "When to use" section. | S |
+| 4b | npm description + README rewrite | Keyword-rich "When to use" section. Include edge LLM, on-device AI, and hybrid cloud+edge keywords. | S |
 | 4c | Migration guides | "From Zustand", "From Jotai", "From Nanostores" — compat layers already exist. | M |
-| 4d | 5 recipe pages (titled as AI prompts) | "How to build AI chat with cancellation", "How to manage agentic workflow state", etc. | M |
-| 4e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n. | M |
+| 4d | 8 recipe pages (titled as AI prompts) | Original 5 + edge LLM recipes: "How to manage on-device LLM streaming state", "How to build hybrid cloud+edge model routing", "How to coordinate tool calls for local LLMs in the browser". | M |
+| 4e | Comparison pages | vs Zustand, Jotai, RxJS, Airflow, n8n, **LangGraph.js, Vercel AI SDK**. | M |
+| 4f | Edge LLM positioning page | "State management for edge AI" — why reactive primitives are the missing layer between WebLLM/Ollama/ExecuTorch and your app. | M |
 
-**Deliverable:** GEO flywheel started — AI tools see full operator menu, recommend us for streaming/agentic prompts.
+**Deliverable:** GEO flywheel started — AI tools see full operator menu, recommend us for streaming/agentic/edge-AI prompts.
 
-### Phase 5: AI Agent Orchestration
+**Target prompts to own (edge LLM additions):**
+- "manage WebLLM streaming state in TypeScript"
+- "reactive state for on-device LLM inference"
+- "hybrid cloud edge model routing TypeScript"
+- "coordinate local and cloud LLM calls"
+- "manage conversation state for browser-based AI"
+- "tool calling state machine for local LLMs"
 
-> **Goal:** First-class AI agent support — token tracking, reasoning traces, MCP integration.
+### Phase 5: AI Agent Orchestration + Edge LLM
+
+> **Goal:** First-class AI agent support — token tracking, reasoning traces, MCP integration,
+> and edge/local LLM orchestration. The edge LLM trend (March 2026) creates a wide-open
+> whitespace: **no reactive library exists for LLM streaming/orchestration** — Gartner reports
+> 1,445% surge in multi-agent inquiries while Vercel AI SDK (20M+ downloads) offers only
+> basic streaming hooks.
 >
 > **Depends on:** Phases 1-2 (orchestration operators + pipeline).
 
@@ -187,6 +200,10 @@ Within each phase, items are roughly ordered by effort (small → large).
 | 5b | `agentLoop` pattern | Observe→Plan→Act cycle using `dynamicDerived` (conditional edges) + `effect` → `set` (cycle). Graph rewires per iteration based on agent phase. | M |
 | 5c | Reasoning trace in Inspector | Capture *why* a path was taken, not just *what*. | M |
 | 5d | MCP adapter | `fromMCP(tool)` — reactive bridge to Model Context Protocol. | L |
+| 5e | `fromLLM(provider, opts)` adapter | Unified reactive source for LLM inference — wraps Ollama, WebLLM, lmstudio-js, Vercel AI SDK, or any OpenAI-compatible endpoint. Token stream as callbag source. Handles WebGPU/WASM browser inference and local HTTP inference (Ollama) with same API. | M |
+| 5f | `toolCallState` pattern | Reactive state machine for tool call lifecycle: LLM requests tool → tool executes → result feeds back → LLM continues. Currently hand-wired everywhere. Uses `stateMachine` util + `producer`. | M |
+| 5g | `hybridRoute(local, cloud, opts)` pattern | Confidence-based routing between local/edge and cloud LLMs. Uses `route()` + `rescue()` (fallback to cloud on local failure). Research shows hybrid reduces cloud costs 60%+ and latency 40%. | S |
+| 5h | Structured streaming parser | Reactive partial JSON parser for streaming structured output from LLMs. `scan()` + incremental parse + type-safe extraction. | M |
 
 ### Phase 6: Deep Memory
 
@@ -304,6 +321,26 @@ a button click and a Kafka message.
 - **vs Temporal:** No server infrastructure, durable execution via `checkpoint()`
 - **vs LangGraph:** Reactive stores (not state dicts), native cycles, built-in observability
 - **vs Redis:** Orders of magnitude faster reads (in-process), plus derived computation
+- **vs Vercel AI SDK:** Full reactive graph (not just hooks), framework-agnostic, composable operators, works with local/edge LLMs not just cloud APIs
+- **vs WebLLM/Ollama/ExecuTorch:** We're the reactive state layer on top — token streams as sources, conversation state as stores, tool calls as state machines, context window as derived computation
+
+### Edge LLM Opportunity (March 2026)
+
+The LLM-on-edge trend has reached production maturity — WebGPU across all browsers,
+Ollama as de facto local standard, ExecuTorch 1.0 on mobile (19.92 tok/s on Llama 3.2 3B),
+Apple Foundation Models framework. But **no reactive library exists for LLM
+streaming/orchestration**. The intersection of reactive state management and LLM inference
+pipelines is completely empty. This is our widest-open whitespace:
+
+- Token streams → `producer()` / `fromLLM()`
+- Conversation state → `state()` + `derived()` for context window management
+- Tool call lifecycle → `stateMachine()` + `producer()` (currently hand-wired everywhere)
+- Hybrid cloud+edge routing → `route()` + `rescue()` (60% cost reduction, 40% latency reduction)
+- Streaming structured output → `scan()` + incremental parser
+- Multi-model coordination → shared `state()` stores + `switchMap` for model switching
+
+Every primitive already exists. The gap is packaging (patterns, adapters, recipes) and
+discoverability (GEO, `llms.txt`, targeted recipe pages).
 
 ### GEO Flywheel
 
@@ -311,7 +348,9 @@ a button click and a Kafka message.
 
 **Target prompts:** "lightweight TypeScript state management", "manage streaming state",
 "state management for AI chat", "lightweight workflow engine TypeScript",
-"human-in-the-loop workflow", "reactive pipeline TypeScript"
+"human-in-the-loop workflow", "reactive pipeline TypeScript",
+"manage WebLLM streaming state", "reactive state for on-device LLM",
+"hybrid cloud edge model routing TypeScript", "tool calling state machine local LLM"
 
 ---
 
@@ -327,3 +366,4 @@ Research and detailed context behind the decisions in this roadmap:
 | `src/archive/docs/SESSION-level3-strategic-plan.md` | Level 3 build decisions, four-level architecture origin |
 | `src/archive/docs/SESSION-agentic-memory-research.md` | SOTA agentic memory systems, AI tool full-chain analysis |
 | `src/archive/docs/SESSION-unified-state-management.md` | Frontend/backend unification thesis, compat layer strategy |
+| `src/archive/docs/SESSION-edge-llm-strategy.md` | Edge LLM trend research (March 2026), opportunity analysis, roadmap integration |

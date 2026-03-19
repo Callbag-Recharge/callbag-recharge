@@ -216,6 +216,17 @@ Implemented dual error semantics for derived computation functions: push path ca
 
 **Outcome:** 50% dispatch reduction for single-dep unbatched paths. `cached()` extra with factory + pipe forms. All 1316 tests passing.
 
+### Session edge-llm-strategy (March 19) — Edge LLM Trend Research & Opportunity Analysis
+**Topic:** How the LLM-on-edge trend affects callbag-recharge and opportunities for positioning
+
+Research across edge LLM landscape (Ollama, WebLLM, ExecuTorch, Apple Foundation Models, React Native ExecuTorch), TypeScript LLM SDKs (Vercel AI SDK 20M+ downloads, LangGraph.js, LlamaIndex.TS), and developer pain points.
+
+**Key insight:** Reactive LLM state management is the widest-open whitespace in the ecosystem — zero existing solutions. Every callbag-recharge primitive maps directly to an edge LLM need. The gap is packaging (patterns, adapters) and discoverability (GEO), not primitives.
+
+**Rejected:** Build own inference runtime; React-specific hooks; full LLM orchestration framework; target only browser inference.
+
+**Outcome:** Roadmap updated with Phase 5e-h (fromLLM adapter, toolCallState pattern, hybridRoute pattern, structured streaming parser), Phase 4 expanded with edge LLM GEO targets, positioning vs Vercel AI SDK and edge inference runtimes, Edge LLM Opportunity section in Strategic Context.
+
 ### Session orchestration-strategy (March 18–19) — Reactive Workflow Engine Strategy → Fully Shipped
 **Topic:** Research user pain points across n8n, Airflow, Jenkins, Dify, Coze, LangGraph, CrewAI, Temporal, Inngest — design and implement reactive orchestration primitives
 
@@ -297,4 +308,4 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session orchestration-strategy (Phase 1+2 shipped)
+**Archive Status:** Complete through Session edge-llm-strategy (March 19, 2026)
