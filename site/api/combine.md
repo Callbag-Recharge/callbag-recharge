@@ -35,6 +35,7 @@ c.get(); // [1, 2]
 ## Options / Behavior Details
 
 - **New array:** Each recompute uses a fresh tuple reference.
+- **Fail-fast:** Terminates when any source ends (error or completion).
 
 ## See Also
 

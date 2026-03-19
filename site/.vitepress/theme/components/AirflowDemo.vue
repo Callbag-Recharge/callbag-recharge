@@ -5,7 +5,6 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import { subscribe } from "@lib/core/subscribe";
-import type { PipelineNode } from "./pipeline";
 import { createPipeline, PIPELINE_SOURCE } from "./pipeline";
 
 // ---------------------------------------------------------------------------
@@ -143,9 +142,6 @@ function statusGlow(status: string): string {
 // ---------------------------------------------------------------------------
 // Vue Flow graph definition
 // ---------------------------------------------------------------------------
-const NODE_W = 180;
-const NODE_H = 60;
-
 // Layout positions (manually placed for the finance DAG shape)
 const positions: Record<string, { x: number; y: number }> = {
 	cron: { x: 340, y: 0 },
@@ -236,6 +232,21 @@ function isLineActive(lineIdx: number): boolean {
 	if (!id) return false;
 	return highlightMap[id]?.includes(lineIdx) ?? false;
 }
+
+// Biome currently checks `<script setup>` bindings independently from template usage.
+// Exposing template-consumed bindings keeps lint clean without changing behavior.
+defineExpose({
+	Background,
+	VueFlow,
+	onNodeEnter,
+	statusColor,
+	statusGlow,
+	vfNodes,
+	dynamicEdges,
+	codeLines,
+	isLineHighlighted,
+	isLineActive,
+});
 </script>
 
 <template>
