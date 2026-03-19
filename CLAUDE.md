@@ -20,12 +20,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 callbag-recharge is a reactive state management library where **every store is a callbag source**. The callbag protocol (START=0, DATA=1, END=2) is the internal wiring; users interact through a simple `Store` interface (`get()`, `set()`, `source()`).
 
-### Core primitives (src/core/ — 11 files)
+### Core primitives (src/core/ — 12 files)
 
 - **`producer(fn?, opts?)`** — general-purpose source primitive. Lazy start (on first sink), auto-cleanup (on last sink disconnect). `autoDirty` (default true) sends DIRTY before each value. Options: `initial` (baseline value), `equals` (emit guard), `resetOnTeardown` (reset to initial on stop), `getter` (custom get()), `resubscribable` (allow re-subscription after error/complete — enables retry/rescue/repeat). Actions: `emit`, `signal`, `complete`, `error`.
 - **`state(initial)`** — thin wrapper over `producer()`. `set()` inlines emit logic (fast path — skips bound method call). `equals` defaults to `Object.is`. `update(fn)` is sugar over `set`.
-- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. **Fully lazy** — no computation or connection at construction. `get()` pull-computes from deps when disconnected (always fresh, no connection established). `source()` subscription triggers connection to deps; when all subscribers leave, derived disconnects from upstream. Single-dep nodes skip bitmask (P0 optimization). `derived.from(dep, opts?)` creates an identity-mode derived that skips `fn()` on recompute.
-- **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators.
+- **`derived(deps, fn)`** — computed store with explicit deps array. Uses dirty-dep counting for diamond resolution. Caches values; `equals` option enables push-phase memoization via RESOLVED signal. **Fully lazy** — no computation or connection at construction. `get()` pull-computes from deps when disconnected (always fresh, no connection established); throws stored error if ERRORED. `source()` subscription triggers connection to deps; when all subscribers leave, derived disconnects from upstream. Single-dep nodes skip bitmask (P0 optimization). `derived.from(dep, opts?)` creates an identity-mode derived that skips `fn()` on recompute. **Error handling (D5):** `_recompute()` and `_lazyConnect()` catch fn errors → send END(error) to subscribers. Late subscribers to errored derived receive END(error). Multi-sink END dispatch is exception-safe (one sink throwing doesn't block others).
+- **`dynamicDerived(fn)`** — computed store with dynamic dependency tracking. Like `derived()` but deps are discovered at runtime via a tracking `get` function and can change between recomputations. Tier 1: participates in diamond resolution. Rewires upstream connections when deps change via `_maybeRewire()`. Same lifecycle as derived: fully lazy, disconnect-on-unsub, pull-compute when disconnected. Re-entrancy guard (`D_RECOMPUTING`) prevents signal cycles during rewire. Same D5 error handling as derived.
+- **`operator(deps, init, opts?)`** — general-purpose transform primitive. Receives all signal types from upstream deps. Handler function `(depIndex, type, data) => void` decides what to forward downstream. Building block for tier 1 operators. Stores error data (`_errorData`) for late subscriber propagation. Multi-sink END dispatch is exception-safe.
 - **`effect(deps, fn)`** — side-effect runner with explicit deps array (`EffectImpl` class). Connects to deps once on creation (static deps). Tracks dirty deps via type 3 signals; runs `fn()` inline when all deps resolve. Returns a dispose function.
 
 ### Key design patterns (output slot + chain model)
@@ -42,7 +43,8 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 - **SINGLE_DEP signaling:** Single-dep subscribers send `talkback(STATE, SINGLE_DEP)` to upstream sources, setting `P_SKIP_DIRTY` flag. Unbatched `emit()`/`set()` skips DIRTY dispatch (DATA follows synchronously). `_singleDepCount` tracks single-dep subscribers for MULTI→SINGLE restoration. Cleared on complete/error/full disconnect.
 - **Producer as universal base:** All sources are built on `producer()`. State is a thin wrapper. Tier 2 extras use producer options (`initial`, `equals`, `resetOnTeardown`, `getter`, `error()`) to avoid manual implementations. D3 higher-order operators (`switchMap`, `concatMap`, `exhaustMap`, `flat`) accept an optional `{ initial: B }` option that narrows the return type from `B | undefined` to `B`.
 - **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
-- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. Callbag protocol is the sole connection mechanism — no implicit tracking.
+- **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. `dynamicDerived` discovers deps at runtime via tracking `get` function. Callbag protocol is the sole connection mechanism — no implicit tracking.
+- **Error handling (D5):** Derived/dynamicDerived fn errors are caught via try/catch (zero V8 overhead on happy path). Push path (`_recompute`/`_lazyConnect`): catches error → sends END(error) via callbag protocol. Pull path (`get()` disconnected): re-throws to caller. `get()` on ERRORED node throws stored error. Error stored in `_cachedValue` (reuses existing field) for late subscriber propagation via `source()`. Multi-sink END dispatch is exception-safe (try/catch per sink). Operator stores error in `_errorData` field for late subscriber propagation.
 - **Inspector:** Static class for opt-in observability via WeakMaps. Zero intrusion into primitives — no hooks in hot paths. Read-only metadata: `inspect()`, `graph()`, `getEdges()`, `dumpGraph()`, `snapshot()`. Callbag sinks: `observe()` (protocol-level test utility), `spy()` (observe + console logging), `trace()` (value change callback). Graph wrapper: `tap()` (transparent passthrough node for visualization). See `docs/test-guidance.md` for usage patterns.
 
 ### Extra modules (src/extra/ — 59 operators, 61 files)
@@ -112,7 +114,7 @@ Pure strategies with zero reactive deps (except `reactiveEviction`):
 
 ```
 src/
-├── core/          ← 5 primitives + protocol + inspector + pipe + types
+├── core/          ← 6 primitives + protocol + inspector + pipe + types
 ├── extra/         ← 58 operators, sources, sinks (tree-shakeable)
 ├── utils/         ← pure strategies (backoff, eviction)
 ├── data/          ← reactive data structures (map, log, index, pubsub)

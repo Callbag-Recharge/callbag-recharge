@@ -1,5 +1,5 @@
-import { defineConfig } from "vitepress";
 import { resolve } from "node:path";
+import { defineConfig } from "vitepress";
 
 const root = resolve(__dirname, "../..");
 
@@ -111,9 +111,7 @@ export default defineConfig({
 			},
 			{
 				text: "Demos",
-				items: [
-					{ text: "Airflow in TypeScript", link: "/demos/airflow" },
-				],
+				items: [{ text: "Airflow in TypeScript", link: "/demos/airflow" }],
 			},
 			{
 				text: "Architecture",

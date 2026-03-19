@@ -3,6 +3,8 @@
 // ---------------------------------------------------------------------------
 
 export { derived } from "./core/derived";
+export type { TrackingFn } from "./core/dynamicDerived";
+export { dynamicDerived } from "./core/dynamicDerived";
 export { effect } from "./core/effect";
 export type { ObserveResult } from "./core/inspector";
 // Observability

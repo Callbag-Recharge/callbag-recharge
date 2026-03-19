@@ -1,12 +1,12 @@
 <script setup lang="ts">
-import { ref, reactive, onMounted, onUnmounted, computed } from "vue";
-import { VueFlow, Position } from "@vue-flow/core";
 import { Background } from "@vue-flow/background";
+import { Position, VueFlow } from "@vue-flow/core";
+import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
-import { createPipeline, PIPELINE_SOURCE } from "./pipeline";
-import type { PipelineNode } from "./pipeline";
 import { subscribe } from "@lib/core/subscribe";
+import type { PipelineNode } from "./pipeline";
+import { createPipeline, PIPELINE_SOURCE } from "./pipeline";
 
 // ---------------------------------------------------------------------------
 // Pipeline instance
@@ -45,7 +45,7 @@ const popoverPos = ref<{ x: number; y: number; above: boolean }>({
 
 function onNodeEnter(id: string, event: MouseEvent) {
 	hoveredNode.value = id;
-	const nodeEl = (event.currentTarget as HTMLElement);
+	const nodeEl = event.currentTarget as HTMLElement;
 	const panelEl = graphPanelRef.value;
 	if (!nodeEl || !panelEl) return;
 
@@ -179,8 +179,7 @@ const dynamicEdges = computed(() =>
 	vfEdges.map((e) => {
 		const sourceStatus = nodeStates[e.source]?.status ?? "idle";
 		const isHoveredPath =
-			hoveredNode.value &&
-			(e.source === hoveredNode.value || e.target === hoveredNode.value);
+			hoveredNode.value && (e.source === hoveredNode.value || e.target === hoveredNode.value);
 		const color =
 			sourceStatus === "running"
 				? "#3b82f6"

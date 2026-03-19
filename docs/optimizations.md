@@ -314,7 +314,17 @@ Replaced `state<MemoryNode[]>` (which allocated a new array on every add/remove)
 
 These are not yet implemented but represent concrete opportunities for improvement.
 
-### 1. Compile-time Inspector removal
+### 1. SINGLE_DEP optimization for `dynamicDerived`
+
+**Status:** Not implemented. **Impact:** Medium (throughput for single-dep dynamicDerived nodes). **Priority:** Medium.
+
+`derived()` has a P0 SINGLE_DEP optimization (optimization #18 above) that skips redundant DIRTY dispatch when a single-dep subscriber connects. `dynamicDerived()` always uses the multi-dep bitmask path, even when it has exactly one dep. This means every unbatched `set()` on the sole upstream dep dispatches a redundant DIRTY signal before DATA.
+
+**Complexity:** Dynamic deps can change between recomputations — a node may go from 1 dep to 3 deps or vice versa. The optimization must handle SINGLE_DEP signaling, revocation on rewire to multi-dep, and restoration on rewire back to single-dep. The `_connectOneDep` path needs to detect the single-dep case and send `talkback(STATE, SINGLE_DEP)` conditionally, with proper cleanup when deps are rewired.
+
+**Dispatch savings (when applicable):** Same as derived SINGLE_DEP — 50% reduction for single-dep unbatched paths.
+
+### 2. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
@@ -399,6 +409,7 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Skip DIRTY (SINGLE_DEP signaling) | Built-in | 50% fewer dispatches for single-dep unbatched paths | Effect re-run, simple chains |
 | Reduced bound methods (6→3) | Built-in | ~30 bytes/store saved, fewer constructor allocations | All stores |
 | Streamlined DISCONNECTED↔SINGLE | Built-in | Reuses `_upstreamTalkbacks` array on reconnect | Derived sub/unsub cycles |
+| SINGLE_DEP for dynamicDerived | Potential (medium priority) | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |
 | ~~Pull-compute version check~~ | Not implementing | Version syncing overhead ≈ pull-compute cost; userland `memo()` operator preferred | — |

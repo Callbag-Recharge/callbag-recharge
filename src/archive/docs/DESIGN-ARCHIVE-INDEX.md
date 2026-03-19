@@ -194,6 +194,17 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 
 **Outcome:** Architecture pivot approved. Implementation: lazy switchMap → derived disconnect → other Tier 2 operators → tests. Streaming example drops from 5 operators to 3.
 
+### Session b5498ba2 (March 18) — D5 Error Handling + dynamicDerived Primitive
+**Topic:** Add try/catch error handling to derived/dynamicDerived, introduce dynamicDerived as a new core primitive, adversarial code review + fixes
+
+Implemented dual error semantics for derived computation functions: push path catches errors and sends END(error) to subscribers; pull path re-throws to caller. Introduced `dynamicDerived(fn)` as a new core primitive with runtime dep discovery via tracking `get` function and automatic upstream rewiring. Ran adversarial code review (Blind Hunter + Edge Case Hunter) finding 17 issues — 5 fixed: late subscriber error propagation (P2), exception-safe multi-sink END dispatch (D1), operator late subscriber error (D2), `_recomputeIdentity` D_COMPLETED guard (D3), subscribe.ts get() safety.
+
+**Key insight:** try/catch has zero V8 overhead on happy path (JIT compiles try body normally). Error storage in `_cachedValue` (dual-use field) avoids per-instance allocation for the rare error case. Operator needs separate `_errorData` because `_value` can be reset by `resetOnTeardown`.
+
+**Rejected:** Letting errors bubble up uncontrolled (breaks callbag contract); separate `_error` field on derived (unnecessary allocation); only push-path error handling (inconsistent get() behavior).
+
+**Outcome:** 6 core primitives (producer, state, derived, dynamicDerived, operator, effect). 1574 tests passing. Two behavioral changes: fn errors → END(error) instead of bubbling, get() on ERRORED throws.
+
 ### Session f47ed59e (March 18) — Skip DIRTY, Cached Operator, and Code Review Fixes
 **Topic:** Four optimizations (SINGLE_DEP signaling, reduced bound methods, streamlined transitions, `cached()` operator) + adversarial code review fixes
 
@@ -204,6 +215,15 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 **Rejected:** Drop MULTI→SINGLE restoration (simpler but loses optimization permanently); alternative to `_singleDepCount` (can't query remaining sink after transition).
 
 **Outcome:** 50% dispatch reduction for single-dep unbatched paths. `cached()` extra with factory + pipe forms. All 1316 tests passing.
+
+### Session orchestration-strategy (March 18) — Reactive Workflow Engine Strategy
+**Topic:** Research user pain points across n8n, Airflow, Jenkins, Dify, Coze, LangGraph, CrewAI, Temporal, Inngest — design reactive orchestration primitives
+
+**Key insight:** The airflow demo fell back to imperative async/await because higher-level pipe wiring doesn't exist. The original Level 3 vision (pure reactive pipes) was correct but unimplemented. "workflowTask" config-object pattern rejected as unintuitive — everything should be a composable pipe operator.
+
+**Rejected:** Monolithic `workflowTask({ retries, timeout, breaker })` config; DAG executor as separate engine (derived() IS the executor); static DAGs only (AI era demands dynamic/cyclic graphs).
+
+**Outcome:** 7 new orchestration operators designed: `gate()` (human-in-the-loop), `track()` (pipe-native task tracking), `route()` (conditional branching), `withBreaker()`, `withRetry()`, `withTimeout()`, `fromTrigger()`. `pipeline()` declarative builder. `checkpoint()` for durable execution. All consolidated into `docs/roadmap.md`.
 
 ---
 
@@ -277,4 +297,4 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session f47ed59e
+**Archive Status:** Complete through Session b5498ba2

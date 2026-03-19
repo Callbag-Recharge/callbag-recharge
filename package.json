@@ -138,6 +138,46 @@
 				"default": "./dist/utils/index.cjs"
 			}
 		},
+		"./compat/nanostores": {
+			"import": {
+				"types": "./dist/compat/nanostores/index.d.ts",
+				"default": "./dist/compat/nanostores/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/nanostores/index.d.cts",
+				"default": "./dist/compat/nanostores/index.cjs"
+			}
+		},
+		"./compat/signals": {
+			"import": {
+				"types": "./dist/compat/signals/index.d.ts",
+				"default": "./dist/compat/signals/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/signals/index.d.cts",
+				"default": "./dist/compat/signals/index.cjs"
+			}
+		},
+		"./compat/jotai": {
+			"import": {
+				"types": "./dist/compat/jotai/index.d.ts",
+				"default": "./dist/compat/jotai/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/jotai/index.d.cts",
+				"default": "./dist/compat/jotai/index.cjs"
+			}
+		},
+		"./compat/zustand": {
+			"import": {
+				"types": "./dist/compat/zustand/index.d.ts",
+				"default": "./dist/compat/zustand/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/zustand/index.d.cts",
+				"default": "./dist/compat/zustand/index.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",

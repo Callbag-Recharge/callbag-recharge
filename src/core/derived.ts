@@ -96,7 +96,13 @@ export class DerivedImpl<T> {
 	}
 
 	_recompute(): void {
-		const result = this._fn();
+		let result: T;
+		try {
+			result = this._fn();
+		} catch (err) {
+			this._handleEnd(err);
+			return;
+		}
 		if (this._eqFn && this._flags & D_HAS_CACHED && this._eqFn(this._cachedValue as T, result)) {
 			this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 			this._dispatch(STATE, RESOLVED);
@@ -108,6 +114,7 @@ export class DerivedImpl<T> {
 	}
 
 	_recomputeIdentity(data: T): void {
+		if (this._flags & D_COMPLETED) return;
 		if (this._eqFn && this._flags & D_HAS_CACHED && this._eqFn(this._cachedValue as T, data)) {
 			this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 			this._dispatch(STATE, RESOLVED);
@@ -120,7 +127,12 @@ export class DerivedImpl<T> {
 
 	_lazyConnect(): void {
 		if (this._flags & (D_CONNECTED | D_COMPLETED)) return;
-		this._cachedValue = this._fn();
+		try {
+			this._cachedValue = this._fn();
+		} catch (err) {
+			this._handleEnd(err);
+			return;
+		}
 		this._flags = ((this._flags | D_HAS_CACHED) & ~_STATUS_MASK) | _S_SETTLED;
 		beginDeferredStart();
 		this._connectUpstream();
@@ -285,6 +297,8 @@ export class DerivedImpl<T> {
 		this._flags |= D_COMPLETED;
 		this._flags =
 			(this._flags & ~_STATUS_MASK) | (errorData !== undefined ? _S_ERRORED : _S_COMPLETED);
+		// Store error in _cachedValue so late subscribers receive it via source()
+		if (errorData !== undefined) this._cachedValue = errorData as any;
 		for (const tb of this._upstreamTalkbacks) tb(END);
 		this._upstreamTalkbacks = [];
 		this._flags &= ~D_CONNECTED;
@@ -296,7 +310,11 @@ export class DerivedImpl<T> {
 		if (output) {
 			if (wasMulti) {
 				for (const sink of output as Set<any>) {
-					errorData !== undefined ? sink(END, errorData) : sink(END);
+					try {
+						errorData !== undefined ? sink(END, errorData) : sink(END);
+					} catch (_) {
+						/* ensure all sinks receive END */
+					}
 				}
 			} else {
 				errorData !== undefined
@@ -323,9 +341,10 @@ export class DerivedImpl<T> {
 			return this._cachedValue as T;
 		}
 		if (this._flags & D_COMPLETED) {
+			if ((this._flags & _STATUS_MASK) === _S_ERRORED) throw this._cachedValue;
 			return this._cachedValue as T;
 		}
-		// Disconnected: pull-compute from deps
+		// Disconnected: pull-compute from deps (re-throw on error)
 		const result = this._fn();
 		this._cachedValue = result;
 		this._flags |= D_HAS_CACHED;
@@ -336,16 +355,18 @@ export class DerivedImpl<T> {
 		if (type === START) {
 			const sink = payload;
 			if (this._flags & D_COMPLETED) {
+				const isErr = (this._flags & _STATUS_MASK) === _S_ERRORED;
 				sink(START, (_t: number) => {});
-				sink(END);
+				isErr ? sink(END, this._cachedValue) : sink(END);
 				return;
 			}
 
 			if (!(this._flags & D_CONNECTED)) {
 				this._lazyConnect();
 				if (this._flags & D_COMPLETED) {
+					const isErr = (this._flags & _STATUS_MASK) === _S_ERRORED;
 					sink(START, (_t: number) => {});
-					sink(END);
+					isErr ? sink(END, this._cachedValue) : sink(END);
 					return;
 				}
 			}

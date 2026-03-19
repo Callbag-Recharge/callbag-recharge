@@ -58,6 +58,7 @@ export class OperatorImpl<B> {
 	_init: (actions: Actions<B>) => (depIndex: number, type: number, data: any) => void;
 	_getterFn: ((cached: B | undefined) => B) | undefined;
 	_initial: B | undefined;
+	_errorData: unknown;
 
 	get _status() {
 		return decodeStatus(this._flags);
@@ -134,7 +135,13 @@ export class OperatorImpl<B> {
 				this._flags &= ~O_MULTI;
 				if (output) {
 					if (wasMulti) {
-						for (const sink of output as Set<any>) sink(END);
+						for (const sink of output as Set<any>) {
+							try {
+								sink(END);
+							} catch (_) {
+								/* ensure all sinks receive END */
+							}
+						}
 					} else {
 						(output as (type: number, data?: any) => void)(END);
 					}
@@ -143,6 +150,7 @@ export class OperatorImpl<B> {
 			error: (e: unknown) => {
 				if (completed) return;
 				completed = true;
+				this._errorData = e;
 				this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_ERRORED;
 				this._handler = null;
 				for (const tb of localTalkbacks) tb?.(END);
@@ -154,7 +162,13 @@ export class OperatorImpl<B> {
 				this._flags &= ~O_MULTI;
 				if (output) {
 					if (wasMulti) {
-						for (const sink of output as Set<any>) sink(END, e);
+						for (const sink of output as Set<any>) {
+							try {
+								sink(END, e);
+							} catch (_) {
+								/* ensure all sinks receive END */
+							}
+						}
 					} else {
 						(output as (type: number, data?: any) => void)(END, e);
 					}
@@ -211,8 +225,9 @@ export class OperatorImpl<B> {
 				if (this._flags & O_RESUB && this._output === null) {
 					this._flags = (this._flags & ~(O_COMPLETED | _STATUS_MASK)) | _S_DISCONNECTED;
 				} else {
+					const isErr = (this._flags & _STATUS_MASK) === _S_ERRORED;
 					sink(START, (_t: number) => {});
-					sink(END);
+					isErr ? sink(END, this._errorData) : sink(END);
 					return;
 				}
 			}

@@ -1,7 +1,8 @@
 # Architecture
 
-> **Status:** Canonical design document. The output slot model, status model, and lazy
-> derived (Option D3) are implemented and shipped. This is the definitive architecture reference.
+> **Status:** Canonical design document. The output slot model, status model, lazy
+> derived (Option D3), dynamicDerived, and D5 error handling are implemented and shipped.
+> This is the definitive architecture reference.
 
 ---
 
@@ -49,6 +50,7 @@ src/
 │   ├── state.ts     ← syntax sugar over producer
 │   ├── operator.ts  ← transform role — imports protocol + inspector + types
 │   ├── derived.ts   ← syntax sugar over operator with terminator management
+│   ├── dynamicDerived.ts ← derived with runtime dep tracking + rewiring
 │   ├── effect.ts    ← sink role — imports protocol + types
 │   └── pipe.ts      ← map/filter/scan sugar via derived
 ├── extra/           ← operators, sources, sinks — import from core + utils only
@@ -151,13 +153,14 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 - `state(initial)` = producer with `set()` / `update()` sugar and `equals: Object.is`
 - Emits DIRTY then DATA on change; emits RESOLVED if `equals` guard fires
 
-### Transform (`operator` / `derived`) — receives deps, produces output
+### Transform (`operator` / `derived` / `dynamicDerived`) — receives deps, produces output
 
 - Has one or more deps
 - Maintains `_value` (last computed output) and `_status`
 - Dep subscription handlers inline state tracking, transform, value caching, and dispatch (see §5 conceptual model)
 - Exposes `get()` and `source()` — is a full store, subscribable by anything downstream
 - `derived([deps], fn)` = operator with lazy connect/disconnect lifecycle (see §6)
+- `dynamicDerived(fn)` = derived with runtime dep discovery via tracking `get` function. Deps can change between recomputations; upstream connections are rewired via `_maybeRewire()`. Re-entrancy guard (`D_RECOMPUTING`) prevents signal cycles during rewire. Same lazy lifecycle as derived.
 
 ### Sink (`effect`) — terminal, no downstream
 
@@ -286,7 +289,8 @@ The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
 | `RESOLVED` | Return `_value` — guaranteed unchanged from last SETTLED |
 | `DIRTY` | Return `_value` alongside a staleness indicator (exact API TBD — see below) |
 | `DISCONNECTED` | Pull-based recompute: call `_fn()` which reads deps via closure, write result to `_cachedValue`, return it |
-| `COMPLETED` / `ERRORED` | Return `_value` — last value before terminal; `_status` communicates terminal state |
+| `COMPLETED` | Return `_value` — last value before terminal |
+| `ERRORED` | **Throw** the stored error (derived/dynamicDerived); return `_value` (producer/operator — error stored separately in `_errorData`) |
 
 **Honest DIRTY feedback** — when `_status === DIRTY`, a new value is in flight. Silently returning `_value` misleads callers. Options for the API shape:
 - `inspect()` → `{ status, value }` for callers that need to distinguish fresh vs. stale
@@ -439,15 +443,38 @@ talkback(END) ← upstream from subscriber
 complete() or error(e):
   → if completed: return                          // idempotency guard
   → completed = true
-  → B._status = DISCONNECTED
+  → B._status = COMPLETED or ERRORED
+  → if error: store error for late subscriber propagation
+      derived/dynamicDerived: _cachedValue = error (reuses existing field)
+      operator: _errorData = error (separate field, avoids resetOnTeardown collision)
   → for each talkback: talkback(END)              // disconnect upstream
   → talkbacks = []
   → localOutput = _output; _output = null          // null before notifying
   → _stop()                                       // cleanup BEFORE notifying
-  → for each sink: sink(END) or sink(END, e)      // notify downstream
+  → for each sink in multi-sink:
+      try { sink(END) or sink(END, e) }           // exception-safe: one sink throwing
+      catch (_) {}                                // doesn't block other sinks
+  → single sink: sink(END) or sink(END, e)        // no try/catch needed
 ```
 
 **Cleanup before notification:** ensures `resubscribable` re-subscription finds a clean state.
+
+### D5: Error handling in derived/dynamicDerived
+
+User computation functions (`fn`) can throw. Error handling follows dual semantics:
+
+**Push path** (`_recompute`, `_lazyConnect`): try/catch around `fn()`. On error:
+- `_handleEnd(err)` sets ERRORED status, stores error in `_cachedValue`, disconnects upstream
+- Active subscribers receive `END(error)` via callbag protocol
+- For `_lazyConnect`: output is null when error fires (sink not yet registered), so `source()` checks ERRORED and sends `END(error)` to the late-arriving sink directly
+
+**Pull path** (`get()` when disconnected): `fn()` throws directly to the caller. No state mutation — the node remains usable for retry on next `get()` call.
+
+**`get()` on ERRORED node**: throws the stored error. Consistent with disconnected pull-compute behavior.
+
+**Late subscriber to ERRORED node**: `source()` checks ERRORED status → sends `START` + `END(error)` with stored error data.
+
+**V8 overhead**: try/catch has zero measurable overhead on the happy path (V8 JIT compiles try body as normal code when catch is never entered).
 
 ### Reconnect
 

@@ -71,7 +71,12 @@ export function subscribe<T>(
 
 	// Baseline: captures current value before producers start. Aligns with
 	// RxJS Observable semantics — no initial-value callback on subscribe.
-	let prev: T | undefined = store.get();
+	let prev: T | undefined;
+	try {
+		prev = store.get();
+	} catch (_) {
+		// Store may have errored during source() — baseline is undefined
+	}
 
 	endDeferredStart();
 

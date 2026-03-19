@@ -302,7 +302,7 @@ describe("state edge cases", () => {
 // ---------------------------------------------------------------------------
 
 describe("derived edge cases", () => {
-	it("fn throws exception → error propagates to subscriber", () => {
+	it("fn throws exception → error propagates via END to subscriber", () => {
 		const s = state(0);
 		const d = derived([s], () => {
 			if (s.get() === 1) throw new Error("derived-error");
@@ -310,11 +310,80 @@ describe("derived edge cases", () => {
 		});
 
 		const values: number[] = [];
-		subscribe(d, (v) => values.push(v));
+		const onEnd = vi.fn();
+		subscribe(d, (v) => values.push(v), { onEnd });
 		expect(values).toEqual([]); // initial value computed before subscribe
 
-		// This will throw during recompute
-		expect(() => s.set(1)).toThrow("derived-error");
+		// Error is caught and sent as END(error) to subscribers
+		s.set(1);
+		expect(onEnd).toHaveBeenCalledWith(expect.any(Error));
+		expect((onEnd.mock.calls[0][0] as Error).message).toBe("derived-error");
+	});
+
+	it("fn throws in lazyConnect → subscriber gets END(error)", () => {
+		const d = derived([state(0)], () => {
+			throw new Error("init-error");
+		});
+
+		const onEnd = vi.fn();
+		subscribe(d, () => {}, { onEnd });
+		expect(onEnd).toHaveBeenCalledWith(expect.any(Error));
+		expect((onEnd.mock.calls[0][0] as Error).message).toBe("init-error");
+	});
+
+	it("late subscriber to errored derived receives END(error)", () => {
+		const s = state(0);
+		const d = derived([s], () => {
+			if (s.get() === 1) throw new Error("late-err");
+			return s.get();
+		});
+
+		// First subscriber triggers the error
+		const onEnd1 = vi.fn();
+		subscribe(d, () => {}, { onEnd: onEnd1 });
+		s.set(1);
+		expect(onEnd1).toHaveBeenCalledWith(expect.any(Error));
+
+		// Late subscriber connects after derived is already errored
+		const onEnd2 = vi.fn();
+		subscribe(d, () => {}, { onEnd: onEnd2 });
+		expect(onEnd2).toHaveBeenCalledWith(expect.any(Error));
+		expect((onEnd2.mock.calls[0][0] as Error).message).toBe("late-err");
+	});
+
+	it("get() on errored derived throws the stored error", () => {
+		const s = state(0);
+		const d = derived([s], () => {
+			if (s.get() === 1) throw new Error("get-err");
+			return s.get();
+		});
+
+		subscribe(d, () => {}, { onEnd: () => {} });
+		s.set(1); // triggers error
+
+		expect(() => d.get()).toThrow("get-err");
+	});
+
+	it("multi-subscriber: one sink throws in END → other still receives END", () => {
+		const s = state(0);
+		const d = derived([s], () => {
+			if (s.get() === 1) throw new Error("multi-err");
+			return s.get();
+		});
+
+		const onEnd1 = vi.fn(() => {
+			throw new Error("sink1 blows up");
+		});
+		const onEnd2 = vi.fn();
+
+		subscribe(d, () => {}, { onEnd: onEnd1 });
+		subscribe(d, () => {}, { onEnd: onEnd2 });
+
+		s.set(1);
+
+		expect(onEnd1).toHaveBeenCalledWith(expect.any(Error));
+		expect(onEnd2).toHaveBeenCalledWith(expect.any(Error));
+		expect((onEnd2.mock.calls[0][0] as Error).message).toBe("multi-err");
 	});
 
 	it("very deep chain (10 nested deriveds) → correct propagation", () => {
@@ -764,6 +833,35 @@ describe("operator edge cases", () => {
 		expect(initCount).toBe(2); // init re-runs
 
 		unsub2();
+	});
+
+	it("late subscriber to errored operator gets END(error)", () => {
+		const s = state(0);
+		const op = operator<number>(
+			[s],
+			({ emit, error }) => {
+				return (_dep, type, data) => {
+					if (type === DATA) {
+						if ((data as number) === 1) {
+							error("op-err");
+						} else {
+							emit(data as number);
+						}
+					}
+				};
+			},
+			{ initial: 0 },
+		);
+
+		subscribe(op, () => {}, { onEnd: () => {} });
+		s.set(1); // triggers error
+
+		// Late subscriber
+		let endData: unknown = "not-called";
+		op.source(START, (type: number, data: any) => {
+			if (type === END) endData = data;
+		});
+		expect(endData).toBe("op-err");
 	});
 
 	it("late subscriber to completed operator gets END immediately", () => {
