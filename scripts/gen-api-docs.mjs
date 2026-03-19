@@ -66,6 +66,7 @@ const REGISTRY = {
 	startWith: "src/extra/startWith.ts",
 	pairwise: "src/extra/pairwise.ts",
 	takeUntil: "src/extra/takeUntil.ts",
+	takeWhile: "src/extra/takeWhile.ts",
 	withLatestFrom: "src/extra/withLatestFrom.ts",
 	partition: "src/extra/partition.ts",
 	share: "src/extra/share.ts",

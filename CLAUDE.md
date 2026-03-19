@@ -45,13 +45,13 @@ See [docs/architecture.md](docs/architecture.md) for full architecture design.
 - **Batching:** `batch()` sends DIRTY immediately but defers type 1 value emission until the outermost batch ends. Connection batching (`deferStart`) queues producer starts until the full sink chain is wired.
 - **Explicit deps, callbag wiring:** `derived` and `effect` take an explicit deps array. `dynamicDerived` discovers deps at runtime via tracking `get` function. Callbag protocol is the sole connection mechanism — no implicit tracking.
 - **Error handling (D5):** Derived/dynamicDerived fn errors are caught via try/catch (zero V8 overhead on happy path). Push path (`_recompute`/`_lazyConnect`): catches error → sends END(error) via callbag protocol. Pull path (`get()` disconnected): re-throws to caller. `get()` on ERRORED node throws stored error. Error stored in `_cachedValue` (reuses existing field) for late subscriber propagation via `source()`. Multi-sink END dispatch is exception-safe (try/catch per sink). Operator stores error in `_errorData` field for late subscriber propagation.
-- **Inspector:** Static class for opt-in observability via WeakMaps. Zero intrusion into primitives — no hooks in hot paths. Read-only metadata: `inspect()`, `graph()`, `getEdges()`, `dumpGraph()`, `snapshot()`. Callbag sinks: `observe()` (protocol-level test utility), `spy()` (observe + console logging), `trace()` (value change callback). Graph wrapper: `tap()` (transparent passthrough node for visualization). See `docs/test-guidance.md` for usage patterns.
+- **Inspector:** Static class for opt-in observability via WeakMaps. Zero intrusion into primitives — no hooks in hot paths. Read-only metadata: `inspect()`, `graph()`, `getEdges()`, `dumpGraph()`, `snapshot()`, `toMermaid()`, `toD2()`. Callbag sinks: `observe()` (protocol-level test utility), `spy()` (observe + console logging), `trace()` (value change callback). Graph wrapper: `tap()` (transparent passthrough node for visualization). See `docs/test-guidance.md` for usage patterns.
 
-### Extra modules (src/extra/ — 59 operators, 61 files)
+### Extra modules (src/extra/ — 60 operators, 62 files)
 
 **Tier 1** (participate in diamond resolution, forward type 3):
 - Sources: `interval`, `fromIter`, `fromEvent`, `fromPromise`, `fromObs`, `of`, `empty`, `throwError`, `never`
-- Operators: `take`, `skip`, `first`, `last`, `find`, `elementAt`, `partition`, `merge`, `combine`, `concat`, `flat`, `share`, `withLatestFrom`, `takeUntil`, `distinctUntilChanged`, `startWith`, `pairwise`
+- Operators: `take`, `skip`, `first`, `last`, `find`, `elementAt`, `partition`, `merge`, `combine`, `concat`, `flat`, `share`, `withLatestFrom`, `takeUntil`, `takeWhile`, `distinctUntilChanged`, `startWith`, `pairwise`
 - Sinks: `forEach`, `subscribe`
 - Piping: `pipeRaw`, `SKIP`
 
@@ -94,6 +94,9 @@ Lightweight scheduling composing with existing primitives:
 - **`fromCron`** — producer that emits on cron schedule (built-in zero-dependency parser)
 - **`taskState`** — reactive task execution tracker (status, duration, error, runCount)
 - **`dag`** — acyclicity validation + Inspector graph registration (Kahn's algorithm)
+- **`checkpoint`** — durable step boundary with pluggable adapters (`memoryAdapter`, `fileAdapter`, `sqliteAdapter`, `indexedDBAdapter`)
+- **`executionLog`** — reactive execution history, auto-connects to pipeline step events, pluggable persistence
+- **`pipeline`** / **`step`** — declarative workflow builder with topological sort and reactive per-step metadata
 
 ### Utils (src/utils/)
 
@@ -115,14 +118,14 @@ Pure strategies with zero reactive deps (except `reactiveEviction`):
 ```
 src/
 ├── core/          ← 6 primitives + protocol + inspector + pipe + types
-├── extra/         ← 58 operators, sources, sinks (tree-shakeable)
+├── extra/         ← 60 operators, sources, sinks (tree-shakeable)
 ├── utils/         ← pure strategies (backoff, eviction)
 ├── data/          ← reactive data structures (map, log, index, pubsub)
 ├── memory/        ← agent memory (node, collection, decay)
-├── orchestrate/   ← scheduling (fromCron, taskState, dag)
-├── patterns/      ← composed recipes (createStore)
-├── adapters/      ← external connectors (planned)
-├── compat/        ← drop-in API wrappers (planned)
+├── orchestrate/   ← 19 orchestration + workflow primitives
+├── patterns/      ← 7 composed recipes
+├── adapters/      ← 4 external system connectors (webhook, websocket, sse, http)
+├── compat/        ← 4 drop-in API wrappers
 └── index.ts       ← public API barrel
 ```
 

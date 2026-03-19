@@ -237,6 +237,26 @@ console.log(Inspector.dumpGraph());
 //   label (derived) = "value=84"  [SETTLED]
 ```
 
+### `Inspector.toMermaid()` / `Inspector.toD2()` — graph-as-text for docs/dashboards
+
+```ts
+console.log(Inspector.toMermaid());
+// graph TD
+//   count["count (state) = 42"]:::settled
+//   doubled["doubled (derived) = 84"]:::settled
+//   count --> doubled
+//   classDef settled fill:#d4edda,stroke:#28a745
+//   ...
+
+console.log(Inspector.toD2());
+// direction: down
+// count: "count (state) = 42 [SETTLED]" { shape: rectangle }
+// doubled: "doubled (derived) = 84 [SETTLED]" { shape: hexagon }
+// count -> doubled
+```
+
+Options: `toMermaid({ direction: "LR" })`, `toD2({ direction: "right" })`. Node IDs are collision-safe (deterministic `__N` suffix on sanitized-name collision). Mermaid output includes `classDef` declarations for status-based styling.
+
 ### When to use which tool
 
 | Use case | Best tool |
@@ -247,6 +267,7 @@ console.log(Inspector.dumpGraph());
 | **"Did RESOLVED skip downstream?"** | `Inspector.observe(store).resolvedCount` |
 | **"Did it complete/error?"** | `Inspector.observe(store).ended` / `.endError` |
 | **"What's the full graph state?"** | `Inspector.snapshot()` or `Inspector.dumpGraph()` |
+| **"Graph as Mermaid/D2 for docs"** | `Inspector.toMermaid()` or `Inspector.toD2()` |
 | **"Trace one store's value changes"** | `Inspector.trace(store, cb)` |
 | **"Insert a debug point in the graph"** | `Inspector.tap(store, name)` |
 | **"Log events live to console"** | `Inspector.spy(store)` |

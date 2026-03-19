@@ -38,6 +38,7 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `pairwise` | Emits `[prev, curr]` pairs on each upstream change |
 | `startWith(value)` | Returns `value` when upstream is `undefined`; switches to upstream once it emits |
 | `takeUntil(notifier)` | Passes through values until notifier emits, then completes and tears down upstream |
+| `takeWhile(pred)` | Emits values while predicate returns true, then disconnects upstream and completes. Failing value is **not** emitted. |
 | `remember` | Caches the last upstream value and replays it to new subscribers |
 | `merge(...sources)` | Merges multiple sources into one |
 | `combine(...sources)` | Emits arrays of latest values when any source updates |
@@ -145,6 +146,11 @@ Orchestration primitives that compose with core to build reactive workflow pipel
 |--------|-------------|
 | `checkpoint(id, adapter, opts?)` | Durable step boundary. Persists values on emit, skips on recovery. Pluggable `CheckpointAdapter`. Tier 2. |
 | `memoryAdapter()` | In-memory `CheckpointAdapter` implementation (for testing / non-durable use). |
+| `fileAdapter(opts)` | File-based `CheckpointAdapter`. JSON files in a directory. Node.js only (async `import("node:fs/promises")`). |
+| `sqliteAdapter(opts)` | SQLite `CheckpointAdapter` via better-sqlite3 (peer dep). Sync. Auto-creates table. Validates table name against SQL injection. |
+| `indexedDBAdapter(opts?)` | IndexedDB `CheckpointAdapter` for browser. Async. Lazy DB open with cached promise. Handles `versionchange` for multi-tab. |
+| `executionLog(opts?)` | Reactive execution history backed by `reactiveLog`. `connectPipeline()` auto-writes step events. `forStep()` O(1) lookup. `persistError` store surfaces adapter failures. |
+| `memoryLogAdapter()` | In-memory `ExecutionLogPersistAdapter` for testing. |
 
 ### Task tracking
 
@@ -176,6 +182,8 @@ Thin source/sink wrappers for external systems. Import from `callbag-recharge/ad
 | `fromWebhook<T>(opts?)` | HTTP trigger source (Node.js/edge). Creates a POST endpoint that emits parsed request bodies. Standalone (`listen()`) or embedded (`handler` property). Configurable path, port, body parser, max body size (default 1MB). Observable `requestCount` store. |
 | `fromWebSocket<T>(url, opts?)` | Reactive WebSocket source. Observable `status` store ("connecting", "open", "closing", "closed"). Optional auto-reconnect with configurable delay. No external deps (browser-native WebSocket API). Works in Node.js 21+ and all modern browsers. |
 | `toWebSocket<T>(ws, source, opts?)` | WebSocket sink. Sends store values to a WebSocket connection. Buffers messages until connection opens. Returns dispose function. |
+| `toSSE<T>(source, opts?)` | Server-Sent Events sink. Streams store values to connected browser clients. Standalone (`listen()`) or embedded (`handler`). CORS preflight. Configurable ping keep-alive (default 30s). Observable `connectionCount` store. Unsubscribes from source when last client disconnects. |
+| `fromHTTP<T>(url, opts?)` | Fetch-based HTTP source with polling, custom transform, timeout. Observable `status` ("idle"/"fetching"/"success"/"error") and `fetchCount` stores. `refetch()` for manual trigger. `stop()` cancels in-flight + resets status. Tier 2. |
 
 ---
 

@@ -15,14 +15,14 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 | Level | What | Import | Status |
 |-------|------|--------|--------|
 | **1** | 6 primitives + protocol + inspector + pipe + batch | `callbag-recharge/core` | **Shipped** |
-| **2** | 59 operators, sources, sinks | `callbag-recharge/extra` | **Shipped** |
+| **2** | 60 operators, sources, sinks | `callbag-recharge/extra` | **Shipped** |
 | **3** | Data structures + memory + orchestration + utils | `/data`, `/memory`, `/orchestrate`, `/utils` | **Shipped** |
 | **4** | Persistence, sync, distribution, content addressing | `/persist`, `/sync`, `/caps` | **Planned** |
 
 **Cross-cutting modules:**
 - `src/patterns/` — 7 composed recipes (shipped)
 - `src/compat/` — 4 drop-in API wrappers (shipped)
-- `src/adapters/` — 2 external system connectors (shipped: webhook, websocket)
+- `src/adapters/` — 4 external system connectors (shipped: webhook, websocket, sse, http)
 
 ---
 
@@ -42,10 +42,10 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] Type 3 STATE control channel, SINGLE_DEP signaling, integer `_status` in `_flags`
 - [x] Output slot model (null → fn → Set), lazy derived
 
-### Level 2: Extras — 59 Operators
+### Level 2: Extras — 60 Operators
 
 **Sources:** interval, fromIter, fromEvent, fromPromise, fromObs, fromAsyncIter, of, empty, throwError, never
-**Tier 1:** map, filter, scan, take, skip, first, last, find, elementAt, partition, merge, combine, concat, flat, share, distinctUntilChanged, startWith, tap, pairwise, remember, buffer, withLatestFrom, takeUntil, subject
+**Tier 1:** map, filter, scan, take, skip, first, last, find, elementAt, partition, merge, combine, concat, flat, share, distinctUntilChanged, startWith, tap, pairwise, remember, buffer, withLatestFrom, takeUntil, takeWhile, subject
 **Tier 2:** debounce, throttle, delay, bufferTime, bufferCount, timeout, sample, audit, switchMap, concatMap, exhaustMap, rescue, retry, repeat, reduce, toArray, groupBy, race, window, windowCount, windowTime
 **Sinks:** subscribe, forEach
 **Interop:** wrap, pipeRaw, SKIP
@@ -76,7 +76,7 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `cancellableStream` — stream with AbortController, fromAbortable() interop
 - [x] `connectionHealth` — monitors connection status with backoff + threshold
 
-### Level 3: Orchestrate — 15 modules
+### Level 3: Orchestrate — 19 modules
 
 - [x] `fromCron(expr)` — cron schedule source (zero-dep parser)
 - [x] `taskState()` — reactive task tracker (status, duration, runCount, error)
@@ -92,11 +92,18 @@ Each level imports only what it needs. Strict upward dependency — lower levels
 - [x] `pipeline(steps)` — declarative workflow builder, auto-wires via topological sort
 - [x] `step(factory, deps?)` — step definition for pipeline()
 - [x] `memoryAdapter()` — in-memory checkpoint adapter
+- [x] `fileAdapter(opts)` — file-based checkpoint persistence (Node.js)
+- [x] `sqliteAdapter(opts)` — SQLite checkpoint persistence (better-sqlite3 peer dep)
+- [x] `indexedDBAdapter(opts)` — IndexedDB checkpoint persistence (browser)
+- [x] `executionLog(opts)` — reactive execution history with pipeline auto-connect
+- [x] `memoryLogAdapter()` — in-memory execution log persistence
 
-### Adapters — 2 modules
+### Adapters — 4 modules
 
 - [x] `fromWebhook(opts?)` — HTTP trigger source (Node.js/edge), standalone or embedded
 - [x] `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge (browser-native, no deps)
+- [x] `toSSE(source, opts?)` — Server-Sent Events sink, streams store values to browser clients
+- [x] `fromHTTP(url, opts?)` — fetch-based HTTP source with polling, headers, custom transform
 
 ### Patterns (7 recipes, all shipped)
 
@@ -129,11 +136,11 @@ Within each phase, items are roughly ordered by effort (small → large).
 
 > **Goal:** Fill remaining gaps in Level 2 operator coverage. Independent of phased work.
 
-| # | Operator | What | Effort |
+| # | Operator | What | Status |
 |---|----------|------|--------|
-| B1 | `takeWhile(pred)` | Passes values while predicate is true, then completes. Complement to `takeUntil` (predicate vs signal). | S |
+| B1 | `takeWhile(pred)` | Passes values while predicate is true, then completes. Complement to `takeUntil` (predicate vs signal). | **Shipped** |
 
-### Phase 3: Production Hardening
+### Phase 3: Production Hardening — **Shipped**
 
 > **Goal:** Make orchestration production-ready. Gap analysis (March 19) found that Phase 1+2
 > shipped the right primitives, but `checkpoint()` is demo-only without real persistence, and
@@ -142,13 +149,13 @@ Within each phase, items are roughly ordered by effort (small → large).
 > **Why before GEO:** Can't recommend a workflow engine that loses state on restart.
 > Pulling persistence forward from Phase 7a.
 
-| # | Deliverable | What | Effort |
+| # | Deliverable | What | Status |
 |---|-------------|------|--------|
-| 3a | Checkpoint persistence adapters | SQLite, IndexedDB, file-based adapters for `checkpoint()`. | M |
-| 3b | Execution log | `reactiveLog`-backed execution history. `pipeline()` auto-writes step events. Pluggable persistence. | M |
-| 3c | DAG visualization export | `Inspector.toMermaid()` / `Inspector.toD2()` — graph-as-text for docs/dashboards. | S |
-| 3d | SSE sink adapter | Server-Sent Events sink. Stream pipeline status to browser clients. | S |
-| 3e | HTTP client source | `fromHTTP(url, opts)` — fetch-based source with polling, headers, transform. | S |
+| 3a | Checkpoint persistence adapters | `fileAdapter`, `sqliteAdapter`, `indexedDBAdapter` for `checkpoint()`. | **Shipped** |
+| 3b | Execution log | `executionLog()` — `reactiveLog`-backed execution history. `connectPipeline()` auto-writes step events. Pluggable persistence via `ExecutionLogPersistAdapter`. | **Shipped** |
+| 3c | DAG visualization export | `Inspector.toMermaid()` / `Inspector.toD2()` — graph-as-text for docs/dashboards. | **Shipped** |
+| 3d | SSE sink adapter | `toSSE(source, opts)` — Server-Sent Events sink. Streams pipeline status to browser clients. Standalone or embedded. | **Shipped** |
+| 3e | HTTP client source | `fromHTTP(url, opts)` — fetch-based source with polling, headers, custom transform, timeout. | **Shipped** |
 
 **Deliverable:** A pipeline that persists checkpoint state to SQLite, logs every step execution, and serves live status over SSE. Restartable workflows.
 
@@ -238,14 +245,14 @@ Within each phase, items are roughly ordered by effort (small → large).
 ```
 src/
 ├── core/          ← Level 1: 6 primitives + protocol + inspector + pipe      [SHIPPED]
-├── extra/         ← Level 2: 59 operators, sources, sinks                    [SHIPPED]
+├── extra/         ← Level 2: 60 operators, sources, sinks                    [SHIPPED]
 ├── utils/         ← Level 3: 12 pure strategies                              [SHIPPED]
 ├── data/          ← Level 3: 4 reactive data structures                      [SHIPPED]
 ├── memory/        ← Level 3: agent memory primitives                         [SHIPPED]
-├── orchestrate/   ← Level 3E: 15 orchestration + workflow primitives         [SHIPPED]
+├── orchestrate/   ← Level 3E: 19 orchestration + workflow primitives         [SHIPPED]
 ├── patterns/      ← Cross-cutting: 7 composed recipes                       [SHIPPED]
 ├── compat/        ← Cross-cutting: 4 drop-in API wrappers                   [SHIPPED]
-├── adapters/      ← Cross-cutting: 2 external system connectors              [SHIPPED → Phase 6 for more]
+├── adapters/      ← Cross-cutting: 4 external system connectors              [SHIPPED → Phase 7 for more]
 └── persist/       ← Level 4: persistence, sync, distribution                 [PLANNED → Phase 7]
 ```
 

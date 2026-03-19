@@ -55,6 +55,7 @@ export { subscribe } from "./subscribe";
 export { switchMap } from "./switchMap";
 export { take } from "./take";
 export { takeUntil } from "./takeUntil";
+export { takeWhile } from "./takeWhile";
 export { tap } from "./tap";
 export { throttle } from "./throttle";
 export { throwError } from "./throwError";

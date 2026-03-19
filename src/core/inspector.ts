@@ -383,6 +383,140 @@ export class Inspector {
 		return { nodes, edges };
 	}
 
+	/**
+	 * Export the graph as a Mermaid flowchart string.
+	 *
+	 * ```ts
+	 * console.log(Inspector.toMermaid());
+	 * // graph TD
+	 * //   count["count (state) = 0"]
+	 * //   doubled["doubled (derived) = 0"]
+	 * //   count --> doubled
+	 * ```
+	 */
+	static toMermaid(opts?: { direction?: "TD" | "LR" | "BT" | "RL" }): string {
+		const direction = opts?.direction ?? "TD";
+		const snap = Inspector.snapshot();
+		const lines: string[] = [`graph ${direction}`];
+
+		const statusStyle: Record<string, string> = {
+			SETTLED: ":::settled",
+			DIRTY: ":::dirty",
+			ERRORED: ":::errored",
+			COMPLETED: ":::completed",
+		};
+
+		// Sanitize for Mermaid node IDs — use deterministic suffix on collision
+		const usedIds = new Map<string, number>();
+		function sanitizeId(name: string): string {
+			const base = name.replace(/[^a-zA-Z0-9_]/g, "_");
+			const count = usedIds.get(base);
+			if (count === undefined) {
+				usedIds.set(base, 1);
+				return base;
+			}
+			usedIds.set(base, count + 1);
+			return `${base}__${count}`;
+		}
+
+		// Cache name→id mapping for edge resolution
+		const nameToId = new Map<string, string>();
+
+		function truncateValue(v: unknown): string {
+			const s = JSON.stringify(v);
+			return s && s.length > 30 ? `${s.slice(0, 27)}...` : (s ?? "undefined");
+		}
+
+		for (const node of snap.nodes) {
+			const id = sanitizeId(node.name);
+			nameToId.set(node.name, id);
+			const label = `${node.name} (${node.kind}) = ${truncateValue(node.value)}`;
+			const style = statusStyle[node.status ?? ""] ?? "";
+			lines.push(`  ${id}["${label}"]${style}`);
+		}
+
+		for (const edge of snap.edges) {
+			const fromId = nameToId.get(edge.from) ?? sanitizeId(edge.from);
+			const toId = nameToId.get(edge.to) ?? sanitizeId(edge.to);
+			lines.push(`  ${fromId} --> ${toId}`);
+		}
+
+		// classDef declarations for status-based styling
+		lines.push("");
+		lines.push("  classDef settled fill:#d4edda,stroke:#28a745");
+		lines.push("  classDef dirty fill:#fff3cd,stroke:#ffc107");
+		lines.push("  classDef errored fill:#f8d7da,stroke:#dc3545");
+		lines.push("  classDef completed fill:#cce5ff,stroke:#007bff");
+
+		return lines.join("\n");
+	}
+
+	/**
+	 * Export the graph as a D2 diagram string.
+	 *
+	 * ```ts
+	 * console.log(Inspector.toD2());
+	 * // count: "count (state) = 0" { shape: rectangle }
+	 * // doubled: "doubled (derived) = 0" { shape: rectangle }
+	 * // count -> doubled
+	 * ```
+	 */
+	static toD2(opts?: { direction?: "right" | "down" | "left" | "up" }): string {
+		const direction = opts?.direction ?? "down";
+		const snap = Inspector.snapshot();
+		const lines: string[] = [`direction: ${direction}`, ""];
+
+		const kindShape: Record<string, string> = {
+			state: "rectangle",
+			derived: "hexagon",
+			effect: "oval",
+			producer: "rectangle",
+			operator: "parallelogram",
+			"pipeline-step": "rectangle",
+			"pipeline-status": "diamond",
+			checkpoint: "cylinder",
+		};
+
+		// Sanitize with collision avoidance
+		const usedIds = new Map<string, number>();
+		function sanitizeId(name: string): string {
+			const base = name.replace(/[^a-zA-Z0-9_]/g, "_");
+			const count = usedIds.get(base);
+			if (count === undefined) {
+				usedIds.set(base, 1);
+				return base;
+			}
+			usedIds.set(base, count + 1);
+			return `${base}__${count}`;
+		}
+
+		const nameToId = new Map<string, string>();
+
+		function truncateValue(v: unknown): string {
+			const s = JSON.stringify(v);
+			return s && s.length > 30 ? `${s.slice(0, 27)}...` : (s ?? "undefined");
+		}
+
+		for (const node of snap.nodes) {
+			const id = sanitizeId(node.name);
+			nameToId.set(node.name, id);
+			const shape = kindShape[node.kind] ?? "rectangle";
+			const label = `${node.name} (${node.kind}) = ${truncateValue(node.value)}`;
+			const statusStr = node.status ? ` [${node.status}]` : "";
+			lines.push(`${id}: "${label}${statusStr}" { shape: ${shape} }`);
+		}
+
+		if (snap.edges.length > 0) lines.push("");
+
+		for (const edge of snap.edges) {
+			const fromId = nameToId.get(edge.from) ?? sanitizeId(edge.from);
+			const toId = nameToId.get(edge.to) ?? sanitizeId(edge.to);
+			lines.push(`${fromId} -> ${toId}`);
+		}
+
+		return lines.join("\n");
+	}
+
 	/** Reset all state (for testing) */
 	static _reset(): void {
 		Inspector._names = new WeakMap<object, string>();
