@@ -1,27 +1,20 @@
 // ---------------------------------------------------------------------------
-// Orchestrate module — Level 3E scheduling + workflow primitives
+// Orchestrate module — workflow nodes + orchestration-specific plumbing
+// ---------------------------------------------------------------------------
+// Workflow nodes: pipeline, step, task, branch, approval
+// Orchestration plumbing: taskState, executionLog, gate (internal, wrapped by approval)
+//
+// Generic operators/sources live in their natural homes:
+//   extra/ — fromTrigger, fromCron, cron, route, timeout
+//   utils/ — track, checkpoint, tokenTracker, withBreaker, dag, retry
 // ---------------------------------------------------------------------------
 
-// Phase 2: Checkpoint
-export type {
-	CheckpointAdapter,
-	CheckpointedStore,
-	CheckpointMeta,
-} from "./checkpoint";
-export { checkpoint, memoryAdapter } from "./checkpoint";
-export type {
-	FileAdapterOptions,
-	IndexedDBAdapterOptions,
-	SQLiteAdapterOptions,
-	SQLiteDatabase,
-} from "./checkpointAdapters";
-export { fileAdapter, indexedDBAdapter, sqliteAdapter } from "./checkpointAdapters";
-export type { CronSchedule } from "./cron";
-// Internal — exported for advanced users / testing
-export { matchesCron, parseCron } from "./cron";
-// Types
-export type { DagNode, DagResult } from "./dag";
-export { dag } from "./dag";
+// -- Workflow nodes ----------------------------------------------------------
+export type { ApprovalOpts, ApprovalStepDef } from "./approval";
+export { approval } from "./approval";
+export type { BranchStepDef } from "./branch";
+export { branch } from "./branch";
+// -- Orchestration plumbing --------------------------------------------------
 export type {
 	ExecutionEntry,
 	ExecutionEventType,
@@ -30,35 +23,22 @@ export type {
 	ExecutionLogResult,
 } from "./executionLog";
 export { executionLog, memoryLogAdapter } from "./executionLog";
-export type { FromCronOptions } from "./fromCron";
-export { fromCron } from "./fromCron";
-// Phase 1: Orchestration Operators
-export type { TriggerStore } from "./fromTrigger";
-export { fromTrigger } from "./fromTrigger";
 export type { GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
-// Phase 2: Pipeline
 export type {
+	PipelineInner,
 	PipelineResult,
 	PipelineStatus,
 	StepDef,
 	StepMeta,
 } from "./pipeline";
 export { pipeline, step } from "./pipeline";
-export { route } from "./route";
+export type { TaskOpts, TaskStepDef } from "./task";
+export { task } from "./task";
 export { taskState } from "./taskState";
-export type { TokenMeta, TokenTrackedStore, TokenUsage } from "./tokenTracker";
-export { tokenTracker } from "./tokenTracker";
-export type { TrackedStore, TrackMeta, TrackStatus } from "./track";
-export { track } from "./track";
 export type {
 	TaskMeta,
 	TaskState,
 	TaskStateSnapshot,
 	TaskStatus,
 } from "./types";
-export type { BreakerLike, WithBreakerOptions } from "./withBreaker";
-export { CircuitOpenError, withBreaker } from "./withBreaker";
-export type { DelayStrategy, RetryMeta, WithRetryOptions } from "./withRetry";
-export { withRetry } from "./withRetry";
-export { TimeoutError, withTimeout } from "./withTimeout";

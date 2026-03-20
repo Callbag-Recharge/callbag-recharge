@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { pipe, state } from "../../index";
-import { checkpoint, memoryAdapter } from "../../orchestrate";
+import { checkpoint, memoryAdapter } from "../../utils/checkpoint";
 
 // ==========================================================================
 // checkpoint

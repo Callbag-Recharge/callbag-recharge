@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { matchesCron, parseCron } from "../../orchestrate/cron";
+import { matchesCron, parseCron } from "../../extra/cron";
 
 describe("cron parser", () => {
 	// --- parseCron validation ---

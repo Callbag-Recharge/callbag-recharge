@@ -445,6 +445,21 @@ Phase 4: Examples
   Step 13: examples/form-with-editor.ts      (editor inside formField)
 ```
 
+### Phase 4.5: Workable Markdown Editor Readiness (MVP hardening)
+
+To move from "composed primitives exist" to a **workable markdown editor** for real usage,
+complete the following after Phase 4:
+
+```
+Step 14: textBuffer undo snapshots restore cursor+selection with content
+Step 15: textEditor command ergonomics hardening (multiline list/code-block behavior, toggle semantics)
+Step 16: canonical UI adapter example (textarea/contenteditable wiring contract)
+Step 17: edge-case tests for suppressed signal paths + async submit/validator failures
+```
+
+**Goal of Phase 4.5:** ensure editor behavior is robust enough for day-to-day markdown editing,
+not just API-level composition validation.
+
 ### Dependency Graph
 
 ```
@@ -523,6 +538,12 @@ src/__tests__/data/reactiveList.test.ts
 - `textEditor`: type + validate + submit lifecycle
 - `textEditor`: markdown commands update content + preview atomically
 
+### Integration tests (Phase 4.5 hardening):
+- `textBuffer`: undo/redo restores both content and cursor/selection snapshot
+- `textEditor`: multiline command behavior (list/code block/heading) remains stable
+- `textEditor`: equal/no-op writes preserve downstream derived stability (`canSubmit`, selection-derived views)
+- `textEditor`: rejected `onSubmit` and async validator failures recover cleanly (`submitting` reset, error/valid coherence)
+
 ---
 
 ## REJECTED ALTERNATIVES
@@ -551,6 +572,7 @@ src/__tests__/data/reactiveList.test.ts
 3. **examples/ demonstrate real usage** — copy-paste-able, not toy demos
 4. **Existing patterns can adopt** — formField refactored to use dirtyTracker + validationPipeline with no behavior change
 5. **Bundle size** — each lego is tree-shakeable; importing textEditor doesn't pull asyncQueue or timer
+6. **Workable markdown editing loop** — cursor-aware undo/redo + predictable multiline command behavior + canonical UI adapter example
 
 ---
 

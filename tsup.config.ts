@@ -58,6 +58,8 @@ export default defineConfig({
 		"src/patterns/undoRedo/index.ts",
 		"src/patterns/pagination/index.ts",
 		"src/patterns/formField/index.ts",
+		"src/patterns/textBuffer/index.ts",
+		"src/patterns/textEditor/index.ts",
 		"src/compat/nanostores/index.ts",
 		"src/compat/signals/index.ts",
 		"src/compat/jotai/index.ts",

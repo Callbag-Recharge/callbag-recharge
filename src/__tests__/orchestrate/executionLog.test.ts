@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
+import { fromTrigger } from "../../extra/fromTrigger";
 import { map } from "../../extra/map";
 import { pipe, state } from "../../index";
 import { executionLog, memoryLogAdapter } from "../../orchestrate/executionLog";
-import { fromTrigger } from "../../orchestrate/fromTrigger";
 import { pipeline, step } from "../../orchestrate/pipeline";
 
 describe("executionLog", () => {
@@ -118,7 +118,7 @@ describe("executionLog.connectPipeline", () => {
 			),
 		});
 
-		const unsub = log.connectPipeline(wf.stepMeta, wf.order);
+		const unsub = log.connectPipeline(wf.inner.stepMeta, wf.inner.order);
 
 		// Fire a value through the pipeline
 		(wf.steps.trigger as any).fire(5);
@@ -142,7 +142,7 @@ describe("executionLog.connectPipeline", () => {
 			src: step(source),
 		});
 
-		const unsub = log.connectPipeline(wf.stepMeta, wf.order);
+		const unsub = log.connectPipeline(wf.inner.stepMeta, wf.inner.order);
 
 		source.set(1);
 

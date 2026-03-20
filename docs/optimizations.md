@@ -345,6 +345,33 @@ These are not yet implemented but represent concrete opportunities for improveme
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
+### 4. Shared timer runtime for `countdown()` and `stopwatch()`
+
+**Status:** Not implemented. **Impact:** Low-medium (maintainability + small runtime consistency wins). **Priority:** Low.
+
+`utils/timer.ts` currently implements separate interval lifecycle logic in `countdown()` and `stopwatch()` (timer start/stop, partial-tick accounting, dispose guards). The semantics are correct, but there is duplicated control-flow code.
+
+**Possible refactor:** Extract a small internal timer runtime (e.g. `createTicker`) that centralizes:
+- interval creation/teardown
+- last-tick bookkeeping
+- pause/resume partial-tick flushing
+- disposed/active guard handling
+
+Both APIs (`countdown`, `stopwatch`) would remain high-level and unchanged. This is primarily a code-size/readability optimization with potential reduction in lifecycle bugs when future timer features are added.
+
+### 5. `validationPipeline` composition over shared reactive operators
+
+**Status:** Not implemented. **Impact:** Medium (code simplification while preserving semantics). **Priority:** Medium-low.
+
+`utils/validationPipeline.ts` correctly handles sync-first validation, debounced async validation, cancellation via `AbortController`, and combined error/valid stores. The current implementation is explicit and imperative in places (timer + async orchestration).
+
+**Possible refactor:** Restructure internals to compose more from core/extras building blocks, while keeping behavior identical:
+- keep sync validation as immediate derived/effect path
+- isolate async scheduling/cancellation into a small reusable helper
+- rely on existing reactive composition for output stores (`errors`, `error`, `valid`)
+
+This should reduce code volume and improve consistency with the library’s composition style without exposing low-level callbag APIs at the pattern layer.
+
 ---
 
 <details>
@@ -427,6 +454,8 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | SINGLE_DEP for dynamicDerived | Potential (medium priority) | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
 | Cancellation-safe pipeline reset | Potential (medium priority) | Prevents stale task completions corrupting post-reset runStatus | Pipelines with long-running async tasks |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
+| Shared timer runtime (`countdown`/`stopwatch`) | Potential (low priority) | Reduce duplicated lifecycle code; lower maintenance risk | Timer utils evolution |
+| `validationPipeline` composition refactor | Potential (medium-low priority) | Smaller, more compositional internals with same semantics | Validation-heavy patterns/utils |
 
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |
 | ~~Pull-compute version check~~ | Not implementing | Version syncing overhead ≈ pull-compute cost; userland `memo()` operator preferred | — |

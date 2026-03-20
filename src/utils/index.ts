@@ -32,6 +32,20 @@ export type {
 	StreamFactory,
 } from "./cancellableStream";
 export { cancellableStream, fromAbortable } from "./cancellableStream";
+// Checkpoint
+export type {
+	CheckpointAdapter,
+	CheckpointedStore,
+	CheckpointMeta,
+} from "./checkpoint";
+export { checkpoint, memoryAdapter } from "./checkpoint";
+export type {
+	FileAdapterOptions,
+	IndexedDBAdapterOptions,
+	SQLiteAdapterOptions,
+	SQLiteDatabase,
+} from "./checkpointAdapters";
+export { fileAdapter, indexedDBAdapter, sqliteAdapter } from "./checkpointAdapters";
 // Circuit breaker
 export type { CircuitBreaker, CircuitBreakerOptions, CircuitState } from "./circuitBreaker";
 export { circuitBreaker } from "./circuitBreaker";
@@ -42,6 +56,9 @@ export type {
 	ConnectionStatus,
 } from "./connectionHealth";
 export { connectionHealth } from "./connectionHealth";
+// DAG
+export type { DagNode, DagResult } from "./dag";
+export { dag } from "./dag";
 // Dirty tracker
 export type { DirtyTrackerOptions, DirtyTrackerResult } from "./dirtyTracker";
 export { dirtyTracker } from "./dirtyTracker";
@@ -56,7 +73,7 @@ export type {
 export { slidingWindow, tokenBucket } from "./rateLimiter";
 export { reactiveScored } from "./reactiveEviction";
 // Retry
-export type { RetryOptions } from "./retry";
+export type { DelayStrategy, RetryMeta, RetryOptions } from "./retry";
 export { retry } from "./retry";
 // State machine
 export type {
@@ -64,6 +81,12 @@ export type {
 	StateMachineResult,
 } from "./stateMachine";
 export { stateMachine } from "./stateMachine";
+// Token tracker
+export type { TokenMeta, TokenTrackedStore, TokenUsage } from "./tokenTracker";
+export { tokenTracker } from "./tokenTracker";
+// Track (stream metadata)
+export type { TrackedStore, TrackMeta, TrackStatus } from "./track";
+export { track } from "./track";
 // Validation pipeline
 export type {
 	AsyncValidator,
@@ -72,3 +95,6 @@ export type {
 	ValidationPipelineResult,
 } from "./validationPipeline";
 export { validationPipeline } from "./validationPipeline";
+// With breaker (circuit breaker operator)
+export type { BreakerLike, WithBreakerOptions } from "./withBreaker";
+export { CircuitOpenError, withBreaker } from "./withBreaker";

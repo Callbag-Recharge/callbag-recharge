@@ -113,8 +113,25 @@ const REGISTRY = {
 	rescue: "src/extra/rescue.ts",
 	repeat: "src/extra/repeat.ts",
 
+	// Extras — sources (from orchestrate)
+	fromTrigger: "src/extra/fromTrigger.ts",
+	fromCron: "src/extra/fromCron.ts",
+	route: "src/extra/route.ts",
+
 	// Utils
 	retry: "src/utils/retry.ts",
+	track: "src/utils/track.ts",
+	checkpoint: "src/utils/checkpoint.ts",
+	tokenTracker: "src/utils/tokenTracker.ts",
+	withBreaker: "src/utils/withBreaker.ts",
+	dag: "src/utils/dag.ts",
+
+	// Orchestrate — workflow nodes
+	pipeline: "src/orchestrate/pipeline.ts",
+	task: "src/orchestrate/task.ts",
+	branch: "src/orchestrate/branch.ts",
+	approval: "src/orchestrate/approval.ts",
+	gate: "src/orchestrate/gate.ts",
 
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",

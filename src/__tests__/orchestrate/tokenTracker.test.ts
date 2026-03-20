@@ -4,8 +4,8 @@ import { pipe } from "../../core/pipe";
 import { producer } from "../../core/producer";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
-import type { TokenMeta, TokenTrackedStore } from "../../orchestrate/tokenTracker";
-import { tokenTracker } from "../../orchestrate/tokenTracker";
+import type { TokenMeta, TokenTrackedStore } from "../../utils/tokenTracker";
+import { tokenTracker } from "../../utils/tokenTracker";
 
 describe("tokenTracker", () => {
 	it("tracks token usage across emissions", () => {

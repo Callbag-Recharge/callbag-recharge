@@ -1,18 +1,17 @@
 // ---------------------------------------------------------------------------
 // pipeline — declarative workflow builder
 // ---------------------------------------------------------------------------
-// Compose orchestration operators into a declarative workflow. Steps declare
-// their deps, and pipeline() auto-wires derived + operators. Each step gets
-// reactive status tracking via track().
+// Compose workflow steps into a declarative DAG. Steps declare deps, and
+// pipeline() auto-wires them in topological order with reactive status tracking.
 //
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     upper:   step(["trigger"], s => pipe(s, map(v => v.toUpperCase()))),
-//     output:  step(["upper"], s => pipe(s, track())),
+//     fetch:   task(["trigger"], async (v) => fetchData(v)),
+//     process: task(["fetch"], async (data) => transform(data)),
 //   });
 //   wf.steps.trigger.fire("hello");
-//   wf.status.get(); // { trigger: "active", upper: "active", output: "active" }
+//   wf.status.get(); // "idle" → "active" → "completed"
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
@@ -46,27 +45,37 @@ export interface StepMeta {
 	error?: unknown;
 }
 
+/** Expert-level internals — callbag lifecycle details. */
+export interface PipelineInner<S extends Record<string, StepDef>> {
+	/** Stream lifecycle status derived from callbag DATA/END signals. */
+	streamStatus: Store<PipelineStatus>;
+	/** Per-step reactive metadata (callbag-level counts and stream status). */
+	stepMeta: { [K in keyof S]: Store<StepMeta> };
+	/** Topologically sorted step names. */
+	order: string[];
+}
+
 export interface PipelineResult<S extends Record<string, StepDef>> {
 	/** Access individual step stores by name. */
 	steps: { [K in keyof S]: Store<any> };
-	/** Per-step reactive metadata. */
-	stepMeta: { [K in keyof S]: Store<StepMeta> };
-	/** Overall pipeline status: derived from all step stream statuses (callbag lifecycle). */
+	/** Overall pipeline status: idle → active → completed/errored. Derived from task() steps automatically. */
 	status: Store<PipelineStatus>;
-	/** Run status derived from registered taskState instances. Tracks actual work execution. */
-	runStatus: Store<PipelineStatus>;
-	/** Topologically sorted step names. */
-	order: string[];
-	/** Reset all step metas to idle. Call before re-triggering to track a new run. */
+	/** Reset all steps and tasks to idle. Call before re-triggering. */
 	reset(): void;
 	/** Dispose all internal subscriptions. */
 	destroy(): void;
+	/** Expert-level callbag internals. Most users don't need this. */
+	inner: PipelineInner<S>;
 }
 
 const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
 
 /**
- * Creates a step definition for use in `pipeline()`.
+ * **Advanced / expert-only.** Creates a raw step definition for `pipeline()` using callbag stores.
+ *
+ * Most users should use `task()` instead, which handles diamond joins, async lifecycle,
+ * and status tracking automatically. Use `step()` only when you need full callbag control
+ * (e.g., wrapping existing stores, custom operators, or source steps like `fromTrigger`).
  *
  * @param factory - A store, or a function that receives dependency stores and returns a store.
  * @param deps - Names of steps this step depends on (default: []).
@@ -76,14 +85,14 @@ const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
  *
  * @example
  * ```ts
- * import { step } from 'callbag-recharge/orchestrate';
- * import { fromTrigger } from 'callbag-recharge/orchestrate';
+ * import { step, task, fromTrigger, pipeline } from 'callbag-recharge/orchestrate';
  *
- * // Source step (no deps)
- * const trigger = step(fromTrigger<string>());
- *
- * // Transform step (depends on trigger)
- * const upper = step(["trigger"], s => pipe(s, map(v => v.toUpperCase())));
+ * const wf = pipeline({
+ *   // step() for source steps (fromTrigger, fromCron, etc.)
+ *   trigger: step(fromTrigger<string>()),
+ *   // task() for everything else — handles joins, async, status automatically
+ *   fetch: task(["trigger"], async (v) => fetchData(v)),
+ * });
  * ```
  *
  * @category orchestrate
@@ -124,51 +133,48 @@ export function step<T>(
 }
 
 /**
- * Declarative workflow builder. Steps declare deps, auto-wires stores. Reactive status per step (Tier 2).
+ * Declarative workflow builder. Wire steps into a DAG with automatic status tracking.
  *
- * @param steps - Record of step name → StepDef. Use `step()` to create definitions.
+ * Use `task()` for work steps and `step()` only for source steps (triggers, cron).
+ * Status is automatically derived from `task()` steps — no manual wiring needed.
+ *
+ * @param steps - Record of step name → StepDef. Use `task()` for work, `step()` for sources.
  * @param opts - Optional configuration.
  *
- * @returns `PipelineResult<S>` — step stores, per-step metadata, overall status, topological order, and destroy().
+ * @returns `PipelineResult<S>` — step stores, status, reset/destroy, and inner callbag details.
  *
  * @returnsTable steps | Record | Access step stores by name.
- * stepMeta | Record | Per-step reactive metadata (status, count, error).
- * status | Store\<PipelineStatus\> | Stream lifecycle status derived from callbag DATA/END signals.
- * runStatus | Store\<PipelineStatus\> | Run status derived from registered taskState instances.
- * order | string[] | Topologically sorted step names.
- * reset() | () => void | Reset step metas, counts, and registered taskStates to idle.
+ * status | Store\<PipelineStatus\> | Pipeline status: idle → active → completed/errored.
+ * reset() | () => void | Reset all steps and tasks to idle for re-trigger.
  * destroy() | () => void | Dispose all internal subscriptions.
- *
- * @option tasks | Partial\<Record\<string, TaskState\>\> | undefined | Map step names to TaskState instances for runStatus tracking.
+ * inner | PipelineInner | Expert-level callbag internals (streamStatus, stepMeta, order).
  *
  * @remarks **Auto-wiring:** Step deps are resolved by name. Factory functions receive dep stores in declared order.
  * @remarks **Topological sort:** Steps are wired in dependency order. Cycles are detected and throw.
- * @remarks **Reactive status:** Each step has a `StepMeta` store. Overall status is derived from all step statuses.
- * @remarks **Run status:** When `tasks` are provided, `runStatus` tracks actual work execution via TaskState (idle → active → completed/errored). Unlike `status`, this works with trigger-based pipelines where streams stay alive across runs. When no `tasks` are provided, `runStatus` stays `"idle"` (no work to track).
- * @remarks **Task ownership:** TaskState instances passed via `tasks` must not be destroyed before `pipeline.destroy()`. The pipeline subscribes to their sources — early teardown will break `runStatus` tracking.
+ * @remarks **Auto status:** When using `task()` steps, `status` automatically tracks work execution (idle → active → completed/errored). Falls back to stream lifecycle tracking when no tasks are detected.
+ * @remarks **Branch support:** Use `branch()` steps with compound deps like `"validate.fail"` for conditional routing.
  *
  * @example
  * ```ts
- * import { pipe } from 'callbag-recharge';
- * import { map, subscribe } from 'callbag-recharge/extra';
- * import { pipeline, step, fromTrigger } from 'callbag-recharge/orchestrate';
+ * import { pipeline, step, task, fromTrigger } from 'callbag-recharge/orchestrate';
  *
  * const wf = pipeline({
- *   trigger: step(fromTrigger<number>()),
- *   doubled: step(["trigger"], s => pipe(s, map(x => x * 2))),
+ *   trigger: step(fromTrigger<string>()),
+ *   fetch:   task(["trigger"], async (v) => fetchData(v), { retry: 3 }),
+ *   process: task(["fetch"], async (data) => transform(data)),
  * });
  *
- * subscribe(wf.steps.doubled, v => console.log(v));
- * (wf.steps.trigger as any).fire(5); // logs 10
+ * wf.steps.trigger.fire("go");
+ * wf.status.get(); // "idle" → "active" → "completed"
  * ```
  *
- * @seeAlso [step](./pipeline) — step definition, [dag](./dag) — DAG validation, [track](./track) — per-stream tracking
+ * @seeAlso [task](./task) — value-level step, [branch](./branch) — conditional routing, [step](./pipeline) — expert-level step
  *
  * @category orchestrate
  */
 export function pipeline<S extends Record<string, StepDef>>(
 	steps: S,
-	opts?: { name?: string; tasks?: Partial<Record<keyof S, TaskState<any>>> },
+	opts?: { name?: string },
 ): PipelineResult<S> {
 	const baseName = opts?.name ?? "pipeline";
 	const stepNames = Object.keys(steps);
@@ -185,10 +191,12 @@ export function pipeline<S extends Record<string, StepDef>>(
 	for (const name of stepNames) {
 		const def = steps[name];
 		for (const dep of def.deps) {
-			if (!inDegree.has(dep)) {
+			// Support compound deps like "validate.fail" → resolve to parent "validate"
+			const baseDep = dep.includes(".") ? dep.split(".")[0] : dep;
+			if (!inDegree.has(baseDep)) {
 				throw new Error(`pipeline: step "${name}" depends on unknown step "${dep}"`);
 			}
-			adj.get(dep)!.push(name);
+			adj.get(baseDep)!.push(name);
 			inDegree.set(name, inDegree.get(name)! + 1);
 		}
 	}
@@ -228,7 +236,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 			const def = steps[name];
 			const stepName = def.name ?? name;
 
-			// Resolve dep stores
+			// Resolve dep stores (supports compound names like "validate.fail")
 			const depStores = def.deps.map((dep) => {
 				const s = storeMap.get(dep);
 				if (!s) {
@@ -248,6 +256,12 @@ export function pipeline<S extends Record<string, StepDef>>(
 			}
 
 			storeMap.set(name, store);
+
+			// Auto-register branch fail stores (e.g., "validate" → "validate.fail")
+			if ((def as any)._failStore && depStores.length === 1) {
+				const failStore = (def as any)._failStore(depStores[0]);
+				storeMap.set(`${name}.fail`, failStore);
+			}
 
 			// Create meta store for this step
 			const meta = state<StepMeta>(
@@ -288,7 +302,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 		throw err;
 	}
 
-	// --- Overall status derived from all step metas ---
+	// --- Stream status derived from all step metas (callbag lifecycle) ---
 	// Source steps (no deps) are long-lived event sources — they don't complete.
 	// When a pipeline has downstream work steps, source steps are non-blocking
 	// for completion (active or idle source steps are treated as "done").
@@ -297,7 +311,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 		order.map((n, i) => (steps[n].deps.length === 0 ? i : -1)).filter((i) => i >= 0),
 	);
 	const hasWorkSteps = sourceStepIndices.size < allMetas.length;
-	const overallStatus = derived(allMetas, () => {
+	const streamStatus = derived(allMetas, () => {
 		let hasActive = false;
 		let hasError = false;
 		let allCompleted = true;
@@ -321,45 +335,55 @@ export function pipeline<S extends Record<string, StepDef>>(
 		return "active" as PipelineStatus; // mix of completed + idle = in progress
 	});
 
-	// Subscribe to overallStatus to keep it connected, track for cleanup
-	const statusUnsub = subscribe(overallStatus, () => {});
-	unsubs.push(statusUnsub);
+	// Subscribe to streamStatus to keep it connected, track for cleanup
+	const streamStatusUnsub = subscribe(streamStatus, () => {});
+	unsubs.push(streamStatusUnsub);
 
-	Inspector.register(overallStatus, { kind: "pipeline-status", name: `${baseName}:status` });
+	Inspector.register(streamStatus, {
+		kind: "pipeline-stream-status",
+		name: `${baseName}:streamStatus`,
+	});
 
-	// --- Run status derived from taskState instances ---
-	// Tracks actual work execution: idle (all idle), active (any running),
-	// completed (none running, at least one success), errored (none running, any error).
-	const taskEntries = opts?.tasks ? Object.values(opts.tasks).filter(Boolean) : [];
-	let runStatus: Store<PipelineStatus>;
-	if (taskEntries.length > 0) {
-		const taskStores = taskEntries as TaskState<any>[];
-		runStatus = derived(taskStores, () => {
+	// --- Task status derived from taskState instances ---
+	// Auto-detect _taskState from task() step defs.
+	const autoDetectedTasks: TaskState<any>[] = [];
+	for (const name of stepNames) {
+		const def = steps[name] as any;
+		if (def._taskState) autoDetectedTasks.push(def._taskState);
+	}
+	// Deduplicate
+	const dedupedTasks = [...new Set(autoDetectedTasks)];
+
+	// Primary status: if tasks exist, derive from taskState. Otherwise fall back to stream status.
+	let status: Store<PipelineStatus>;
+	if (dedupedTasks.length > 0) {
+		const taskStores = dedupedTasks;
+		status = derived(taskStores, () => {
 			let anyRunning = false;
 			let anyError = false;
-			let anySuccess = false;
+			let allSuccess = true;
 			let allIdle = true;
 
-			for (const task of taskStores) {
-				const s = task.get().status;
+			for (const ts of taskStores) {
+				const s = ts.get().status;
 				if (s === "running") anyRunning = true;
 				if (s === "error") anyError = true;
-				if (s === "success") anySuccess = true;
+				if (s !== "success") allSuccess = false;
 				if (s !== "idle") allIdle = false;
 			}
 
 			if (anyRunning) return "active" as PipelineStatus;
 			if (anyError) return "errored" as PipelineStatus;
-			if (anySuccess) return "completed" as PipelineStatus;
+			if (allSuccess) return "completed" as PipelineStatus;
 			if (allIdle) return "idle" as PipelineStatus;
-			return "idle" as PipelineStatus;
+			return "active" as PipelineStatus;
 		});
-		const runStatusUnsub = subscribe(runStatus, () => {});
-		unsubs.push(runStatusUnsub);
-		Inspector.register(runStatus, { kind: "pipeline-run-status", name: `${baseName}:runStatus` });
+		const statusUnsub = subscribe(status, () => {});
+		unsubs.push(statusUnsub);
+		Inspector.register(status, { kind: "pipeline-status", name: `${baseName}:status` });
 	} else {
-		// No tasks registered — no work to track, stays idle
-		runStatus = state<PipelineStatus>("idle", { name: `${baseName}:runStatus` });
+		// No task() steps — fall back to stream lifecycle status
+		status = streamStatus;
 	}
 
 	// --- Build result ---
@@ -371,12 +395,18 @@ export function pipeline<S extends Record<string, StepDef>>(
 		(stepMetaResult as any)[name] = metaMap.get(name)!;
 	}
 
+	// Include compound stores (e.g., "validate.fail" from branch steps)
+	for (const [key, store] of storeMap) {
+		if (key.includes(".") && !(key in stepsResult)) {
+			(stepsResult as any)[key] = store;
+		}
+	}
+
+	let _destroyed = false;
+
 	return {
 		steps: stepsResult,
-		stepMeta: stepMetaResult,
-		status: overallStatus,
-		runStatus,
-		order,
+		status,
 		reset() {
 			for (const meta of allMetas) {
 				(meta as any).set({ ...IDLE_STEP_META });
@@ -384,13 +414,25 @@ export function pipeline<S extends Record<string, StepDef>>(
 			for (const key of counts.keys()) {
 				counts.set(key, 0);
 			}
-			for (const task of taskEntries as TaskState<any>[]) {
+			for (const task of dedupedTasks) {
 				task.reset();
 			}
 		},
 		destroy() {
+			if (_destroyed) return;
+			_destroyed = true;
 			for (const unsub of unsubs) unsub();
 			unsubs.length = 0;
+			// Invalidate approval controls so stale calls throw
+			for (const name of stepNames) {
+				const def = steps[name] as any;
+				if (typeof def._destroy === "function") def._destroy();
+			}
+		},
+		inner: {
+			streamStatus,
+			stepMeta: stepMetaResult,
+			order,
 		},
 	};
 }

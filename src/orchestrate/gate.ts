@@ -64,6 +64,7 @@ export interface GatedStore<A> extends Store<A | undefined> {
  * @remarks **Tier 2:** Cycle boundary — each approved value starts a new DIRTY+value cycle.
  * @remarks **Queue:** Values queue while gate is closed. `maxPending` limits queue size (FIFO drop).
  * @remarks **Open/close:** `open()` flushes all pending and auto-approves future values. `close()` re-enables manual gating.
+ * @remarks **Teardown:** After the gate's producer is torn down (unsubscribed), all controls throw. Re-subscribing resets the gate to a clean state.
  *
  * @example
  * ```ts
@@ -111,6 +112,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 		let _emit: ((value: A) => void) | null = null;
 		let _error: ((e: unknown) => void) | null = null;
 		let _complete: (() => void) | null = null;
+		let _torn = false;
 		let queue: A[] = [];
 
 		function enqueue(value: A) {
@@ -131,6 +133,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 			const items = queue.splice(0, queue.length);
 			pendingStore.set([]);
 			for (const item of items) {
+				if (_torn) break;
 				_emit?.(item);
 			}
 		}
@@ -142,6 +145,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 				_complete = complete;
 
 				// Reset state on reconnect
+				_torn = false;
 				queue = [];
 				pendingStore.set([]);
 				isOpenStore.set(startOpen);
@@ -159,6 +163,13 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 						onEnd: (err) => {
 							if (err !== undefined) error(err);
 							else complete();
+							// Mark torn so controls throw instead of silently no-oping
+							_emit = null;
+							_error = null;
+							_complete = null;
+							_torn = true;
+							queue = [];
+							pendingStore.set([]);
 						},
 					},
 				);
@@ -167,6 +178,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 					_emit = null;
 					_error = null;
 					_complete = null;
+					_torn = true;
 					queue = [];
 					pendingStore.set([]);
 					unsub();
@@ -179,13 +191,19 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 
 		const gated = store as unknown as GatedStore<A>;
 
+		function guardTorn(method: string) {
+			if (_torn) throw new Error(`gate: ${method}() called after gate was torn down`);
+		}
+
 		Object.defineProperties(gated, {
 			pending: { value: pendingStore, enumerable: true },
 			isOpen: { value: isOpenStore, enumerable: true },
 			approve: {
 				value(count = 1) {
+					guardTorn("approve");
 					const items = dequeue(count);
 					for (const item of items) {
+						if (_torn) break;
 						_emit?.(item);
 					}
 				},
@@ -193,12 +211,14 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 			},
 			reject: {
 				value(count = 1) {
+					guardTorn("reject");
 					dequeue(count);
 				},
 				enumerable: true,
 			},
 			modify: {
 				value(fn: (value: A) => A) {
+					guardTorn("modify");
 					const items = dequeue(1);
 					if (items.length > 0) {
 						_emit?.(fn(items[0]));
@@ -208,6 +228,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 			},
 			open: {
 				value() {
+					guardTorn("open");
 					isOpenStore.set(true);
 					flushAll();
 				},
@@ -215,6 +236,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 			},
 			close: {
 				value() {
+					guardTorn("close");
 					isOpenStore.set(false);
 				},
 				enumerable: true,

@@ -13,7 +13,7 @@ import type { Store } from "@lib/core/types";
 import { reactiveLog } from "@lib/data/reactiveLog";
 import type { ReactiveLog } from "@lib/data/types";
 import { combine, subscribe, switchMap } from "@lib/extra";
-import { fromTrigger } from "@lib/orchestrate/fromTrigger";
+import { fromTrigger } from "@lib/extra/fromTrigger";
 import { pipeline, step } from "@lib/orchestrate/pipeline";
 import { taskState } from "@lib/orchestrate/taskState";
 import type { TaskState } from "@lib/orchestrate/types";

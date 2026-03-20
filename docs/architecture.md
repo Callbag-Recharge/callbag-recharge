@@ -59,7 +59,7 @@ src/
 ├── extra/           ← basic operators, sources, sinks (may use core and/or raw callbag)
 ├── utils/           ← versatile utilities reused by many modules (more abstract than extras)
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, pubsub)
-├── orchestrate/     ← workflow scheduling, pipelines, triggers (specialized domain)
+├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval) + plumbing (taskState, gate, executionLog)
 ├── memory/          ← agent memory primitives (specialized domain)
 ├── patterns/        ← composed recipes specializing certain use cases
 ├── adapters/        ← external system connectors (peer deps for external libs)
@@ -613,10 +613,22 @@ Reactive data structures using the **version-gated pattern**: `state<number>` ve
 
 ### Orchestrate (`src/orchestrate/`)
 
-Lightweight scheduling primitives — "Airflow in TypeScript" using `derived()` + `effect()` as the DAG executor.
+Workflow nodes and orchestration-specific plumbing. Users build pipelines with these building blocks:
 
-| Primitive | What it does |
-|-----------|-------------|
-| `fromCron(expr)` | Tier 2 source emitting `Date` on cron match (5-field, built-in parser) |
-| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. `NodeV0` compliant. |
-| `dag(nodes)` | Validates acyclicity (Kahn's), registers Inspector edges. No new nodes. |
+| Workflow node | What it does |
+|---------------|-------------|
+| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. |
+| `task(deps, fn, opts)` | Value-level work step. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
+| `branch(dep, pred)` | Binary conditional routing. Creates `name` (pass) + `name.fail` (fail) steps. |
+| `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
+| `step(factory)` | Raw callbag source wrapper. For `fromTrigger()`, `state()`, or expert-only full callbag control. |
+
+| Internal plumbing | What it does |
+|-------------------|-------------|
+| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Used by `task()`. |
+| `gate(opts)` | Pipe operator for approval queuing. Wrapped by `approval()`. |
+| `executionLog(opts)` | Reactive execution history with pipeline auto-logging. |
+
+Generic operators/sources that were previously here have moved to their natural homes:
+- **`extra/`**: `fromTrigger`, `fromCron`, `cron`, `route`, `timeout`
+- **`utils/`**: `track`, `checkpoint`, `checkpointAdapters`, `tokenTracker`, `withBreaker`, `dag`, `retry` (with `retryMeta`)

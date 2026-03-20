@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { effect } from "../../core/effect";
 import { subscribe } from "../../core/subscribe";
-import { fromCron } from "../../orchestrate/fromCron";
+import { fromCron } from "../../extra/fromCron";
 
 describe("fromCron", () => {
 	beforeEach(() => {

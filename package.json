@@ -98,6 +98,26 @@
 				"default": "./dist/patterns/formField/index.cjs"
 			}
 		},
+		"./patterns/textBuffer": {
+			"import": {
+				"types": "./dist/patterns/textBuffer/index.d.ts",
+				"default": "./dist/patterns/textBuffer/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/textBuffer/index.d.cts",
+				"default": "./dist/patterns/textBuffer/index.cjs"
+			}
+		},
+		"./patterns/textEditor": {
+			"import": {
+				"types": "./dist/patterns/textEditor/index.d.ts",
+				"default": "./dist/patterns/textEditor/index.js"
+			},
+			"require": {
+				"types": "./dist/patterns/textEditor/index.d.cts",
+				"default": "./dist/patterns/textEditor/index.cjs"
+			}
+		},
 		"./patterns/toolCallState": {
 			"import": {
 				"types": "./dist/patterns/toolCallState/index.d.ts",

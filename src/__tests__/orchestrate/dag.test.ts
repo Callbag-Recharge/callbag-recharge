@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { state } from "../../core/state";
-import { dag } from "../../orchestrate/dag";
+import { dag } from "../../utils/dag";
 
 describe("dag", () => {
 	it("validates a simple linear DAG", () => {

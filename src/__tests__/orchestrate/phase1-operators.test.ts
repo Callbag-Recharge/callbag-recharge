@@ -1,17 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Inspector } from "../../core/inspector";
+import { fromTrigger } from "../../extra/fromTrigger";
+import { route } from "../../extra/route";
 import { subscribe } from "../../extra/subscribe";
+import { timeout } from "../../extra/timeout";
 import { effect, pipe, producer, state } from "../../index";
-import {
-	fromTrigger,
-	gate,
-	route,
-	track,
-	withBreaker,
-	withRetry,
-	withTimeout,
-} from "../../orchestrate";
+import { gate } from "../../orchestrate";
 import { circuitBreaker } from "../../utils";
+import { retry } from "../../utils/retry";
+import { track } from "../../utils/track";
+import { withBreaker } from "../../utils/withBreaker";
 
 // ==========================================================================
 // 1a. fromTrigger
@@ -240,9 +238,9 @@ describe("route", () => {
 });
 
 // ==========================================================================
-// 1c. withTimeout
+// 1c. timeout
 // ==========================================================================
-describe("withTimeout", () => {
+describe("timeout", () => {
 	beforeEach(() => {
 		vi.useFakeTimers();
 	});
@@ -252,7 +250,7 @@ describe("withTimeout", () => {
 
 	it("forwards values and resets timer", () => {
 		const input = state(0);
-		const guarded = pipe(input, withTimeout(100));
+		const guarded = pipe(input, timeout(100));
 
 		const values: number[] = [];
 		const unsub = subscribe(guarded, (v) => values.push(v));
@@ -269,7 +267,7 @@ describe("withTimeout", () => {
 
 	it("errors with TimeoutError after ms of silence", () => {
 		const input = state(0);
-		const guarded = pipe(input, withTimeout(100));
+		const guarded = pipe(input, timeout(100));
 
 		const obs = Inspector.observe(guarded);
 
@@ -289,7 +287,7 @@ describe("withTimeout", () => {
 			{ initial: 0 },
 		);
 
-		const guarded = pipe(p, withTimeout(100));
+		const guarded = pipe(p, timeout(100));
 		const obs = Inspector.observe(guarded);
 
 		expect(obs.ended).toBe(true);
@@ -307,7 +305,7 @@ describe("withTimeout", () => {
 			{ initial: 0 },
 		);
 
-		const guarded = pipe(p, withTimeout(100));
+		const guarded = pipe(p, timeout(100));
 		const obs = Inspector.observe(guarded);
 
 		expect(obs.ended).toBe(true);
@@ -316,7 +314,7 @@ describe("withTimeout", () => {
 
 	it("get() returns initial value from input", () => {
 		const input = state(42);
-		const guarded = pipe(input, withTimeout(100));
+		const guarded = pipe(input, timeout(100));
 		expect(guarded.get()).toBe(42);
 	});
 });
@@ -409,9 +407,9 @@ describe("withBreaker", () => {
 });
 
 // ==========================================================================
-// 1e. withRetry
+// 1e. retry
 // ==========================================================================
-describe("withRetry", () => {
+describe("retry", () => {
 	it("retries on error up to count", () => {
 		let attempts = 0;
 		const source = producer<number>(
@@ -426,7 +424,7 @@ describe("withRetry", () => {
 			{ initial: 0, resubscribable: true },
 		);
 
-		const retried = pipe(source, withRetry(5));
+		const retried = pipe(source, retry(5));
 
 		const values: number[] = [];
 		const unsub = subscribe(retried, (v) => values.push(v));
@@ -444,7 +442,7 @@ describe("withRetry", () => {
 			{ initial: 0, resubscribable: true },
 		);
 
-		const retried = pipe(source, withRetry(2));
+		const retried = pipe(source, retry(2));
 		const obs = Inspector.observe(retried);
 
 		expect(obs.ended).toBe(true);
@@ -465,7 +463,7 @@ describe("withRetry", () => {
 			{ initial: 0, resubscribable: true },
 		);
 
-		const retried = pipe(source, withRetry(5));
+		const retried = pipe(source, retry(5));
 
 		const unsub = subscribe(retried, () => {});
 		const meta = (retried as any).retryMeta.get();
@@ -486,7 +484,7 @@ describe("withRetry", () => {
 
 		const retried = pipe(
 			source,
-			withRetry({
+			retry({
 				count: 10,
 				while: (err) => (err as Error).message === "retryable",
 			}),
@@ -515,7 +513,7 @@ describe("withRetry", () => {
 
 		const retried = pipe(
 			source,
-			withRetry({
+			retry({
 				count: 5,
 				delay: (attempt) => (attempt + 1) * 100,
 			}),
@@ -544,7 +542,7 @@ describe("withRetry", () => {
 			{ initial: 0 },
 		);
 
-		const retried = pipe(source, withRetry(3));
+		const retried = pipe(source, retry(3));
 		const obs = Inspector.observe(retried);
 
 		expect(obs.ended).toBe(true);
@@ -999,7 +997,7 @@ describe("gate — isOpen reconnect reset (P1)", () => {
 	});
 });
 
-describe("withRetry — delay null stops without incrementing (P3)", () => {
+describe("retry — delay null stops without incrementing (P3)", () => {
 	it("does not increment attempt when delay returns null", () => {
 		let attempts = 0;
 		const source = producer<number>(
@@ -1012,7 +1010,7 @@ describe("withRetry — delay null stops without incrementing (P3)", () => {
 
 		const retried = pipe(
 			source,
-			withRetry({
+			retry({
 				count: 5,
 				delay: () => null, // always stop
 			}),
@@ -1027,7 +1025,7 @@ describe("withRetry — delay null stops without incrementing (P3)", () => {
 	});
 });
 
-describe("withRetry — stopped guard on teardown (P4)", () => {
+describe("retry — stopped guard on teardown (P4)", () => {
 	it("does not error when torn down during delay", () => {
 		vi.useFakeTimers();
 		let attempts = 0;
@@ -1042,7 +1040,7 @@ describe("withRetry — stopped guard on teardown (P4)", () => {
 
 		const retried = pipe(
 			source,
-			withRetry({
+			retry({
 				count: 5,
 				delay: () => 1000,
 			}),
@@ -1089,12 +1087,12 @@ describe("Phase 1 integration", () => {
 		u2();
 	});
 
-	it("gate → withTimeout composition", () => {
+	it("gate → timeout composition", () => {
 		vi.useFakeTimers();
 
 		const input = state(0);
 		const gated = pipe(input, gate()) as any;
-		const guarded = pipe(gated, withTimeout(1000));
+		const guarded = pipe(gated, timeout(1000));
 
 		const obs = Inspector.observe(guarded);
 
