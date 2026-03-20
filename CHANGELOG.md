@@ -1,3 +1,10 @@
+# [0.8.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.7.0...v0.8.0) (2026-03-20)
+
+
+### Features
+
+* implement text editor phase 4.5 ([36f3089](https://github.com/Callbag-Recharge/callbag-recharge/commit/36f30897107c24613f86a1730ad3298dccb559e0))
+
 # [0.7.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.6.0...v0.7.0) (2026-03-20)
 
 
