@@ -139,6 +139,9 @@ const REGISTRY = {
 	// Extras — interop
 	subject: "src/extra/subject.ts",
 	wrap: "src/extra/wrap.ts",
+
+	// Patterns
+	textBuffer: "src/patterns/textBuffer/index.ts",
 };
 
 // ─── TypeScript parsing ─────────────────────────────────────────────────────

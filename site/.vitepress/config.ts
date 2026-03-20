@@ -88,6 +88,7 @@ export default defineConfig({
 					{ text: "teardown()", link: "/api/teardown" },
 					{ text: "Protocol & teardown", link: "/api/protocol" },
 					{ text: "Inspector", link: "/api/inspector" },
+					{ text: "textBuffer()", link: "/api/textBuffer" },
 					{ text: "merge()", link: "/api/merge" },
 					{ text: "combine()", link: "/api/combine" },
 					{ text: "pipeRaw()", link: "/api/pipeRaw" },

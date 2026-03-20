@@ -9,6 +9,13 @@ import {
 import { type CommandBusResult, type CommandDef, commandBus } from "../commandBus";
 import { type FocusManagerResult, focusManager } from "../focusManager";
 import { type TextBufferResult, textBuffer } from "../textBuffer";
+import {
+	toggleCodeBlock,
+	toggleHeading,
+	toggleInlineCode,
+	toggleOrderedList,
+	toggleUnorderedList,
+} from "./markdownCommands";
 
 export interface TextEditorOptions {
 	initial?: string;
@@ -77,20 +84,38 @@ export function textEditor(opts?: TextEditorOptions): TextEditorResult {
 		buffer.cursor.moveCursor(-token.length);
 	}
 
+	function applyMarkdownEdit(
+		fn: (
+			text: string,
+			start: number,
+			end: number,
+		) => {
+			rangeStart: number;
+			rangeEnd: number;
+			replacement: string;
+			selStart: number;
+			selEnd: number;
+		},
+	): void {
+		const value = buffer.content.get();
+		const start = buffer.cursor.start.get();
+		const end = buffer.cursor.end.get();
+		const edit = fn(value, start, end);
+		buffer.replaceRange(
+			edit.rangeStart,
+			edit.rangeEnd,
+			edit.replacement,
+			edit.selStart,
+			edit.selEnd,
+		);
+	}
+
 	const commands = commandBus<EditorCommands>(
 		{
 			bold: { execute: () => wrap("**") },
 			italic: { execute: () => wrap("*") },
 			heading: {
-				execute: ({ level }) => {
-					const token = `${"#".repeat(level)} `;
-					const selected = buffer.selectedText.get();
-					if (selected.length > 0) {
-						buffer.replace(selected.replace(/^/gm, token));
-						return;
-					}
-					buffer.insert(token);
-				},
+				execute: ({ level }) => applyMarkdownEdit((text, s, e) => toggleHeading(text, s, e, level)),
 			},
 			link: {
 				execute: ({ url, text }) => {
@@ -100,25 +125,16 @@ export function textEditor(opts?: TextEditorOptions): TextEditorResult {
 				},
 			},
 			list: {
-				execute: ({ ordered }) => {
-					const selected = buffer.selectedText.get();
-					const source = selected.length > 0 ? selected : "";
-					const lines = source.length > 0 ? source.split("\n") : [""];
-					const formatted = lines
-						.map((line, index) => (ordered ? `${index + 1}. ${line}` : `- ${line}`))
-						.join("\n");
-					buffer.replace(formatted);
-				},
+				execute: ({ ordered }) =>
+					applyMarkdownEdit((text, s, e) =>
+						ordered ? toggleOrderedList(text, s, e) : toggleUnorderedList(text, s, e),
+					),
 			},
 			code: {
-				execute: ({ block }) => {
-					const selected = buffer.selectedText.get();
-					if (block) {
-						buffer.replace(`\`\`\`\n${selected}\n\`\`\``);
-						return;
-					}
-					buffer.replace(`\`${selected}\``);
-				},
+				execute: ({ block }) =>
+					applyMarkdownEdit((text, s, e) =>
+						block ? toggleCodeBlock(text, s, e) : toggleInlineCode(text, s, e),
+					),
 			},
 			undo: {
 				execute: () => {

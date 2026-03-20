@@ -50,6 +50,49 @@ describe("textBuffer", () => {
 		expect(tb.content.get()).toBe("xab");
 	});
 
+	it("undo and redo restore caret from snapshots", () => {
+		const tb = textBuffer("a");
+		tb.insert("b");
+		expect(tb.content.get()).toBe("ab");
+		expect(tb.cursor.start.get()).toBe(2);
+		tb.cursor.collapse(0);
+		tb.insert("Z");
+		expect(tb.content.get()).toBe("Zab");
+		expect(tb.cursor.start.get()).toBe(1);
+		tb.history.undo();
+		expect(tb.content.get()).toBe("ab");
+		expect(tb.cursor.start.get()).toBe(2);
+		tb.history.undo();
+		expect(tb.content.get()).toBe("a");
+		expect(tb.cursor.start.get()).toBe(1);
+		tb.history.redo();
+		expect(tb.content.get()).toBe("ab");
+		expect(tb.cursor.start.get()).toBe(2);
+	});
+
+	it("undo restores non-collapsed selection from snapshot", () => {
+		const tb = textBuffer("");
+		tb.replaceRange(0, 0, "hello", 1, 4);
+		expect(tb.content.get()).toBe("hello");
+		expect(tb.cursor.collapsed.get()).toBe(false);
+		tb.replaceRange(1, 4, "Z", 2, 2);
+		expect(tb.content.get()).toBe("hZo");
+		expect(tb.cursor.collapsed.get()).toBe(true);
+		tb.history.undo();
+		expect(tb.content.get()).toBe("hello");
+		expect(tb.cursor.start.get()).toBe(1);
+		expect(tb.cursor.end.get()).toBe(4);
+		expect(tb.cursor.collapsed.get()).toBe(false);
+	});
+
+	it("replaceRange applies text and selection in one history step", () => {
+		const tb = textBuffer("aa\nbb");
+		tb.replaceRange(0, 2, "XX", 0, 2);
+		expect(tb.content.get()).toBe("XX\nbb");
+		tb.history.undo();
+		expect(tb.content.get()).toBe("aa\nbb");
+	});
+
 	it("dirty becomes false after markClean", () => {
 		const tb = textBuffer("init");
 		expect(tb.dirty.get()).toBe(false);
