@@ -1,3 +1,10 @@
+# [0.7.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.6.0...v0.7.0) (2026-03-20)
+
+
+### Features
+
+* fix airflow demo ([f267c44](https://github.com/Callbag-Recharge/callbag-recharge/commit/f267c44b7a44df5071c7c7a78196d059175b6c04))
+
 # [0.6.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.5.0...v0.6.0) (2026-03-20)
 
 
