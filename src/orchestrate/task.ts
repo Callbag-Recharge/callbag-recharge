@@ -192,6 +192,19 @@ export function task<T>(
 							const result = await ts.run(async () => {
 								let maybePromise = fn(...values);
 
+								// Guard: async generators silently resolve to the generator
+								// object instead of yielded values. Detect and throw early.
+								if (
+									maybePromise != null &&
+									typeof (maybePromise as any)[Symbol.asyncIterator] ===
+										"function"
+								) {
+									throw new Error(
+										"task() does not support async generators. " +
+											"Use step() + fromAsyncIter() for multi-value async streams.",
+									);
+								}
+
 								// Apply timeout if configured
 								if (timeoutOpt !== undefined && maybePromise instanceof Promise) {
 									maybePromise = Promise.race([

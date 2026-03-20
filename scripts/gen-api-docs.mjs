@@ -235,8 +235,6 @@ function reindentCode(code) {
 }
 
 function extractJSDocData(jsDoc) {
-	if (!jsDoc) return {};
-
 	const result = {
 		description: "",
 		params: [],
@@ -249,6 +247,7 @@ function extractJSDocData(jsDoc) {
 		returnsTable: [],
 		category: "",
 	};
+	if (!jsDoc) return result;
 
 	// Description: the main comment text (before tags)
 	if (jsDoc.comment) {

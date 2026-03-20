@@ -139,7 +139,7 @@ export function step<T>(
  * Status is automatically derived from `task()` steps — no manual wiring needed.
  *
  * @param steps - Record of step name → StepDef. Use `task()` for work, `step()` for sources.
- * @param opts - Optional configuration.
+ * @param opts - Optional configuration: `name` (Inspector prefix), `tasks` (extra `TaskState` instances to fold into aggregate `status` when they are not attached to a `task()` step).
  *
  * @returns `PipelineResult<S>` — step stores, status, reset/destroy, and inner callbag details.
  *
@@ -152,6 +152,7 @@ export function step<T>(
  * @remarks **Auto-wiring:** Step deps are resolved by name. Factory functions receive dep stores in declared order.
  * @remarks **Topological sort:** Steps are wired in dependency order. Cycles are detected and throw.
  * @remarks **Auto status:** When using `task()` steps, `status` automatically tracks work execution (idle → active → completed/errored). Falls back to stream lifecycle tracking when no tasks are detected.
+ * @remarks **opts.tasks:** Pass additional `TaskState` stores so `status` reflects work outside `task()`-wrapped steps (e.g. UI demos that run `taskState` manually). Duplicates are deduped with auto-detected task states.
  * @remarks **Branch support:** Use `branch()` steps with compound deps like `"validate.fail"` for conditional routing.
  *
  * @example
@@ -174,7 +175,7 @@ export function step<T>(
  */
 export function pipeline<S extends Record<string, StepDef>>(
 	steps: S,
-	opts?: { name?: string },
+	opts?: { name?: string; tasks?: Record<string, TaskState<any>> },
 ): PipelineResult<S> {
 	const baseName = opts?.name ?? "pipeline";
 	const stepNames = Object.keys(steps);
@@ -345,11 +346,16 @@ export function pipeline<S extends Record<string, StepDef>>(
 	});
 
 	// --- Task status derived from taskState instances ---
-	// Auto-detect _taskState from task() step defs.
+	// Auto-detect _taskState from task() step defs, merge with explicitly provided tasks.
 	const autoDetectedTasks: TaskState<any>[] = [];
 	for (const name of stepNames) {
 		const def = steps[name] as any;
 		if (def._taskState) autoDetectedTasks.push(def._taskState);
+	}
+	if (opts?.tasks) {
+		for (const ts of Object.values(opts.tasks)) {
+			autoDetectedTasks.push(ts);
+		}
 	}
 	// Deduplicate
 	const dedupedTasks = [...new Set(autoDetectedTasks)];

@@ -156,7 +156,7 @@ export function createPipeline(): Pipeline {
 	// --- Run tracking ---
 	const _runCount = state(0, { name: "pipeline:runCount" });
 	const _running = state(false, { name: "pipeline:running" });
-	let _runStatusUnsub: (() => void) | null = null;
+	let _pipelineStatusUnsub: (() => void) | null = null;
 
 	// --- Declarative pipeline wiring via pipeline() + step() ---
 	const triggerSrc = fromTrigger<string>({ name: "pipeline:trigger" });
@@ -270,24 +270,32 @@ export function createPipeline(): Pipeline {
 	);
 	// #endregion display
 
+	function finishRun() {
+		if (!_pipelineStatusUnsub) return;
+		_running.set(false);
+		_runCount.update((n) => n + 1);
+		const unsub = _pipelineStatusUnsub;
+		_pipelineStatusUnsub = null;
+		queueMicrotask(() => unsub());
+	}
+
 	function fireTrigger() {
 		if (_running.get()) return;
 		_running.set(true);
 		wf.reset();
+
+		// Subscribe BEFORE firing so no status transitions can be missed.
+		_pipelineStatusUnsub = subscribe(wf.status, (rs) => {
+			if (rs === "completed" || rs === "errored") finishRun();
+		});
+
 		triggerSrc.fire("go");
 
-		// Reactively track completion via runStatus (derived from taskState instances).
-		// runStatus transitions: idle → active → completed/errored as tasks finish.
-		_runStatusUnsub = subscribe(wf.runStatus, (rs) => {
-			if (rs === "completed" || rs === "errored") {
-				if (!_runStatusUnsub) return; // re-entry guard
-				_running.set(false);
-				_runCount.update((n) => n + 1);
-				// Null synchronously to prevent re-entry, defer actual unsub
-				const unsub = _runStatusUnsub;
-				_runStatusUnsub = null;
-				queueMicrotask(() => unsub());
-			}
+		// Safety: if every task was skipped (e.g. all circuit breakers open),
+		// no taskState ever transitions from idle, so status stays "idle" forever.
+		// Detect this after the synchronous propagation settles.
+		queueMicrotask(() => {
+			if (_pipelineStatusUnsub && wf.status.get() === "idle") finishRun();
 		});
 	}
 
@@ -298,9 +306,9 @@ export function createPipeline(): Pipeline {
 		running: _running as Store<boolean>,
 		runCount: _runCount as Store<number>,
 		destroy() {
-			if (_runStatusUnsub) {
-				_runStatusUnsub();
-				_runStatusUnsub = null;
+			if (_pipelineStatusUnsub) {
+				_pipelineStatusUnsub();
+				_pipelineStatusUnsub = null;
 			}
 			wf.destroy();
 			for (const node of nodes) {

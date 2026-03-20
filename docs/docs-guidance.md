@@ -163,7 +163,7 @@ The generator produces `site/api/<name>.md` with this structure:
 | Tier | Location | Purpose | Key rule |
 |------|----------|---------|----------|
 | **1** | `@example` in JSDoc | IDE tooltips + feeds generated API pages | First = basic usage; additional = titled advanced patterns. Show return values as comments, not `console.log`. |
-| **2** | `examples/*.ts` | Runnable standalone scripts (`npx tsx examples/<name>.ts`) | Self-contained, clean up at end, JSDoc comment at top. |
+| **2** | `examples/*.ts` | Runnable standalone scripts (`npx tsx examples/<name>.ts`) | Self-contained, clean up at end, JSDoc comment at top. **In this repo**, the package name is scoped (`@callbag-recharge/callbag-recharge`) but examples import the public name `callbag-recharge`; use `pnpm exec tsx --tsconfig tsconfig.examples.json examples/<name>.ts` so path aliases resolve to `src/`. |
 | **3** | `site/recipes/*.md` | Long-form VitePress docs with context and variations | **Pull code from `examples/`** via `<<< @/../examples/<name>.ts` — never duplicate. |
 | **4** | `src/patterns/<name>/` | Published reusable patterns (npm package) | Pattern `README.md` is canonical API reference. Recipe links to it. |
 | **5** | `llms.txt` / `llms-full.txt` | AI-readable docs (repo root + `site/public/`) | Update when adding new primitives/operators/patterns, not on bug fixes. |

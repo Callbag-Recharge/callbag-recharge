@@ -419,3 +419,33 @@ describe("task — no deps", () => {
 		wf.destroy();
 	});
 });
+
+// ==========================================================================
+// task() — async generator guard
+// ==========================================================================
+describe("task — async generator guard", () => {
+	it("throws early when fn returns an async generator", async () => {
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline({
+			input: step(trigger),
+			stream: task(["input"], async function* () {
+				yield 1;
+				yield 2;
+			}),
+		});
+
+		const errors: unknown[] = [];
+		subscribe(wf.steps.stream, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 50));
+
+		// task should have errored — taskState captures the throw
+		const meta = wf.steps.stream.get();
+		expect(meta).toBeNull(); // fallback null on error
+		expect(wf.status.get()).toBe("errored");
+
+		wf.destroy();
+	});
+});
