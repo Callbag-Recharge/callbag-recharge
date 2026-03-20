@@ -1,3 +1,10 @@
+# [0.6.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.5.0...v0.6.0) (2026-03-20)
+
+
+### Features
+
+* redesign orchestration ([5042002](https://github.com/Callbag-Recharge/callbag-recharge/commit/5042002e046dfa67261949756398a5df5f4f935f))
+
 # [0.5.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.4.0...v0.5.0) (2026-03-20)
 
 
