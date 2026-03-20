@@ -435,7 +435,6 @@ describe("task — async generator guard", () => {
 			}),
 		});
 
-		const errors: unknown[] = [];
 		subscribe(wf.steps.stream, () => {});
 
 		trigger.fire("go");

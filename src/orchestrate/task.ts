@@ -196,8 +196,7 @@ export function task<T>(
 								// object instead of yielded values. Detect and throw early.
 								if (
 									maybePromise != null &&
-									typeof (maybePromise as any)[Symbol.asyncIterator] ===
-										"function"
+									typeof (maybePromise as any)[Symbol.asyncIterator] === "function"
 								) {
 									throw new Error(
 										"task() does not support async generators. " +
