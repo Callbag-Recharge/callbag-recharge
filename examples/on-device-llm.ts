@@ -29,7 +29,7 @@ const tokens = pipe(
 			fetch("http://localhost:11434/api/generate", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ model: "llama3.2", prompt: p, stream: true }),
+				body: JSON.stringify({ model: "llama4", prompt: p, stream: true }),
 				signal: ctrl.signal,
 			})
 				.then(async (res) => {

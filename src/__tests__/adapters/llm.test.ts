@@ -56,7 +56,7 @@ describe("fromLLM", () => {
 		const llm = fromLLM({
 			provider: "openai",
 			apiKey: "test-key",
-			model: "gpt-4",
+			model: "gpt-5.4-mini",
 			fetch: mockFetch as any,
 		});
 
@@ -78,7 +78,7 @@ describe("fromLLM", () => {
 		expect(url).toBe("https://api.openai.com/v1/chat/completions");
 		expect(init.headers.Authorization).toBe("Bearer test-key");
 		expect(JSON.parse(init.body)).toMatchObject({
-			model: "gpt-4",
+			model: "gpt-5.4-mini",
 			stream: true,
 			messages: [{ role: "user", content: "Hi" }],
 		});
@@ -99,7 +99,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({
 			provider: "ollama",
-			model: "llama3",
+			model: "llama4",
 			fetch: mockFetch as any,
 		});
 
@@ -121,7 +121,7 @@ describe("fromLLM", () => {
 				]),
 			);
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
 
@@ -135,7 +135,7 @@ describe("fromLLM", () => {
 	it("extracts Ollama token usage", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(mockSSEResponse([ollamaChunk("done", true, 20)]));
 
-		const llm = fromLLM({ provider: "ollama", model: "llama3", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "ollama", model: "llama4", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
 
@@ -149,7 +149,7 @@ describe("fromLLM", () => {
 	it("handles API error response", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(new Response("Rate limited", { status: 429 }));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
 
@@ -160,7 +160,7 @@ describe("fromLLM", () => {
 	it("handles fetch error", async () => {
 		const mockFetch = vi.fn().mockRejectedValue(new Error("Network error"));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
 
@@ -180,7 +180,7 @@ describe("fromLLM", () => {
 				new Response(stream, { status: 200, headers: { "Content-Type": "text/event-stream" } }),
 			);
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 
 		// Let fetch resolve
@@ -197,7 +197,7 @@ describe("fromLLM", () => {
 			.mockResolvedValueOnce(mockSSEResponse([openaiChunk("first")]))
 			.mockResolvedValueOnce(mockSSEResponse([openaiChunk("second")]));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "first" }]);
 		// Auto-cancels first
 		llm.generate([{ role: "user", content: "second" }]);
@@ -212,7 +212,7 @@ describe("fromLLM", () => {
 	it("passes generate options correctly", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(mockSSEResponse([openaiChunk("ok")]));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }], {
 			temperature: 0.5,
 			maxTokens: 100,
@@ -230,7 +230,7 @@ describe("fromLLM", () => {
 	it("Ollama uses num_predict for maxTokens", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(mockSSEResponse([ollamaChunk("ok")]));
 
-		const llm = fromLLM({ provider: "ollama", model: "llama3", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "ollama", model: "llama4", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }], { maxTokens: 200 });
 
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
@@ -246,7 +246,7 @@ describe("fromLLM", () => {
 			.mockRejectedValueOnce(new Error("fail"))
 			.mockResolvedValueOnce(mockSSEResponse([openaiChunk("ok")]));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.error.get()).toBeInstanceOf(Error), { timeout: 1000 });
@@ -276,7 +276,7 @@ describe("fromLLM", () => {
 	it("streaming store is reactive", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(mockSSEResponse([openaiChunk("ok")]));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 
 		const states: boolean[] = [];
 		const unsub = subscribe(llm.streaming, (v) => states.push(v));
@@ -307,7 +307,7 @@ describe("fromLLM", () => {
 			.mockResolvedValueOnce(firstResponse)
 			.mockResolvedValueOnce(mockSSEResponse([openaiChunk("second")]));
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 
 		llm.generate([{ role: "user", content: "first" }]);
 		// Let fetch resolve
@@ -330,7 +330,7 @@ describe("fromLLM", () => {
 				mockSSEResponse([openaiChunk("Hello"), "not valid json at all", openaiChunk(" world")]),
 			);
 
-		const llm = fromLLM({ provider: "openai", model: "gpt-4", fetch: mockFetch as any });
+		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
 

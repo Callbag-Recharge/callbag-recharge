@@ -30,7 +30,7 @@ interface LLMResponse {
 function localInfer(req: LLMRequest): Promise<LLMResponse> {
 	return Promise.resolve({
 		text: `(local answer to: ${req.prompt.slice(0, 30)})`,
-		model: "llama3.2",
+		model: "llama4",
 		latencyMs: 120,
 		cost: 0,
 	});
@@ -39,7 +39,7 @@ function localInfer(req: LLMRequest): Promise<LLMResponse> {
 function cloudInfer(req: LLMRequest): Promise<LLMResponse> {
 	return Promise.resolve({
 		text: `(cloud answer to: ${req.prompt.slice(0, 30)})`,
-		model: "gpt-4o",
+		model: "gpt-5.4-mini",
 		latencyMs: 800,
 		cost: 0.003,
 	});
@@ -78,7 +78,7 @@ const localResponse = pipe(
 		producer<LLMResponse>(({ emit, complete }) => {
 			emit({
 				text: "(cloud fallback response)",
-				model: "gpt-4o",
+				model: "gpt-5.4-mini",
 				latencyMs: 800,
 				cost: 0.003,
 			});
@@ -117,11 +117,11 @@ const allResponses = merge(localResponse, cloudResponse);
 
 subscribe(allResponses, (resp) => {
 	if (resp) {
-		const source = resp.model === "llama3.2" ? "LOCAL" : "CLOUD";
+		const source = resp.model === "llama4" ? "LOCAL" : "CLOUD";
 		console.log(`[${source}] ${resp.model}: "${resp.text}" (${resp.latencyMs}ms, $${resp.cost})`);
 		routingStats.update((s) => ({
-			localCount: s.localCount + (resp.model === "llama3.2" ? 1 : 0),
-			cloudCount: s.cloudCount + (resp.model !== "llama3.2" ? 1 : 0),
+			localCount: s.localCount + (resp.model === "llama4" ? 1 : 0),
+			cloudCount: s.cloudCount + (resp.model !== "llama4" ? 1 : 0),
 			totalCost: s.totalCost + resp.cost,
 		}));
 	}

@@ -14,7 +14,7 @@ Edge/local LLM inference is production-ready:
 
 - **WebGPU** across all major browsers
 - **Ollama** as the de facto local inference standard
-- **ExecuTorch 1.0** on mobile (19.92 tok/s on Llama 3.2 3B)
+- **ExecuTorch 1.0** on mobile (19.92 tok/s on Llama 4 Scout)
 - **Apple Foundation Models** framework for on-device
 
 But **no reactive library exists for LLM streaming/orchestration**. The gap between the inference runtime and your app is filled with ad-hoc `useState` + `AbortController` + manual state management.
@@ -55,7 +55,7 @@ const ollamaTokens = producer<string>(({ emit, complete, error }) => {
   const ctrl = new AbortController()
   fetch('http://localhost:11434/api/generate', {
     method: 'POST',
-    body: JSON.stringify({ model: 'llama3.2', prompt, stream: true }),
+    body: JSON.stringify({ model: 'llama4', prompt, stream: true }),
     signal: ctrl.signal,
   }).then(async res => {
     if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
@@ -79,7 +79,7 @@ const ollamaTokens = producer<string>(({ emit, complete, error }) => {
 const webllmTokens = producer<string>(({ emit, complete, error }) => {
   let engine: any
   ;(async () => {
-    engine = await webllm.CreateMLCEngine('Llama-3.2-1B-Instruct-q4f16_1-MLC')
+    engine = await webllm.CreateMLCEngine('Llama-4-Scout-17B-16E-Instruct-q4f16_1-MLC')
     const stream = await engine.chat.completions.create({
       messages: [{ role: 'user', content: prompt }],
       stream: true,

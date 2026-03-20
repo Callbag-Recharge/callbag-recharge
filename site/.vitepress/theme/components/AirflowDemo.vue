@@ -5,7 +5,32 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import { subscribe } from "@lib/core/subscribe";
-import { createPipeline, PIPELINE_SOURCE } from "./pipeline";
+import { createPipeline } from "./pipeline";
+import pipelineRaw from "./pipeline.ts?raw";
+
+// Extract the display region between #region display and #endregion display
+const REGION_START = "// #region display";
+const REGION_END = "// #endregion display";
+const regionStart = pipelineRaw.indexOf(REGION_START);
+const regionEnd = pipelineRaw.indexOf(REGION_END);
+const afterMarker = regionStart >= 0 ? pipelineRaw.indexOf("\n", regionStart) : -1;
+const rawRegion =
+	regionStart >= 0 && regionEnd > regionStart && afterMarker >= 0
+		? pipelineRaw.slice(afterMarker + 1, regionEnd).trimEnd()
+		: pipelineRaw;
+
+// Dedent: strip common leading whitespace so the code panel isn't over-indented
+const regionLines = rawRegion.split("\n");
+const minIndent = regionLines
+	.filter((l) => l.trim().length > 0)
+	.reduce((min, l) => {
+		const match = l.match(/^(\t+)/);
+		return match ? Math.min(min, match[1].length) : min;
+	}, Infinity);
+const PIPELINE_SOURCE =
+	minIndent > 0 && minIndent < Infinity
+		? regionLines.map((l) => l.slice(minIndent).replace(/\t/g, "  ")).join("\n")
+		: rawRegion.replace(/\t/g, "  ");
 
 // ---------------------------------------------------------------------------
 // Pipeline instance
@@ -144,13 +169,13 @@ function statusGlow(status: string): string {
 // ---------------------------------------------------------------------------
 // Layout positions (manually placed for the finance DAG shape)
 const positions: Record<string, { x: number; y: number }> = {
-	cron: { x: 340, y: 0 },
-	"fetch-bank": { x: 140, y: 110 },
-	"fetch-cards": { x: 540, y: 110 },
-	aggregate: { x: 340, y: 220 },
-	anomaly: { x: 180, y: 330 },
-	"batch-write": { x: 500, y: 330 },
-	alert: { x: 180, y: 430 },
+	cron: { x: 220, y: 0 },
+	"fetch-bank": { x: 50, y: 110 },
+	"fetch-cards": { x: 390, y: 110 },
+	aggregate: { x: 220, y: 220 },
+	anomaly: { x: 80, y: 330 },
+	"batch-write": { x: 360, y: 330 },
+	alert: { x: 80, y: 430 },
 };
 
 const vfNodes = pipeline.nodes.map((node) => ({
@@ -201,18 +226,33 @@ const dynamicEdges = computed(() =>
 // ---------------------------------------------------------------------------
 const codeLines = PIPELINE_SOURCE.split("\n");
 
-// Map task IDs to relevant source line ranges (0-indexed)
-// Lines: 5=fetchBank decl, 6=fetchCards, 7=aggregate, 8=anomaly, 9=batchWrite, 10=alert
-// Lines: 28="Execute the DAG", 29=fetchBank exec, 30=fetchCards, 31=aggregate, 32=anomaly, 33=alert
-const highlightMap: Record<string, number[]> = {
-	cron: [28],
-	"fetch-bank": [5, 29],
-	"fetch-cards": [6, 30],
-	aggregate: [7, 31],
-	anomaly: [8, 32],
-	"batch-write": [9],
-	alert: [10, 33],
+// Map node IDs to relevant source line ranges (0-indexed, within the display region).
+// Matches step definitions and nodeProducer calls in the pipeline() wiring.
+const NODE_PATTERNS: Record<string, RegExp> = {
+	cron: /\bcron\b/,
+	"fetch-bank": /\bfetchBank\b/,
+	"fetch-cards": /\bfetchCards\b/,
+	aggregate: /\baggregate\b/,
+	anomaly: /\banomaly\b/,
+	"batch-write": /\bbatchWrite\b/,
+	alert: /\balert\b/,
 };
+
+const highlightMap: Record<string, number[]> = {};
+codeLines.forEach((line: string, i: number) => {
+	// Match step(...) definitions and nodeProducer(...) calls
+	const isStepLine = /\bstep\(/.test(line);
+	const isProducerLine = /\bnodeProducer\(/.test(line);
+	const isCommentLine = /\/\/\s*Step/.test(line);
+	if (!isStepLine && !isProducerLine && !isCommentLine) return;
+
+	for (const [id, pattern] of Object.entries(NODE_PATTERNS)) {
+		if (pattern.test(line)) {
+			if (!highlightMap[id]) highlightMap[id] = [];
+			highlightMap[id].push(i);
+		}
+	}
+});
 
 function isLineHighlighted(lineIdx: number): boolean {
 	if (!hoveredNode.value) return false;
@@ -281,6 +321,7 @@ defineExpose({
 					:nodes="vfNodes"
 					:edges="dynamicEdges"
 					:fit-view-on-init="true"
+					:fit-view-params="{ padding: 0.15 }"
 					:nodes-draggable="false"
 					:nodes-connectable="false"
 					:zoom-on-scroll="false"
@@ -404,7 +445,7 @@ defineExpose({
 			<div class="code-panel">
 				<div class="code-header">
 					<span class="code-filename">pipeline.ts</span>
-					<span class="code-badge">~30 lines</span>
+					<span class="code-badge">{{ codeLines.length }} lines</span>
 				</div>
 				<div class="code-body">
 					<pre><code><template
@@ -548,6 +589,7 @@ defineExpose({
 /* ── Graph panel ── */
 .graph-panel {
 	position: relative;
+	min-width: 0;
 	border-bottom: 1px solid var(--cr-border-subtle);
 }
 
@@ -721,6 +763,7 @@ defineExpose({
 	flex-direction: column;
 	background: #091322;
 	max-height: 400px;
+	min-width: 0;
 }
 
 .code-header {

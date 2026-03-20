@@ -9,7 +9,7 @@
 // is minimal (URL patterns, auth headers, response format).
 //
 // Usage:
-//   const llm = fromLLM({ provider: 'ollama', model: 'llama3' });
+//   const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
 //   llm.generate([{ role: 'user', content: 'Hello' }]);
 //   effect([llm.store], () => console.log(llm.store.get()));
 // ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  * import { fromLLM } from 'callbag-recharge/adapters/llm';
  * import { effect } from 'callbag-recharge';
  *
- * const llm = fromLLM({ provider: 'ollama', model: 'llama3' });
+ * const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
  *
  * effect([llm.store], () => {
  *   console.log(llm.store.get()); // accumulating response...

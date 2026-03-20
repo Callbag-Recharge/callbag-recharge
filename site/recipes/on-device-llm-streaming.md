@@ -43,7 +43,7 @@ import { producer } from 'callbag-recharge'
 const webllmTokens = producer<string>(({ emit, complete, error }) => {
   let engine: any
   ;(async () => {
-    engine = await webllm.CreateMLCEngine('Llama-3.2-1B-Instruct-q4f16_1-MLC')
+    engine = await webllm.CreateMLCEngine('Llama-4-Scout-17B-16E-Instruct-q4f16_1-MLC')
     const stream = await engine.chat.completions.create({
       messages: [{ role: 'user', content: prompt.get() }],
       stream: true,

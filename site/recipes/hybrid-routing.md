@@ -11,7 +11,7 @@ Route LLM requests between local/edge models and cloud APIs based on complexity,
 Running everything on cloud LLMs is expensive and slow. Running everything locally has quality limitations. The optimal strategy is hybrid routing:
 
 - **Simple queries** (greetings, lookups, summarization) → local model (Ollama, WebLLM)
-- **Complex queries** (multi-step reasoning, code generation) → cloud model (GPT-4, Claude)
+- **Complex queries** (multi-step reasoning, code generation) → cloud model (GPT-5.4, Claude)
 - **Fallback** — if the local model fails or produces low-confidence output, fall back to cloud
 
 No reactive library provides this pattern. Developers hand-wire `if/else` chains with no observability.
@@ -66,7 +66,7 @@ const finalResponses = merge(confident, cloudRefined, cloudResponse)
 Track routing economics reactively:
 
 ```ts
-const costPerModel = { 'llama3.2': 0, 'gpt-4o': 0.003, 'claude-3.5': 0.004 }
+const costPerModel = { 'llama4': 0, 'gpt-5.4-mini': 0.003, 'claude-sonnet-4.6': 0.004 }
 
 const totalCost = derived([routingStats], () => {
   const stats = routingStats.get()
@@ -75,7 +75,7 @@ const totalCost = derived([routingStats], () => {
 
 const costSavings = derived([routingStats], () => {
   const stats = routingStats.get()
-  const cloudOnlyCost = (stats.localCount + stats.cloudCount) * costPerModel['gpt-4o']
+  const cloudOnlyCost = (stats.localCount + stats.cloudCount) * costPerModel['gpt-5.4-mini']
   return cloudOnlyCost - stats.totalCost
 })
 
