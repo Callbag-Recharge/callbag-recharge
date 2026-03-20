@@ -2,7 +2,7 @@ import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import { END, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
-import type { BackoffStrategy } from "../utils/backoff";
+import type { BackoffStrategy } from "./backoff";
 
 export interface RetryOptions {
 	/** Maximum number of retries. Default: Infinity when delay is set. */
@@ -27,7 +27,7 @@ export interface RetryOptions {
  *
  * @seeAlso [rescue](/api/rescue), [repeat](/api/repeat)
  *
- * @category extra
+ * @category utils
  */
 export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 	const opts: RetryOptions = typeof config === "number" ? { count: config } : config;

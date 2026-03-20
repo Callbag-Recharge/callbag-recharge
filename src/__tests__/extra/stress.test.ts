@@ -11,12 +11,12 @@ import { map } from "../../extra/map";
 import { merge } from "../../extra/merge";
 import { of } from "../../extra/of";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { scan } from "../../extra/scan";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
 import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

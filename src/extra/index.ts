@@ -43,8 +43,6 @@ export { reduce } from "./reduce";
 export { remember } from "./remember";
 export { repeat } from "./repeat";
 export { rescue } from "./rescue";
-export type { RetryOptions } from "./retry";
-export { retry } from "./retry";
 export { sample } from "./sample";
 export { scan } from "./scan";
 export { share } from "./share";

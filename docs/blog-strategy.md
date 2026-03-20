@@ -83,7 +83,7 @@ Each "engineering evolution" post follows this pattern:
 |---|-------|----------------|----------------|
 | 7 | **"From Dual-Channel to Two-Phase Push: v1→v4 Journey"** | All architecture docs + archived v1/v2/v3 | The definitive "evolution of design" post |
 | 8 | **"The Cost of Correctness"** | Session 88e9bd81 — 9.8M ops/sec vs Preact 34M, but correct diamonds | Honest benchmarking builds trust |
-| 9 | **"Callbag-Recharge vs Zustand/Jotai/SolidJS"** | Session 47f1a07f, `state-management.md` | Maps mental models across libraries |
+| 9 | **"Callbag-Recharge vs Zustand/Jotai/SolidJS"** | Session 47f1a07f, `src/archive/docs/state-management.md` | Maps mental models across libraries |
 
 ### Bonus Topics (from bugs & discoveries)
 
@@ -136,7 +136,7 @@ Each "engineering evolution" post follows this pattern:
 |------|----------|---------|
 | `architecture.md` | `docs/` | Canonical — output slot, STANDALONE, chain model |
 | `architecture-v4-review.md (archived)` | `docs/` | Review notes, error asymmetry, trade-offs |
-| `state-management.md` | `docs/` | Competitive landscape & positioning |
+| `state-management.md` | `src/archive/docs/` | Competitive landscape & positioning (archived) |
 | `benchmarks.md` | `docs/` | Performance data |
 | `optimizations.md` | `docs/` | V8 optimization techniques |
 

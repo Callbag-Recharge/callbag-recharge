@@ -407,7 +407,7 @@ Framework-agnostic. Works frontend, backend, edge.
 - debounce, throttle — time-based flow control
 - scan — accumulate values (streaming chunks, undo history)
 - merge, combine — compose multiple sources
-- retry, rescue, timeout — production error handling
+- rescue, timeout — production error handling (retry in utils)
 - fromEvent, fromPromise, interval — connect to external sources
 - buffer, bufferTime — batch high-frequency events
 - concatMap, exhaustMap — sequential / exclusive async
@@ -426,7 +426,7 @@ npm i @callbag-recharge/callbag-recharge
 **Tier 1 — Operators:** map, filter, scan, take, skip, first, last, find, elementAt, partition, merge, combine, concat, share, pipeRaw, distinctUntilChanged, startWith, tap, pairwise, remember, flat
 **Tier 2 — Time:** debounce, throttle, delay, bufferTime, timeout, sample
 **Tier 2 — Dynamic sub:** switchMap, concatMap, exhaustMap, buffer, takeUntil
-**Tier 2 — Error:** rescue, retry, repeat
+**Tier 2 — Error:** rescue, repeat
 **Sinks:** forEach, subscribe
 **Other:** subject, SKIP, TimeoutError
 
@@ -479,7 +479,8 @@ import { switchMap, debounce, throttle, scan, merge, combine } from 'callbag-rec
 import { fromAsyncIter, fromEvent, fromPromise, interval } from 'callbag-recharge/extra'
 
 // Tier 3: Safety nets — production-ready error handling
-import { retry, rescue, timeout } from 'callbag-recharge/extra'
+import { rescue, timeout } from 'callbag-recharge/extra'
+import { retry } from 'callbag-recharge/utils'
 ```
 
 ### The narrative for AI tools and developers

@@ -55,6 +55,9 @@ export type {
 } from "./rateLimiter";
 export { slidingWindow, tokenBucket } from "./rateLimiter";
 export { reactiveScored } from "./reactiveEviction";
+// Retry
+export type { RetryOptions } from "./retry";
+export { retry } from "./retry";
 // State machine
 export type {
 	StateMachineConfig,

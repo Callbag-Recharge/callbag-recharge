@@ -318,3 +318,15 @@ This format preserves the thinking process, not just conclusions.
 
 **Created:** March 16, 2026
 **Archive Status:** Complete through Session text-editor-lego-plan (March 19, 2026)
+
+---
+
+## Archived Documents (formerly in docs/)
+
+These documents were moved to archive because their content became stale or was superseded by canonical docs. They preserve historical context but should not be treated as current truth.
+
+| File | Original location | Why archived | Date archived |
+|------|-------------------|-------------|---------------|
+| `state-management.md` | `docs/state-management.md` | Strategy doc with stale gap analysis (gaps filled), stale package structure, stale operator counts. Landscape research and GEO strategy remain useful as historical context. | 2026-03-19 |
+| `extras.md` | `docs/extras.md` | Module listing with stale operator/pattern/adapter counts. Roadmap sections for patterns/compat/adapters already shipped. Superseded by JSDoc (source of truth) + `docs/architecture.md` folder hierarchy. | 2026-03-19 |
+| `roadmap-v0.4.0-shipped.md` | `docs/roadmap.md` | Full roadmap snapshot at v0.4.0 release including all shipped phases. Current `docs/roadmap.md` contains only in-progress/backlog. | 2026-03-19 |

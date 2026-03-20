@@ -5,6 +5,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
 import { subscribe } from "@lib/core/subscribe";
+import type { Store } from "@lib/core/types";
 import { createPipeline } from "./pipeline";
 import pipelineRaw from "./pipeline.ts?raw";
 
@@ -104,8 +105,18 @@ for (const node of pipeline.nodes) {
 
 // Subscribe to taskState changes
 onMounted(() => {
+	const safeSubscribe = <T>(
+		store: Store<T> | null | undefined,
+		cb: Parameters<typeof subscribe<T>>[1],
+	) => {
+		if (!store || typeof (store as { source?: unknown }).source !== "function") {
+			return () => {};
+		}
+		return subscribe(store, cb);
+	};
+
 	for (const node of pipeline.nodes) {
-		const unsub = subscribe(node.task, (meta) => {
+		const unsub = safeSubscribe(node.task as unknown as Store<any>, (meta) => {
 			const ns = nodeStates[node.id];
 			ns.status = meta.status;
 			ns.duration = meta.duration;
@@ -116,7 +127,7 @@ onMounted(() => {
 		unsubs.push(unsub);
 
 		// Subscribe to log entries
-		const logUnsub = subscribe(node.log.latest, (entry) => {
+		const logUnsub = safeSubscribe(node.log?.latest, (entry) => {
 			if (entry) {
 				const ns = nodeStates[node.id];
 				ns.logs = [...ns.logs.slice(-4), entry.value];
@@ -126,8 +137,8 @@ onMounted(() => {
 	}
 
 	// Pipeline-level subscriptions
-	unsubs.push(subscribe(pipeline.running, (v) => (isRunning.value = v)));
-	unsubs.push(subscribe(pipeline.runCount, (v) => (runCount.value = v)));
+	unsubs.push(safeSubscribe(pipeline.running, (v) => (isRunning.value = v)));
+	unsubs.push(safeSubscribe(pipeline.runCount, (v) => (runCount.value = v)));
 });
 
 onUnmounted(() => {

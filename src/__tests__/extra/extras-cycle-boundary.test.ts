@@ -5,12 +5,12 @@ import { delay } from "../../extra/delay";
 import { exhaustMap } from "../../extra/exhaustMap";
 import { flat } from "../../extra/flat";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { throttle } from "../../extra/throttle";
 import { derived, Inspector, pipe, state } from "../../index";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

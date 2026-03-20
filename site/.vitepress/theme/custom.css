@@ -76,6 +76,26 @@
 	color: var(--cr-aqua);
 }
 
+/* ─── Mobile nav menu visibility fix ─── */
+@media (max-width: 960px) {
+	/* iOS Safari: fixed descendants can disappear under filtered ancestors */
+	.VPNav {
+		backdrop-filter: none;
+		-webkit-backdrop-filter: none;
+	}
+
+	.VPNavBar,
+	.VPNavBar.screen-open {
+		background: rgba(10, 22, 40, 0.9);
+		border-bottom: 1px solid var(--cr-border-subtle);
+	}
+
+	.VPNavScreen {
+		z-index: 90;
+		background: rgba(10, 22, 40, 0.98);
+	}
+}
+
 /* ─── Sidebar refinements ─── */
 .VPSidebar {
 	background: var(--cr-deep);

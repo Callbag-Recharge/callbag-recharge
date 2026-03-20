@@ -111,8 +111,10 @@ const REGISTRY = {
 
 	// Extras — error handling & resubscription
 	rescue: "src/extra/rescue.ts",
-	retry: "src/extra/retry.ts",
 	repeat: "src/extra/repeat.ts",
+
+	// Utils
+	retry: "src/utils/retry.ts",
 
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",

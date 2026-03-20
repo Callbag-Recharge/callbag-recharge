@@ -8,11 +8,9 @@ export default {
 	extends: DefaultTheme,
 	enhanceApp({ app }) {
 		app.component("HomeLayout", HomeLayout);
-		if (!import.meta.env.SSR) {
-			app.component(
-				"AirflowDemo",
-				defineAsyncComponent(() => import("./components/AirflowDemo.vue")),
-			);
-		}
+		app.component(
+			"AirflowDemo",
+			defineAsyncComponent(() => import("./components/AirflowDemo.vue")),
+		);
 	},
 } satisfies Theme;

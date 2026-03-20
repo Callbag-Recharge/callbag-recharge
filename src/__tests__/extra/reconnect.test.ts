@@ -14,7 +14,6 @@ import { of } from "../../extra/of";
 import { pairwise } from "../../extra/pairwise";
 import { partition } from "../../extra/partition";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { scan } from "../../extra/scan";
 import { skip } from "../../extra/skip";
@@ -24,6 +23,7 @@ import { take } from "../../extra/take";
 import { throttle } from "../../extra/throttle";
 import { timeout } from "../../extra/timeout";
 import { derived, effect, Inspector, operator, pipe, producer, state } from "../../index";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

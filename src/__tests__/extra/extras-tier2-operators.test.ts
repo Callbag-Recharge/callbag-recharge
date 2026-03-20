@@ -4,7 +4,6 @@ import { bufferTime } from "../../extra/bufferTime";
 import { delay } from "../../extra/delay";
 import { remember } from "../../extra/remember";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { subject } from "../../extra/subject";
 import { subscribe } from "../../extra/subscribe";
@@ -12,6 +11,7 @@ import { tap } from "../../extra/tap";
 import { TimeoutError, timeout } from "../../extra/timeout";
 import { Inspector, pipe, producer, state } from "../../index";
 import { constant as backoffConstant } from "../../utils/backoff";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

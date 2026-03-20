@@ -101,6 +101,49 @@ describe("fromTrigger", () => {
 		expect(v1).toEqual([1]);
 		expect(v2).toEqual([2]);
 	});
+
+	it("fire() while disconnected updates get() but does not replay on reconnect", () => {
+		const trigger = fromTrigger<number>();
+
+		// Subscribe, fire, disconnect
+		const v1: number[] = [];
+		const u1 = subscribe(trigger, (v) => v1.push(v!));
+		trigger.fire(1);
+		u1();
+		expect(v1).toEqual([1]);
+
+		// Fire while disconnected — no subscribers
+		trigger.fire(42);
+		expect(trigger.get()).toBe(42); // get() reflects last fired value
+
+		// Reconnect — should NOT replay 42 (button semantics: press is lost)
+		const v2: number[] = [];
+		const u2 = subscribe(trigger, (v) => v2.push(v!));
+		expect(v2).toEqual([]); // no replay
+
+		// But fire() works again after reconnect
+		trigger.fire(99);
+		expect(v2).toEqual([99]);
+		expect(trigger.get()).toBe(99);
+		u2();
+	});
+
+	it("get() stays consistent with _lastValue across lifecycle", () => {
+		const trigger = fromTrigger<string>({ initial: "init" });
+		expect(trigger.get()).toBe("init");
+
+		const u1 = subscribe(trigger, () => {});
+		trigger.fire("a");
+		expect(trigger.get()).toBe("a");
+		u1(); // disconnect
+
+		trigger.fire("b"); // fire while disconnected
+		expect(trigger.get()).toBe("b");
+
+		const u2 = subscribe(trigger, () => {}); // reconnect
+		expect(trigger.get()).toBe("b"); // still consistent
+		u2();
+	});
 });
 
 // ==========================================================================

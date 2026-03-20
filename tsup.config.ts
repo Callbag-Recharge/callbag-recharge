@@ -33,7 +33,6 @@ export default defineConfig({
 		"src/extra/delay.ts",
 		"src/extra/buffer.ts",
 		"src/extra/bufferTime.ts",
-		"src/extra/retry.ts",
 		"src/extra/rescue.ts",
 		"src/extra/sample.ts",
 		"src/extra/timeout.ts",

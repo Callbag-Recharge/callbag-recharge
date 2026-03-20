@@ -38,11 +38,14 @@
 
 ## 2. Folder & Dependency Hierarchy
 
+> **This is the single source of truth for import rules.** All other docs reference here.
+> Each folder's `README.md` is the source of truth for its **purpose** and which functions belong there.
+
 `derived` and `operator` are separate files with converged internals.
 
 ```
 src/
-├── core/
+├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types
 │   ├── protocol.ts  ← type constants, batch, deferStart — no other core imports
 │   ├── types.ts     ← Store, WritableStore, Actions, NodeStatus — no runtime imports
 │   ├── inspector.ts ← observability singleton — imports protocol only
@@ -53,37 +56,27 @@ src/
 │   ├── dynamicDerived.ts ← derived with runtime dep tracking + rewiring
 │   ├── effect.ts    ← sink role — imports protocol + types
 │   └── pipe.ts      ← map/filter/scan sugar via derived
-├── extra/           ← operators, sources, sinks — import from core (all 6 primitives) + utils only
-├── utils/           ← pure utilities — zero reactive deps (except reactiveEviction)
-│   ├── backoff.ts   ← BackoffStrategy: constant, linear, exponential, fibonacci, decorrelatedJitter
-│   ├── eviction.ts  ← EvictionPolicy: fifo, lru, lfu, scored, random
-│   └── reactiveEviction.ts ← reactiveScored: O(log n) min-heap with reactive score stores
-├── data/            ← Level 3 reactive data structures — import from core + utils
-│   ├── reactiveMap.ts   ← reactive key-value store (replaces kvStore)
-│   ├── reactiveLog.ts   ← append-only reactive log with bounded size
-│   ├── reactiveIndex.ts ← reactive secondary index (indexKey → Set<primaryKey>)
-│   ├── pubsub.ts        ← thin topic-based publish/subscribe channel
-│   └── types.ts         ← shared type definitions (including NodeV0)
-├── memory/          ← Level 3 agent memory — import from core + utils + data
-│   ├── node.ts      ← memoryNode: content + meta + reactive score
-│   ├── collection.ts← collection: bounded container with decay-scored eviction
-│   └── decay.ts     ← scoring: recency decay, importance, frequency
-├── orchestrate/     ← Level 3E scheduling — import from core + data
-│   ├── cron.ts      ← minimal cron expression parser + matcher (internal)
-│   ├── dag.ts       ← acyclicity validation + Inspector graph registration
-│   ├── fromCron.ts  ← producer that emits on a cron schedule
-│   ├── taskState.ts ← reactive task execution tracker (status, duration, error)
-│   └── types.ts     ← TaskState, TaskMeta, TaskStatus types
+├── extra/           ← basic operators, sources, sinks (may use core and/or raw callbag)
+├── utils/           ← versatile utilities reused by many modules (more abstract than extras)
+├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, pubsub)
+├── orchestrate/     ← workflow scheduling, pipelines, triggers (specialized domain)
+├── memory/          ← agent memory primitives (specialized domain)
+├── patterns/        ← composed recipes specializing certain use cases
+├── adapters/        ← external system connectors (peer deps for external libs)
+├── compat/          ← drop-in API wrappers for other state libraries
 └── index.ts         ← public API barrel
 ```
 
-**Strict rules** (unchanged):
-- `core/` never imports from `extra/`, `utils/`, `data/`, or `memory/`
-- `extra/` imports from `core/` (all 6 primitives allowed) and `utils/` only, never from each other
-- `utils/` never imports from `extra/`, `data/`, or `memory/` (except `reactiveEviction.ts` which imports `core/effect`)
+**Strict import rules (the canonical reference):**
+- `core/` never imports from any other folder
+- `extra/` imports from `core/` only; intra-extra imports allowed (e.g. `subscribe`)
+- `utils/` imports from `core/` and `extra/` only
 - `data/` imports from `core/` and `utils/` only
+- `orchestrate/` imports from `core/`, `extra/`, `utils/`, and `data/`
 - `memory/` imports from `core/`, `utils/`, and `data/`
-- `orchestrate/` imports from `core/` and `data/` only
+- `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
+- `adapters/` imports from `core/` only (peer deps for external libs)
+- `compat/` imports from `core/` only
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
 ---
@@ -767,9 +760,9 @@ For all extras:
 
 ---
 
-## 19. Utils Layer — Pure Strategies
+## 19. Utils Layer — Composed Utilities
 
-`src/utils/` contains pure functions/objects that configure behavior for operators and data structures. They are **not reactive nodes** — they have zero callbag dependencies (except `reactiveEviction.ts` which bridges into the graph).
+`src/utils/` contains composed utilities built on core + extra. Includes pure strategies (backoff, eviction), reactive utilities (retry, connectionHealth, validationPipeline), and bridging tools (reactiveEviction).
 
 ### Backoff Strategies (`utils/backoff.ts`)
 

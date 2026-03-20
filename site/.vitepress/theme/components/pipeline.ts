@@ -153,55 +153,50 @@ export function createPipeline(): Pipeline {
 		trigger: step(triggerSrc),
 
 		// Step 1: Cron fires on trigger
-		cron: step(
-			(src: Store<string | undefined>) =>
-				pipe(
-					src,
-					switchMap(() =>
-						producer<string>(({ emit, complete }) => {
-							cron.log.append("[TRIGGER] Pipeline started");
-							cron.task
-								.run(() => {
-									cron.breaker.recordSuccess();
-									cron.log.append("[OK] Trigger fired");
-									return Promise.resolve("triggered");
-								})
-								.then((r) => {
-									emit(r);
-									complete();
-								})
-								.catch(() => {
-									emit("triggered");
-									complete();
-								});
-						}),
-					),
+		cron: step(["trigger"], (src: Store<string | undefined>) =>
+			pipe(
+				src,
+				switchMap(() =>
+					producer<string>(({ emit, complete }) => {
+						cron.log.append("[TRIGGER] Pipeline started");
+						cron.task
+							.run(() => {
+								cron.breaker.recordSuccess();
+								cron.log.append("[OK] Trigger fired");
+								return Promise.resolve("triggered");
+							})
+							.then((r) => {
+								emit(r);
+								complete();
+							})
+							.catch(() => {
+								emit("triggered");
+								complete();
+							});
+					}),
 				),
-			["trigger"],
+			),
 		),
 
 		// Step 2a: Fetch bank (parallel with cards)
-		fetchBank: step(
-			(src: Store<string>) =>
-				pipe(
-					src,
-					switchMap(() => nodeProducer(fetchBank, [800, 2000], 0.2)),
-				),
-			["cron"],
+		fetchBank: step(["cron"], (src: Store<string>) =>
+			pipe(
+				src,
+				switchMap(() => nodeProducer(fetchBank, [800, 2000], 0.2)),
+			),
 		),
 
 		// Step 2b: Fetch cards (parallel with bank)
-		fetchCards: step(
-			(src: Store<string>) =>
-				pipe(
-					src,
-					switchMap(() => nodeProducer(fetchCards, [600, 1500], 0.15)),
-				),
-			["cron"],
+		fetchCards: step(["cron"], (src: Store<string>) =>
+			pipe(
+				src,
+				switchMap(() => nodeProducer(fetchCards, [600, 1500], 0.15)),
+			),
 		),
 
 		// Step 3: Aggregate — diamond resolution (waits for both fetches)
 		aggregate: step(
+			["fetchBank", "fetchCards"],
 			(bankSrc: Store<string | null>, cardsSrc: Store<string | null>) =>
 				pipe(
 					combine(bankSrc, cardsSrc),
@@ -218,43 +213,36 @@ export function createPipeline(): Pipeline {
 						return nodeProducer(aggregate, [300, 800], 0.05);
 					}),
 				),
-			["fetchBank", "fetchCards"],
 		),
 
 		// Step 4a: Detect anomaly
-		anomaly: step(
-			(src: Store<string | null>) =>
-				pipe(
-					src,
-					switchMap((v: string | null) =>
-						v !== null ? nodeProducer(anomaly, [200, 600], 0.1) : skipProducer(),
-					),
+		anomaly: step(["aggregate"], (src: Store<string | null>) =>
+			pipe(
+				src,
+				switchMap((v: string | null) =>
+					v !== null ? nodeProducer(anomaly, [200, 600], 0.1) : skipProducer(),
 				),
-			["aggregate"],
+			),
 		),
 
 		// Step 4b: Batch write
-		batchWrite: step(
-			(src: Store<string | null>) =>
-				pipe(
-					src,
-					switchMap((v: string | null) =>
-						v !== null ? nodeProducer(batchWrite, [400, 1000], 0.08) : skipProducer(),
-					),
+		batchWrite: step(["aggregate"], (src: Store<string | null>) =>
+			pipe(
+				src,
+				switchMap((v: string | null) =>
+					v !== null ? nodeProducer(batchWrite, [400, 1000], 0.08) : skipProducer(),
 				),
-			["aggregate"],
+			),
 		),
 
 		// Step 5: Alert (only if anomaly detection succeeds)
-		alert: step(
-			(src: Store<string | null>) =>
-				pipe(
-					src,
-					switchMap((v: string | null) =>
-						v !== null ? nodeProducer(alert, [100, 300], 0.02) : skipProducer(),
-					),
+		alert: step(["anomaly"], (src: Store<string | null>) =>
+			pipe(
+				src,
+				switchMap((v: string | null) =>
+					v !== null ? nodeProducer(alert, [100, 300], 0.02) : skipProducer(),
 				),
-			["anomaly"],
+			),
 		),
 	});
 	// #endregion display

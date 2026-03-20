@@ -306,4 +306,26 @@ describe("pipeline", () => {
 		unsub();
 		wf.destroy();
 	});
+
+	it("all-source-steps pipeline does not bypass status", () => {
+		// When every step is a source step (no deps), the bypass logic
+		// should NOT treat idle/active as "done" — there are no work steps.
+		const wf = pipeline({
+			a: step(state(0)),
+			b: step(state(0)),
+		});
+
+		// Both idle → overall idle
+		expect(wf.status.get()).toBe("idle");
+
+		// One emits → active (not "completed" — no bypass)
+		(wf.steps.a as any).set(1);
+		expect(wf.status.get()).toBe("active");
+
+		// Both emit → still active (source steps don't "complete")
+		(wf.steps.b as any).set(2);
+		expect(wf.status.get()).toBe("active");
+
+		wf.destroy();
+	});
 });

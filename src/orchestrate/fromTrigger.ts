@@ -1,9 +1,10 @@
 // ---------------------------------------------------------------------------
 // fromTrigger — manual trigger source
 // ---------------------------------------------------------------------------
-// A reactive source that emits when `.fire(value)` is called. Unlike state(),
-// fromTrigger always emits (no equality guard), making it ideal for event-driven
-// workflows where the same value may be fired multiple times.
+// A reactive pulse stream backed by producer(). Emits when `.fire(value)` is
+// called — no equality guard, so the same value fires every time. Unlike
+// state(), this is semantically an event source (pulses in a stream), not
+// persistent state.
 //
 // Usage:
 //   const trigger = fromTrigger<string>();
@@ -12,7 +13,7 @@
 //   trigger.fire("go");  // logs "go" again (no dedup)
 // ---------------------------------------------------------------------------
 
-import { state } from "../core/state";
+import { producer } from "../core/producer";
 import type { Store } from "../core/types";
 
 export interface TriggerStore<T> extends Store<T | undefined> {
@@ -35,7 +36,7 @@ export interface TriggerStore<T> extends Store<T | undefined> {
  * @option initial | T | undefined | Value before first fire().
  *
  * @remarks **No dedup:** Every `fire()` call emits, even if the value is the same as the previous one.
- * @remarks **Eager:** Unlike producer(), the trigger is always ready — `fire()` works before any subscriber connects (value is stored for `get()`).
+ * @remarks **Pulse semantics:** Backed by producer() — an event source, not persistent state.
  *
  * @example
  * ```ts
@@ -48,24 +49,40 @@ export interface TriggerStore<T> extends Store<T | undefined> {
  * trigger.fire("go"); // logs "go" again
  * ```
  *
- * @seeAlso [state](../core/state) — writable store with dedup, [producer](../core/producer) — general-purpose source
+ * @seeAlso [producer](../core/producer) — general-purpose source
  *
  * @category orchestrate
  */
 export function fromTrigger<T>(opts?: { initial?: T; name?: string }): TriggerStore<T> {
-	const store = state<T | undefined>(opts?.initial, {
-		equals: () => false,
-		name: opts?.name ?? "trigger",
-		kind: "trigger",
-	});
+	let _emit: ((value: T | undefined) => void) | null = null;
+	let _lastValue: T | undefined = opts?.initial;
+
+	const store = producer<T | undefined>(
+		({ emit }) => {
+			_emit = emit;
+			return () => {
+				_emit = null;
+			};
+		},
+		{
+			initial: opts?.initial,
+			name: opts?.name ?? "trigger",
+			kind: "trigger",
+			equals: () => false,
+			getter: () => _lastValue,
+		},
+	);
 
 	const self: TriggerStore<T> = {
 		get() {
-			return store.get();
+			return _lastValue;
 		},
 		source: store.source,
 		fire(value: T) {
-			store.set(value);
+			_lastValue = value;
+			if (_emit) {
+				_emit(value);
+			}
 		},
 	};
 

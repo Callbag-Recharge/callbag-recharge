@@ -11,7 +11,6 @@ import { map } from "../../extra/map";
 import { pipeRaw, SKIP } from "../../extra/pipeRaw";
 import { remember } from "../../extra/remember";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { scan } from "../../extra/scan";
 import { subject } from "../../extra/subject";
@@ -20,6 +19,7 @@ import { switchMap } from "../../extra/switchMap";
 import { tap } from "../../extra/tap";
 import { throttle } from "../../extra/throttle";
 import { Inspector, pipe, producer, state } from "../../index";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

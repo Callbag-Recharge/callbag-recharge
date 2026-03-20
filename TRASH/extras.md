@@ -63,7 +63,6 @@ callbag-recharge ships extra sources, operators, and sinks as tree-shakeable ent
 | `concatMap(fn)` | Maps to inner stores sequentially; queues outer values while inner is active |
 | `exhaustMap(fn)` | Maps to an inner store; ignores new outer values while inner is active |
 | `rescue(fn)` | On error, switches to a fallback store |
-| `retry(n)` | Re-subscribes on error up to n times |
 | `repeat(factory, n?)` | Re-subscribes via factory on completion, up to n total times |
 | `audit(ms)` | Trailing-edge throttle; emits latest value after `ms` ms silence window |
 | `bufferCount(count, startEvery?)` | Count-based buffering; tumbling (default) or sliding window |

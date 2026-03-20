@@ -23,7 +23,6 @@ import { interval } from "../../extra/interval";
 import { merge } from "../../extra/merge";
 import { of } from "../../extra/of";
 import { rescue } from "../../extra/rescue";
-import { retry } from "../../extra/retry";
 import { sample } from "../../extra/sample";
 import { scan } from "../../extra/scan";
 import { subscribe } from "../../extra/subscribe";
@@ -44,6 +43,7 @@ import {
 	STATE,
 	state,
 } from "../../index";
+import { retry } from "../../utils/retry";
 
 beforeEach(() => {
 	Inspector._reset();

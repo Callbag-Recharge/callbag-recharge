@@ -237,7 +237,7 @@ store.source(0, (type, data) => {
 
 - **[Docs site](https://callbag-recharge.github.io/callbag-recharge/)** — getting started, API reference, recipes
 - [Architecture](./docs/architecture.md) — layers, design principles, how each primitive works
-- [Extras](./docs/extras.md) — 60+ operators, sources, and sinks
+- [Extras](https://callbag-recharge.github.io/callbag-recharge/api/) — operators, sources, and sinks (API reference)
 - [Recipes](https://callbag-recharge.github.io/callbag-recharge/recipes/) — AI chat streaming, data pipelines, and more
 - [llms.txt](./llms.txt) / [llms-full.txt](./llms-full.txt) — AI-readable documentation
 - [Benchmarks](./docs/benchmarks.md) — Vitest + tinybench (`pnpm run bench`)

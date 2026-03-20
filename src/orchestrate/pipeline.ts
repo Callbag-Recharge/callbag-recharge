@@ -274,18 +274,28 @@ export function pipeline<S extends Record<string, StepDef>>(
 	}
 
 	// --- Overall status derived from all step metas ---
+	// Source steps (no deps) are long-lived event sources — they don't complete.
+	// When a pipeline has downstream work steps, source steps are non-blocking
+	// for completion (active or idle source steps are treated as "done").
 	const allMetas = order.map((n) => metaMap.get(n)!);
+	const sourceStepIndices = new Set(
+		order.map((n, i) => (steps[n].deps.length === 0 ? i : -1)).filter((i) => i >= 0),
+	);
+	const hasWorkSteps = sourceStepIndices.size < allMetas.length;
 	const overallStatus = derived(allMetas, () => {
 		let hasActive = false;
 		let hasError = false;
 		let allCompleted = true;
 		let allIdle = true;
 
-		for (const m of allMetas) {
-			const s = m.get().status;
+		for (let i = 0; i < allMetas.length; i++) {
+			const s = allMetas[i].get().status;
+			const isSource = sourceStepIndices.has(i);
 			if (s === "errored") hasError = true;
-			if (s === "active") hasActive = true;
-			if (s !== "completed") allCompleted = false;
+			// Source steps in a pipeline with work steps: "active" or "idle" counts as done
+			if (s === "active" && !(isSource && hasWorkSteps)) hasActive = true;
+			if (s !== "completed" && !(isSource && hasWorkSteps && (s === "active" || s === "idle")))
+				allCompleted = false;
 			if (s !== "idle") allIdle = false;
 		}
 
