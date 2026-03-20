@@ -12,7 +12,7 @@ import { state } from "@lib/core/state";
 import type { Store } from "@lib/core/types";
 import { reactiveLog } from "@lib/data/reactiveLog";
 import type { ReactiveLog } from "@lib/data/types";
-import { combine, switchMap } from "@lib/extra";
+import { combine, subscribe, switchMap } from "@lib/extra";
 import { fromTrigger } from "@lib/orchestrate/fromTrigger";
 import { pipeline, step } from "@lib/orchestrate/pipeline";
 import { taskState } from "@lib/orchestrate/taskState";
@@ -70,6 +70,16 @@ function simulateWork(
 }
 
 // Run a node as a reactive producer (circuit breaker guarded)
+//
+// IMPORTANT: emit() and complete() must happen INSIDE the task.run() body,
+// before the function returns. This ensures downstream propagation fires
+// BEFORE task status transitions to "success". Otherwise there's a microtask
+// gap between the task status update and the .then() callback, causing
+// runStatus to prematurely report "completed" before downstream tasks start.
+//
+// Note: emit/complete fire before task.run()'s generation check, so a stale
+// run (after reset) could theoretically emit. This is safe here because
+// switchMap unsubscribes old inner producers (emit becomes a no-op).
 function nodeProducer(
 	node: PipelineNode,
 	duration: [number, number],
@@ -84,15 +94,19 @@ function nodeProducer(
 		}
 		node.log.append("[START] Running...");
 		node.task
-			.run(() => simulateWork(node, duration, failRate))
-			.then((r) => {
-				emit(r);
-				complete();
+			.run(async () => {
+				try {
+					const result = await simulateWork(node, duration, failRate);
+					emit(result);
+					complete();
+					return result;
+				} catch (e) {
+					emit(null);
+					complete();
+					throw e; // re-throw so task.run() sets status to "error"
+				}
 			})
-			.catch(() => {
-				emit(null);
-				complete();
-			});
+			.catch(() => {}); // swallow — already handled inside
 	});
 }
 
@@ -142,128 +156,139 @@ export function createPipeline(): Pipeline {
 	// --- Run tracking ---
 	const _runCount = state(0, { name: "pipeline:runCount" });
 	const _running = state(false, { name: "pipeline:running" });
-	let _checkDoneTimer: ReturnType<typeof setInterval> | null = null;
+	let _runStatusUnsub: (() => void) | null = null;
 
 	// --- Declarative pipeline wiring via pipeline() + step() ---
 	const triggerSrc = fromTrigger<string>({ name: "pipeline:trigger" });
 
 	// #region display
-	const wf = pipeline({
-		// Entry point: manual trigger
-		trigger: step(triggerSrc),
+	const wf = pipeline(
+		{
+			// Entry point: manual trigger
+			trigger: step(triggerSrc),
 
-		// Step 1: Cron fires on trigger
-		cron: step(["trigger"], (src: Store<string | undefined>) =>
-			pipe(
-				src,
-				switchMap(() =>
-					producer<string>(({ emit, complete }) => {
-						cron.log.append("[TRIGGER] Pipeline started");
-						cron.task
-							.run(() => {
-								cron.breaker.recordSuccess();
-								cron.log.append("[OK] Trigger fired");
-								return Promise.resolve("triggered");
-							})
-							.then((r) => {
-								emit(r);
-								complete();
-							})
-							.catch(() => {
-								emit("triggered");
-								complete();
-							});
-					}),
-				),
-			),
-		),
-
-		// Step 2a: Fetch bank (parallel with cards)
-		fetchBank: step(["cron"], (src: Store<string>) =>
-			pipe(
-				src,
-				switchMap(() => nodeProducer(fetchBank, [800, 2000], 0.2)),
-			),
-		),
-
-		// Step 2b: Fetch cards (parallel with bank)
-		fetchCards: step(["cron"], (src: Store<string>) =>
-			pipe(
-				src,
-				switchMap(() => nodeProducer(fetchCards, [600, 1500], 0.15)),
-			),
-		),
-
-		// Step 3: Aggregate — diamond resolution (waits for both fetches)
-		aggregate: step(
-			["fetchBank", "fetchCards"],
-			(bankSrc: Store<string | null>, cardsSrc: Store<string | null>) =>
+			// Step 1: Cron fires on trigger (synchronous emit to prevent double-fire downstream)
+			cron: step(["trigger"], (src: Store<string | undefined>) =>
 				pipe(
-					combine(bankSrc, cardsSrc),
-					switchMap(([bankVal, cardVal]: [string | null, string | null]) => {
-						const bankOk = bankVal !== null;
-						const cardsOk = cardVal !== null;
-						if (!bankOk && !cardsOk) {
-							aggregate.log.append("[SKIP] Both sources failed");
-							return skipProducer();
-						}
-						aggregate.log.append(
-							`[START] Merging: bank=${bankOk ? "ok" : "fail"}, cards=${cardsOk ? "ok" : "fail"}`,
-						);
-						return nodeProducer(aggregate, [300, 800], 0.05);
-					}),
-				),
-		),
-
-		// Step 4a: Detect anomaly
-		anomaly: step(["aggregate"], (src: Store<string | null>) =>
-			pipe(
-				src,
-				switchMap((v: string | null) =>
-					v !== null ? nodeProducer(anomaly, [200, 600], 0.1) : skipProducer(),
+					src,
+					switchMap(() =>
+						producer<string>(({ emit, complete }) => {
+							cron.log.append("[TRIGGER] Pipeline started");
+							cron.breaker.recordSuccess();
+							cron.log.append("[OK] Trigger fired");
+							emit("triggered");
+							complete();
+							// Fire-and-forget task tracking for UI status display
+							cron.task.run(() => Promise.resolve("triggered")).catch(() => {});
+						}),
+					),
 				),
 			),
-		),
 
-		// Step 4b: Batch write
-		batchWrite: step(["aggregate"], (src: Store<string | null>) =>
-			pipe(
-				src,
-				switchMap((v: string | null) =>
-					v !== null ? nodeProducer(batchWrite, [400, 1000], 0.08) : skipProducer(),
+			// Step 2a: Fetch bank (parallel with cards)
+			fetchBank: step(["cron"], (src: Store<string>) =>
+				pipe(
+					src,
+					switchMap(() => nodeProducer(fetchBank, [800, 2000], 0.2)),
 				),
 			),
-		),
 
-		// Step 5: Alert (only if anomaly detection succeeds)
-		alert: step(["anomaly"], (src: Store<string | null>) =>
-			pipe(
-				src,
-				switchMap((v: string | null) =>
-					v !== null ? nodeProducer(alert, [100, 300], 0.02) : skipProducer(),
+			// Step 2b: Fetch cards (parallel with bank)
+			fetchCards: step(["cron"], (src: Store<string>) =>
+				pipe(
+					src,
+					switchMap(() => nodeProducer(fetchCards, [600, 1500], 0.15)),
 				),
 			),
-		),
-	});
+
+			// Step 3: Aggregate — diamond resolution (waits for both fetches)
+			aggregate: step(
+				["fetchBank", "fetchCards"],
+				(bankSrc: Store<string | null>, cardsSrc: Store<string | null>) =>
+					pipe(
+						combine(bankSrc, cardsSrc),
+						switchMap(([bankVal, cardVal]: [string | null, string | null]) => {
+							// Guard: undefined means "not yet produced" — wait for real values
+							if (bankVal === undefined || cardVal === undefined) {
+								return skipProducer();
+							}
+							const bankOk = bankVal !== null;
+							const cardsOk = cardVal !== null;
+							if (!bankOk && !cardsOk) {
+								aggregate.log.append("[SKIP] Both sources failed");
+								return skipProducer();
+							}
+							aggregate.log.append(
+								`[START] Merging: bank=${bankOk ? "ok" : "fail"}, cards=${cardsOk ? "ok" : "fail"}`,
+							);
+							return nodeProducer(aggregate, [300, 800], 0.05);
+						}),
+					),
+			),
+
+			// Step 4a: Detect anomaly
+			anomaly: step(["aggregate"], (src: Store<string | null>) =>
+				pipe(
+					src,
+					switchMap((v: string | null) =>
+						v != null ? nodeProducer(anomaly, [200, 600], 0.1) : skipProducer(),
+					),
+				),
+			),
+
+			// Step 4b: Batch write
+			batchWrite: step(["aggregate"], (src: Store<string | null>) =>
+				pipe(
+					src,
+					switchMap((v: string | null) =>
+						v != null ? nodeProducer(batchWrite, [400, 1000], 0.08) : skipProducer(),
+					),
+				),
+			),
+
+			// Step 5: Alert (only if anomaly detection succeeds)
+			alert: step(["anomaly"], (src: Store<string | null>) =>
+				pipe(
+					src,
+					switchMap((v: string | null) =>
+						v != null ? nodeProducer(alert, [100, 300], 0.02) : skipProducer(),
+					),
+				),
+			),
+		},
+		{
+			tasks: {
+				cron: cron.task,
+				fetchBank: fetchBank.task,
+				fetchCards: fetchCards.task,
+				aggregate: aggregate.task,
+				anomaly: anomaly.task,
+				batchWrite: batchWrite.task,
+				alert: alert.task,
+			},
+		},
+	);
 	// #endregion display
 
 	function fireTrigger() {
 		if (_running.get()) return;
 		_running.set(true);
+		wf.reset();
 		triggerSrc.fire("go");
 
-		// Track completion — watch pipeline status
-		_checkDoneTimer = setInterval(() => {
-			const status = wf.status.get();
-			if (status !== "active") {
+		// Reactively track completion via runStatus (derived from taskState instances).
+		// runStatus transitions: idle → active → completed/errored as tasks finish.
+		_runStatusUnsub = subscribe(wf.runStatus, (rs) => {
+			if (rs === "completed" || rs === "errored") {
+				if (!_runStatusUnsub) return; // re-entry guard
 				_running.set(false);
 				_runCount.update((n) => n + 1);
-				if (_checkDoneTimer) {
-					clearInterval(_checkDoneTimer);
-					_checkDoneTimer = null;
-				}
+				// Null synchronously to prevent re-entry, defer actual unsub
+				const unsub = _runStatusUnsub;
+				_runStatusUnsub = null;
+				queueMicrotask(() => unsub());
 			}
-		}, 100);
+		});
 	}
 
 	return {
@@ -273,9 +298,9 @@ export function createPipeline(): Pipeline {
 		running: _running as Store<boolean>,
 		runCount: _runCount as Store<number>,
 		destroy() {
-			if (_checkDoneTimer) {
-				clearInterval(_checkDoneTimer);
-				_checkDoneTimer = null;
+			if (_runStatusUnsub) {
+				_runStatusUnsub();
+				_runStatusUnsub = null;
 			}
 			wf.destroy();
 			for (const node of nodes) {

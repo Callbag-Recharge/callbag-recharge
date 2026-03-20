@@ -88,8 +88,8 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 
 			try {
 				const result = await fn();
-				// P4: If reset() was called during await, discard this result
-				if (gen !== generation) return result;
+				// P4: If destroyed or reset() was called during await, discard
+				if (destroyed || gen !== generation) return result;
 				const duration = Date.now() - startTime;
 				_state.set({
 					status: "success",
@@ -102,8 +102,8 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 				_version.update((v) => v + 1);
 				return result;
 			} catch (e) {
-				// P4: If reset() was called during await, discard this error transition
-				if (gen !== generation) throw e;
+				// P4: If destroyed or reset() was called during await, discard
+				if (destroyed || gen !== generation) throw e;
 				const duration = Date.now() - startTime;
 				_state.set({
 					status: "error",

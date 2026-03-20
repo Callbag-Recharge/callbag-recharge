@@ -165,97 +165,23 @@ expect(cCount).toBe(0); // c did not run
 
 ## Inspector Debugging Tools
 
-Inspector provides static methods that work as callbag sinks — zero intrusion into production primitives. Use these in tests and debugging sessions instead of writing ad-hoc raw callbag observation code.
+Inspector provides static methods for test assertions and debugging. Use these instead of ad-hoc raw callbag observation code. See `src/core/inspector.ts` for the full API.
 
-### `Inspector.observe(store)` — protocol-level observation
+### `Inspector.observe(store)` — primary test utility
 
-The primary test utility. Replaces ad-hoc `observeRaw()` helpers and raw `store.source(START, ...)` patterns. Returns a live observation object that grows as the store emits.
+Returns a live observation object. Replaces ad-hoc `observeRaw()` and raw `store.source(START, ...)` patterns.
 
 ```ts
-const s = state(0);
 const obs = Inspector.observe(s);
-
-s.set(1);
-s.set(2);
-
-obs.values       // [1, 2] — DATA payloads only
-obs.signals      // [DIRTY, DIRTY] — STATE payloads
-obs.events       // full protocol order: [{ type: "signal", data: DIRTY }, { type: "data", data: 1 }, ...]
-obs.dirtyCount   // 2
-obs.resolvedCount // 0
-obs.ended        // false
-obs.endError     // undefined
-obs.name         // store name from Inspector registration
-obs.dispose()    // unsubscribe
+obs.values        // DATA payloads only
+obs.signals       // STATE payloads
+obs.events        // full protocol order: [{ type, data }, ...]
+obs.dirtyCount    // DIRTY signal count
+obs.resolvedCount // RESOLVED signal count
+obs.ended         // true after END
+obs.endError      // error payload if END(error)
+obs.dispose()     // unsubscribe
 ```
-
-**Use for:** checking emitted values, verifying END/error propagation, counting DIRTY/RESOLVED signals, verifying protocol event ordering.
-
-### `Inspector.tap(store, name?)` — graph visualization wrapper
-
-Creates a transparent passthrough node visible in the graph. Delegates `get()` and `source()` to the original store. Zero overhead.
-
-```ts
-const a = state(1, { name: "a" });
-const tapped = Inspector.tap(a, "debug_a");
-// tapped.get() delegates to a.get()
-// subscribers through tapped connect directly to a
-// Inspector.snapshot() shows "debug_a" as a distinct node with edge from "a"
-```
-
-**Use for:** inserting named observation points in the graph during debugging without modifying production code.
-
-### `Inspector.spy(store, opts?)` — observe + console logging
-
-Same as `observe()` but also logs every event to console. For interactive debugging sessions.
-
-```ts
-const obs = Inspector.spy(myStore, { name: "debug" });
-// Console output: [debug] STATE: DIRTY, [debug] DATA: 42, etc.
-obs.values  // same as observe()
-obs.dispose()
-```
-
-### `Inspector.snapshot()` — JSON-serializable graph
-
-Returns `{ nodes, edges }` — the full graph as JSON. Designed for AI consumption.
-
-```ts
-const snap = Inspector.snapshot();
-// snap.nodes: [{ name, kind, value, status }, ...]
-// snap.edges: [{ from, to }, ...]
-JSON.stringify(snap) // works
-```
-
-### `Inspector.dumpGraph()` — pretty-print for console/CLI
-
-```ts
-console.log(Inspector.dumpGraph());
-// Store Graph (3 nodes):
-//   count (state) = 42  [SETTLED]
-//   doubled (derived) = 84  [SETTLED]
-//   label (derived) = "value=84"  [SETTLED]
-```
-
-### `Inspector.toMermaid()` / `Inspector.toD2()` — graph-as-text for docs/dashboards
-
-```ts
-console.log(Inspector.toMermaid());
-// graph TD
-//   count["count (state) = 42"]:::settled
-//   doubled["doubled (derived) = 84"]:::settled
-//   count --> doubled
-//   classDef settled fill:#d4edda,stroke:#28a745
-//   ...
-
-console.log(Inspector.toD2());
-// direction: down
-// count: "count (state) = 42 [SETTLED]" { shape: rectangle }
-// doubled: "doubled (derived) = 84 [SETTLED]" { shape: hexagon }
-// count -> doubled
-```
-
-Options: `toMermaid({ direction: "LR" })`, `toD2({ direction: "right" })`. Node IDs are collision-safe (deterministic `__N` suffix on sanitized-name collision). Mermaid output includes `classDef` declarations for status-based styling.
 
 ### When to use which tool
 
@@ -319,169 +245,25 @@ expect(values2).toEqual([6]);
 
 ## v4: Output Slot Testing Patterns
 
-The output slot model introduces new topology invariants that must be verified.
+The output slot model introduces topology invariants. Key things to verify:
 
-### Output slot mode transitions
+### Output slot mode transitions (DISCONNECTED → SINGLE → MULTI → DISCONNECTED)
 
-Test that mode transitions (DISCONNECTED → SINGLE → MULTI → SINGLE → DISCONNECTED) preserve value correctness and don't leak subscriptions.
-
-```ts
-// DISCONNECTED → SINGLE: derived connects to deps on first subscriber
-const a = state(1)
-const b = derived([a], () => a.get() * 2)
-expect(b.get()).toBe(2) // DISCONNECTED — b pull-computes from deps
-
-const values: number[] = []
-const unsub = subscribe(b, v => values.push(v)) // → SINGLE (connects to deps)
-a.set(5)
-expect(b.get()).toBe(10) // b current via push
-expect(values).toEqual([10])
-
-// SINGLE → MULTI: second subscriber joins without upstream reconnection
-const values2: number[] = []
-const unsub2 = subscribe(b, v => values2.push(v))
-a.set(7)
-expect(values).toEqual([10, 14])
-expect(values2).toEqual([14]) // D joined mid-stream
-
-// MULTI → SINGLE → DISCONNECTED
-unsub2()
-a.set(8)
-expect(values).toEqual([10, 14, 16]) // C still works
-unsub()
-// back to DISCONNECTED — deps disconnected, get() pull-computes
-expect(b.get()).toBe(16) // pull-computes: a.get() is still 8, so 8*2=16
-a.set(9)
-expect(b.get()).toBe(18) // pull-computes fresh from deps
-```
-
-Always verify:
-1. **A never gets extra subscribers** during SINGLE → MULTI (the output slot absorbs topology changes)
+1. **A never gets extra subscribers** during SINGLE → MULTI (output slot absorbs topology changes)
 2. **B._value stays current** while connected (push-based)
 3. **Values are not duplicated** during transition (no replay artifacts)
-4. **get() pull-computes correctly** when all external subscribers leave (DISCONNECTED)
+4. **get() pull-computes correctly** when all subscribers leave (DISCONNECTED)
 
 ### Diamond topology with output slots
 
-The bitmask must still resolve correctly even though B's output slot (not B directly) dispatches to C.
+Bitmask must resolve correctly even though B's output slot (not B directly) dispatches to C. Verify single-compute with both SINGLE and MULTI modes on intermediate nodes.
 
-```ts
-// C depends on [A, B] where B depends on A — diamond
-const a = state(1)
-const b = derived([a], () => a.get() * 2)
-const c = derived([a, b], () => a.get() + b.get())
+### Other invariants
 
-// C should compute exactly once per a.set()
-let cCount = 0
-effect([c], () => { cCount++ })
-
-a.set(5)
-expect(cCount).toBe(1)      // once, not twice
-expect(c.get()).toBe(15)     // 5 + 10
-
-// Verify with multiple subscribers to B (MULTI mode)
-const unsub = subscribe(b, () => {})
-a.set(10)
-expect(cCount).toBe(2)      // still once per change
-expect(c.get()).toBe(30)     // 10 + 20
-unsub()
-```
-
-### Status model correctness
-
-Verify the full status lifecycle including terminal states:
-
-```ts
-const a = state(1)
-const b = derived([a], () => a.get() * 2)
-
-// SETTLED after data flows
-a.set(2)
-expect(b._status).toBe('SETTLED')
-
-// DIRTY during two-phase push (observable via effect timing)
-let statusDuringEffect: string | undefined
-const c = derived([a], () => a.get())
-effect([a], () => {
-  // During effect, c should be DIRTY or SETTLED depending on ordering
-  statusDuringEffect = c._status
-})
-
-// COMPLETED on terminal
-const p = producer<number>(({ emit, complete }) => {
-  emit(1)
-  complete()
-})
-const sub = subscribe(p, () => {})
-expect(p._status).toBe('COMPLETED') // or verify via Inspector
-```
-
-### Type 3 tuple signals
-
-Verify that `[Symbol, data?]` tuples are forwarded unchanged through nodes that don't recognize them:
-
-```ts
-// Unknown type 3 signals must pass through — forward-compatibility
-const a = state(1)
-const b = derived([a], () => a.get())
-
-const customSignal = Symbol('CUSTOM')
-const received: any[] = []
-
-// Raw sink observing type 3
-b.source(START, (type: number, data: any) => {
-  if (type === STATE) received.push(data)
-})
-
-// Inject custom signal through a — should arrive at b's sink
-// (implementation-specific: may need to inject via a's internal sink)
-```
-
-### Raw callbag sink wrapper
-
-Prefer `Inspector.observe()` over raw callbag sinks for test assertions. Use raw sinks only when testing protocol-level behavior that `observe()` can't capture (e.g., talkback mechanics):
-
-```ts
-// Inspector.observe() captures DATA, STATE, and END — covers most test needs
-const a = state(1)
-const obs = Inspector.observe(a)
-
-a.set(2)
-obs.values    // [2]
-obs.signals   // [DIRTY]
-obs.ended     // false
-```
-
-### init() timing: construction vs connection
-
-Test that handler-local state resets on reconnect but dep connection structure survives:
-
-```ts
-// Operator with a counter (handler-local state)
-const a = state(0)
-const counted = operator([a], (actions) => {
-  let count = 0 // handler-local: resets on reconnect
-  return (depIndex, type, data) => {
-    if (type === DATA) {
-      count++
-      actions.emit([data, count])
-    }
-  }
-})
-
-const values1: any[] = []
-const unsub1 = subscribe(counted, v => values1.push(v))
-a.set(1); a.set(2)
-expect(values1).toEqual([[1, 1], [2, 2]])
-unsub1()
-
-// Reconnect — count resets
-const values2: any[] = []
-const unsub2 = subscribe(counted, v => values2.push(v))
-a.set(3); a.set(4)
-expect(values2).toEqual([[3, 1], [4, 2]]) // count restarted at 1
-unsub2()
-```
+- **Status lifecycle**: SETTLED after data, DIRTY during two-phase push, COMPLETED on terminal
+- **Type 3 forwarding**: Unknown `[Symbol, data?]` tuples pass through unchanged
+- **init() timing**: Handler-local state resets on reconnect; dep connection structure survives
+- Prefer `Inspector.observe()` over raw callbag sinks for assertions
 
 ---
 
@@ -498,37 +280,6 @@ The `regressions.test.ts` file records every confirmed bug that was found and fi
 When a bug is fixed, add the regression test immediately before closing the issue.
 
 ---
-
-## Completed Test History (Batch Summary)
-
-All batches are complete. 267 tests were written across 8 batches. 12 bugs were found and fixed.
-
-| Batch | Focus | Tests | Fixes |
-|-------|-------|-------|-------|
-| 1 | first/last/find/elementAt/partition | 42 | 3 |
-| 2 | Source factories + buffer error/completion | 31 | 3 |
-| 3 | Core primitives edge cases | 45 | 1 |
-| 4 | Reconnect/lifecycle across all operators | 26 | 0 |
-| 5 | Reentrancy, stress, complex chains | 29 | 1 |
-| 6 | Protocol, batch, interop | 27 | 0 |
-| 7 | flat/switchMap/repeat/pipeRaw/SKIP/Inspector | 39 | 2 |
-| Post | Optimization pass & code review | 28 | 2 |
-| **Total** | | **267** | **12** |
-
-### Notable bugs found
-
-| Batch | Operator | Bug | Fix |
-|-------|----------|-----|-----|
-| 1 | first, find, elementAt | Upstream error converted to completion | `data !== undefined` check → `error(data)` |
-| 2 | fromPromise | Rejection silently swallowed | Rejection handler calls `error(reason)` |
-| 2 | fromObs | Missing error/complete in observer | Observer now passes `{ next, error, complete }` |
-| 2 | buffer | Upstream error/completion ignored | Added `onEnd` handlers for input and notifier |
-| 3 | effect | dispose() not idempotent | Added `_disposed` guard |
-| 5 | producer | retry can't restart completed sources | Added `resubscribable` option + reentrancy fix |
-| 7 | flat | Sync inner completion race | Added `innerEnded` flag guard |
-| 7 | switchMap | Same sync completion race | Same fix |
-| Post | operator | complete()/error() didn't disconnect upstream | Added upstream END loop before notifying sinks |
-| Post | operator | init-time complete() leaked dep subscriptions | Added `if (completed) break` in dep loop |
 
 ### Watch list
 

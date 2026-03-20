@@ -266,6 +266,35 @@ describe("taskState", () => {
 		task.destroy(); // no throw
 	});
 
+	it("destroy during in-flight run discards status transition", async () => {
+		const task = taskState<string>();
+		let resolve: (v: string) => void;
+		const p = task.run(() => new Promise<string>((r) => (resolve = r)));
+		expect(task.get().status).toBe("running");
+
+		task.destroy();
+		resolve!("done");
+		const result = await p;
+
+		// Result is returned but status was NOT updated (destroyed guard)
+		expect(result).toBe("done");
+		expect(task.get().status).toBe("running"); // frozen — state store torn down
+	});
+
+	it("destroy during in-flight error discards error transition", async () => {
+		const task = taskState<string>();
+		let reject: (e: Error) => void;
+		const p = task.run(() => new Promise<string>((_, r) => (reject = r)));
+		expect(task.get().status).toBe("running");
+
+		task.destroy();
+		reject!(new Error("boom"));
+		await expect(p).rejects.toThrow("boom");
+
+		// Error is re-thrown but status was NOT updated (destroyed guard)
+		expect(task.get().status).toBe("running"); // frozen
+	});
+
 	// --- Reactive ---
 
 	it("effect fires on status transitions", async () => {

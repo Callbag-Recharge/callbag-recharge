@@ -4,7 +4,7 @@
 // Generic utility for wrapping any async data source (fetch, SSE, WebSocket,
 // ReadableStream, AsyncIterable) into a reactive Store with:
 // - AbortSignal-based cancellation on unsubscribe
-// - Auto-cancel-previous semantics (switchMap-style)
+// - Auto-cancel-previous semantics (unsubscribe inner → fromAbortable abort)
 // - Retry integration via resubscribable producer
 //
 // This is the reusable core extracted from chatStream. Benefits:
@@ -16,6 +16,7 @@
 
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 
 export type StreamFactory<T> = (signal: AbortSignal) => AsyncIterable<T>;
@@ -78,60 +79,58 @@ export interface CancellableStreamResult<T> {
 export function cancellableStream<T>(
 	opts?: CancellableStreamOptions<T>,
 ): CancellableStreamResult<T> {
-	let abortController: AbortController | null = null;
-	let running = false;
+	const name = opts?.name ?? "cancellableStream";
 
 	const output = producer<T>(undefined, {
 		initial: opts?.initial,
-		name: opts?.name ?? "cancellableStream",
+		name,
 		resubscribable: true,
 	});
 
 	const activeStore = producer<boolean>(undefined, {
 		initial: false,
-		name: opts?.name ? `${opts.name}.active` : "cancellableStream.active",
+		name: `${name}.active`,
 		_skipInspect: true,
 	});
 
-	function cancel(): void {
-		if (abortController) {
-			abortController.abort();
-			abortController = null;
-		}
-		if (running) {
-			running = false;
-			activeStore.emit(false);
-		}
-	}
+	let innerUnsub: (() => void) | null = null;
+	let cancelled = false;
 
-	async function consumeStream(factory: StreamFactory<T>, signal: AbortSignal): Promise<void> {
-		try {
-			const iterable = factory(signal);
-			for await (const chunk of iterable) {
-				if (signal.aborted) return;
-				output.emit(chunk);
-			}
-			if (!signal.aborted) {
-				running = false;
-				activeStore.emit(false);
-				opts?.onComplete?.();
-			}
-		} catch (err) {
-			if (signal.aborted) return; // expected cancellation
-			running = false;
-			activeStore.emit(false);
-			opts?.onError?.(err);
-			output.error(err);
+	function cancel(): void {
+		cancelled = true;
+		if (innerUnsub) {
+			innerUnsub();
+			innerUnsub = null;
 		}
+		activeStore.emit(false);
 	}
 
 	function start(factory: StreamFactory<T>): void {
-		cancel(); // cancel any existing stream
-		abortController = new AbortController();
-		running = true;
+		cancel();
+		cancelled = false;
 		activeStore.emit(true);
-		// Catch to prevent unhandled rejection if onError/output.error throw
-		consumeStream(factory, abortController.signal).catch(() => {});
+		// fromAbortable handles AbortController + async iteration + error handling.
+		// Unsubscribing (via cancel or next start) triggers fromAbortable's cleanup → abort.
+		const inner = fromAbortable(factory, { name, initial: opts?.initial });
+		innerUnsub = subscribe(inner, (v) => output.emit(v as T), {
+			onEnd: (err) => {
+				innerUnsub = null;
+				// Distinguish user-initiated cancel from natural completion/error.
+				// On cancel, fromAbortable swallows the abort and sends clean END.
+				if (cancelled) return;
+				activeStore.emit(false);
+				if (err !== undefined) {
+					try {
+						opts?.onError?.(err);
+					} catch {
+						// Don't let callback exceptions block error propagation
+					}
+					output.error(err);
+				} else {
+					opts?.onComplete?.();
+				}
+			},
+		});
 	}
 
 	Inspector.register(output as any, { kind: "cancellableStream" });
@@ -153,6 +152,10 @@ export interface FromAbortableOptions<T> {
 	name?: string;
 	/** Initial value before first emission. */
 	initial?: T;
+	/** Called when stream completes normally. */
+	onComplete?: () => void;
+	/** Called when stream errors. */
+	onError?: (error: unknown) => void;
 }
 
 /**
@@ -193,11 +196,21 @@ export function fromAbortable<T>(
 					}
 					if (!ac.signal.aborted) {
 						done = true;
+						try {
+							opts?.onComplete?.();
+						} catch {
+							// Don't let callback exceptions block completion
+						}
 						complete();
 					}
 				} catch (err) {
 					if (!ac.signal.aborted) {
 						done = true;
+						try {
+							opts?.onError?.(err);
+						} catch {
+							// Don't let callback exceptions block error propagation
+						}
 						error(err);
 					}
 				}

@@ -324,7 +324,22 @@ These are not yet implemented but represent concrete opportunities for improveme
 
 **Dispatch savings (when applicable):** Same as derived SINGLE_DEP — 50% reduction for single-dep unbatched paths.
 
-### 2. Compile-time Inspector removal
+### 2. Cancellation-safe pipeline reset
+
+**Status:** Not implemented. **Impact:** Medium (correctness for long-running async tasks). **Priority:** Medium.
+
+`pipeline.reset()` resets all TaskState instances to idle synchronously, but in-flight async work (e.g., a `task.run(() => fetch(...))` that hasn't resolved yet) continues executing. When it eventually resolves, the TaskState's generation counter guards against stale completions — but the derived `runStatus` may momentarily see mixed states (some tasks idle from reset, some completing from the previous run) during the transition window.
+
+**Current mitigation:** TaskState uses a generation counter — `reset()` bumps `_generation`, and the `.run()` promise checks `gen === this._generation` before writing success/error. This prevents stale completions from corrupting state. The race is therefore a timing issue (brief mixed-state window), not a correctness bug.
+
+**Proper fix:** Cancellation tokens. `pipeline.reset()` would abort in-flight tasks via `AbortController`, ensuring they reject immediately rather than completing later. This eliminates the mixed-state window entirely. Requires:
+- `TaskState.run()` to accept an `AbortSignal` parameter
+- `pipeline.reset()` to abort the previous run's controller before creating a new one
+- User factories to plumb the signal into their async work (fetch, setTimeout, etc.)
+
+**Complexity:** Medium — the AbortController wiring is straightforward, but user-facing API changes (signal parameter) need careful design. Deferring until a real-world use case demands it.
+
+### 3. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
@@ -410,7 +425,9 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Reduced bound methods (6→3) | Built-in | ~30 bytes/store saved, fewer constructor allocations | All stores |
 | Streamlined DISCONNECTED↔SINGLE | Built-in | Reuses `_upstreamTalkbacks` array on reconnect | Derived sub/unsub cycles |
 | SINGLE_DEP for dynamicDerived | Potential (medium priority) | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
+| Cancellation-safe pipeline reset | Potential (medium priority) | Prevents stale task completions corrupting post-reset runStatus | Pipelines with long-running async tasks |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
+
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |
 | ~~Pull-compute version check~~ | Not implementing | Version syncing overhead ≈ pull-compute cost; userland `memo()` operator preferred | — |
 | ~~Memory footprint reduction~~ | Not implementing | ~6x gap is structural; lazy binding and WeakRef-free don't justify complexity | — |

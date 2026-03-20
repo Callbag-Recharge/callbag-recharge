@@ -51,19 +51,33 @@ export function switchMap<A, B>(
 						innerUnsub();
 						innerUnsub = null;
 					}
-					emit(innerStore.get());
+					// Subscribe first so synchronous factory emissions are detected.
+					// Only fall back to .get() if the factory didn't emit during subscribe.
+					// This prevents double-emission (undefined from .get() + value from factory)
+					// when the inner store emits synchronously in its factory.
+					let innerEmitted = false;
 					let innerEnded = false;
-					innerUnsub = subscribe(innerStore, (v) => emit(v), {
-						onEnd: (err) => {
-							innerUnsub = null;
-							innerEnded = true;
-							if (err !== undefined) {
-								error(err);
-							} else if (outerDone) {
-								complete();
-							}
+					innerUnsub = subscribe(
+						innerStore,
+						(v) => {
+							innerEmitted = true;
+							emit(v);
 						},
-					});
+						{
+							onEnd: (err) => {
+								innerUnsub = null;
+								innerEnded = true;
+								if (err !== undefined) {
+									error(err);
+								} else if (outerDone) {
+									complete();
+								}
+							},
+						},
+					);
+					if (!innerEmitted) {
+						emit(innerStore.get());
+					}
 					if (innerEnded) innerUnsub = null;
 				}
 

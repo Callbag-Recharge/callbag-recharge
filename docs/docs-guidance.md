@@ -107,40 +107,7 @@ Every exported function must have a structured JSDoc block. This is the **single
 export function state<T>(initial: T, opts?: StoreOptions<T>): WritableStore<T>
 ```
 
-### Template: extra operator (e.g. `map`)
-
-```ts
-/**
- * Transforms each upstream value through `fn`. Returns a `StoreOperator` for use with `pipe()`.
- *
- * @param fn - Transform function applied to each upstream value.
- * @param opts - Optional configuration.
- *
- * @returns `StoreOperator<A, B>` — a function that takes a `Store<A>` and returns a `Store<B>`.
- *
- * @optionsType StoreOptions
- * @option name | string | undefined | Debug name for Inspector.
- * @option equals | (a: B, b: B) => boolean | undefined | Push-phase memoization.
- *
- * @remarks **Tier 1:** Participates in diamond resolution. Forwards type 3 STATE signals from upstream.
- * @remarks **Stateful:** Maintains the last transformed value. `get()` returns `fn(input.get())` when disconnected.
- *
- * @example
- * ```ts
- * import { state, pipe } from 'callbag-recharge';
- * import { map } from 'callbag-recharge/extra';
- *
- * const count = state(3);
- * const doubled = pipe(count, map(x => x * 2));
- * doubled.get(); // 6
- * ```
- *
- * @seeAlso [pipe](/api/pipe) — compose operators, [derived](/api/derived) — computed stores
- *
- * @category extra
- */
-export function map<A, B>(fn: (value: A) => B, opts?: StoreOptions): StoreOperator<A, B>
-```
+Extra operators follow the same pattern — add `@category extra` and tier info in `@remarks`.
 
 ### Generated output
 
@@ -191,92 +158,15 @@ The generator produces `site/api/<name>.md` with this structure:
 
 ---
 
-## Tier 1 — JSDoc `@example` in source files
+## Documentation tiers
 
-The structured JSDoc above serves double duty:
-1. **IDE tooltips** — `@example` blocks appear in hover documentation
-2. **Generated API pages** — all tags feed into `site/api/*.md`
-
-**Conventions for `@example` blocks:**
-- First `@example` = basic usage (shown in IDE + becomes "Basic Usage" section)
-- Additional `@example` = advanced patterns (titled, shown in "Examples" section)
-- Show return values in comments, not `console.log`
-- Show teardown / dispose where relevant (effect, subscribe)
-
----
-
-## Tier 2 — `examples/` directory (runnable files)
-
-Longer, multi-primitive examples that show realistic patterns. Each file is a standalone `.ts` script that can be run with `npx tsx examples/<name>.ts`.
-
-**Current examples:**
-| File | Demonstrates |
-|------|-------------|
-| `examples/counter.ts` | `state` + `derived` + `effect` — basic reactive counter |
-| `examples/diamond.ts` | Diamond dependency graph — shows single-fire guarantee |
-| `examples/batch.ts` | `batch()` — multiple `set()` calls coalesced into one effect run |
-| `examples/pipe-operators.ts` | `pipe()` with `map`, `filter`, `scan` — transformation chain |
-| `examples/streaming.ts` | AI chat streaming with `producer` + `switchMap` + `scan` |
-| `examples/create-store.ts` | `createStore` — Zustand-compatible API with diamond-safe selectors |
-
-**Conventions:**
-- Each file is self-contained: imports only from `callbag-recharge` or Node built-ins
-- Dispose / clean up at the end so the script exits cleanly
-- A short JSDoc comment block at the top explains what pattern the file demonstrates
-
----
-
-## Tier 3 — Recipes (site/recipes/)
-
-Recipes are longer-form docs on the VitePress site that explain patterns with context, rationale, and variations.
-
-**Key rule: recipes pull code from `examples/` — don't duplicate code.**
-
-Use VitePress code snippet imports:
-```md
-<<< @/../examples/streaming.ts
-```
-
-This pulls the code directly from the `.ts` file. When you update the example, the recipe updates automatically.
-
-For inline code snippets in recipes (e.g. showing a variation), use fenced code blocks. But the primary example should always be imported from `examples/`.
-
-**Current recipes:**
-- `site/recipes/ai-chat-streaming.md` — AI chat with streaming, auto-cancellation, retry
-- `site/recipes/zustand-migration.md` — createStore pattern, migration from Zustand
-
----
-
-## Tier 4 — Pattern source code (`src/patterns/`)
-
-Patterns are reusable, published code (shipped in the npm package). Each pattern has:
-- `src/patterns/<name>/index.ts` — the implementation
-- `src/patterns/<name>/README.md` — full API docs, migration guide, comparison table
-
-The pattern README is the **canonical API reference** for that pattern. The recipe on the site links to it or pulls content from it. Don't duplicate the API docs in the recipe.
-
-**Workflow for a new pattern:**
-1. Write the implementation in `src/patterns/<name>/index.ts`
-2. Write tests in `src/__tests__/patterns/<name>.test.ts`
-3. Write the README in `src/patterns/<name>/README.md`
-4. Write a runnable example in `examples/<name>.ts`
-5. Write a recipe in `site/recipes/<name>.md` that:
-   - Uses `<<< @/../examples/<name>.ts` for the primary code
-   - Links to the pattern README for full API docs
-   - Adds context, variations, and framework integration
-
----
-
-## Tier 5 — llms.txt / llms-full.txt
-
-AI-readable documentation at the repo root. Updated periodically (not on every commit).
-
-- `llms.txt` — concise summary (< 4KB) for quick AI tool consumption
-- `llms-full.txt` — comprehensive reference with all APIs and examples
-
-These are also served at the docs site via `site/public/llms.txt` and `site/public/llms-full.txt`.
-
-**When to update:** When you add a new primitive, operator, data structure, or pattern. Not for every bug fix or internal refactor.
+| Tier | Location | Purpose | Key rule |
+|------|----------|---------|----------|
+| **1** | `@example` in JSDoc | IDE tooltips + feeds generated API pages | First = basic usage; additional = titled advanced patterns. Show return values as comments, not `console.log`. |
+| **2** | `examples/*.ts` | Runnable standalone scripts (`npx tsx examples/<name>.ts`) | Self-contained, clean up at end, JSDoc comment at top. |
+| **3** | `site/recipes/*.md` | Long-form VitePress docs with context and variations | **Pull code from `examples/`** via `<<< @/../examples/<name>.ts` — never duplicate. |
+| **4** | `src/patterns/<name>/` | Published reusable patterns (npm package) | Pattern `README.md` is canonical API reference. Recipe links to it. |
+| **5** | `llms.txt` / `llms-full.txt` | AI-readable docs (repo root + `site/public/`) | Update when adding new primitives/operators/patterns, not on bug fixes. |
 
 ---
 

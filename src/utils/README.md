@@ -22,7 +22,7 @@ Exported from `callbag-recharge/utils`.
 ## Design Principles
 
 1. **Strategies, not patterns.** These are reusable building blocks that configure behavior. Patterns compose them into opinionated recipes.
-2. **Zero external dependencies.** Utils import from `core/` only (never from `extra/`, `data/`, or `memory/`), except `reactiveEviction.ts` which bridges into the reactive graph via `core/effect`.
+2. **Core + extra only.** Utils import from `core/` and `extra/` only (never from `data/`, `memory/`, or `orchestrate/`). Compose with existing operators (e.g. `switchMap`, `subscribe`) instead of reimplementing callbag wiring.
 3. **Every utility has 3+ consumers.** If it's only used in one place, it should be inlined there instead.
 4. **Composition over configuration.** Circuit breaker uses backoff. Rate limiters plug into cancellableAction. State machine composes with any store.
 

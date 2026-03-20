@@ -20,6 +20,7 @@ import { Inspector } from "../core/inspector";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
+import type { TaskState } from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -50,10 +51,14 @@ export interface PipelineResult<S extends Record<string, StepDef>> {
 	steps: { [K in keyof S]: Store<any> };
 	/** Per-step reactive metadata. */
 	stepMeta: { [K in keyof S]: Store<StepMeta> };
-	/** Overall pipeline status: derived from all step statuses. */
+	/** Overall pipeline status: derived from all step stream statuses (callbag lifecycle). */
 	status: Store<PipelineStatus>;
+	/** Run status derived from registered taskState instances. Tracks actual work execution. */
+	runStatus: Store<PipelineStatus>;
 	/** Topologically sorted step names. */
 	order: string[];
+	/** Reset all step metas to idle. Call before re-triggering to track a new run. */
+	reset(): void;
 	/** Dispose all internal subscriptions. */
 	destroy(): void;
 }
@@ -128,13 +133,19 @@ export function step<T>(
  *
  * @returnsTable steps | Record | Access step stores by name.
  * stepMeta | Record | Per-step reactive metadata (status, count, error).
- * status | Store\<PipelineStatus\> | Overall pipeline status derived from all steps.
+ * status | Store\<PipelineStatus\> | Stream lifecycle status derived from callbag DATA/END signals.
+ * runStatus | Store\<PipelineStatus\> | Run status derived from registered taskState instances.
  * order | string[] | Topologically sorted step names.
+ * reset() | () => void | Reset step metas, counts, and registered taskStates to idle.
  * destroy() | () => void | Dispose all internal subscriptions.
+ *
+ * @option tasks | Partial\<Record\<string, TaskState\>\> | undefined | Map step names to TaskState instances for runStatus tracking.
  *
  * @remarks **Auto-wiring:** Step deps are resolved by name. Factory functions receive dep stores in declared order.
  * @remarks **Topological sort:** Steps are wired in dependency order. Cycles are detected and throw.
  * @remarks **Reactive status:** Each step has a `StepMeta` store. Overall status is derived from all step statuses.
+ * @remarks **Run status:** When `tasks` are provided, `runStatus` tracks actual work execution via TaskState (idle → active → completed/errored). Unlike `status`, this works with trigger-based pipelines where streams stay alive across runs. When no `tasks` are provided, `runStatus` stays `"idle"` (no work to track).
+ * @remarks **Task ownership:** TaskState instances passed via `tasks` must not be destroyed before `pipeline.destroy()`. The pipeline subscribes to their sources — early teardown will break `runStatus` tracking.
  *
  * @example
  * ```ts
@@ -157,7 +168,7 @@ export function step<T>(
  */
 export function pipeline<S extends Record<string, StepDef>>(
 	steps: S,
-	opts?: { name?: string },
+	opts?: { name?: string; tasks?: Partial<Record<keyof S, TaskState<any>>> },
 ): PipelineResult<S> {
 	const baseName = opts?.name ?? "pipeline";
 	const stepNames = Object.keys(steps);
@@ -208,6 +219,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 	// --- Wire stores in topological order ---
 	const storeMap = new Map<string, Store<any>>();
 	const metaMap = new Map<string, Store<StepMeta>>();
+	const counts = new Map<string, number>();
 	const unsubs: (() => void)[] = [];
 
 	// Wrap wiring in try/catch — on factory throw, clean up already-wired subscriptions
@@ -244,20 +256,23 @@ export function pipeline<S extends Record<string, StepDef>>(
 			);
 			metaMap.set(name, meta);
 
-			// Track step values
-			let count = 0;
+			// Track step values — count stored in map so reset() can zero it
+			counts.set(name, 0);
+			const stepKey = name;
 			const unsub = subscribe(
 				store,
 				() => {
-					count++;
-					meta.set({ status: "active", count });
+					const c = (counts.get(stepKey) ?? 0) + 1;
+					counts.set(stepKey, c);
+					meta.set({ status: "active", count: c });
 				},
 				{
 					onEnd: (err) => {
+						const c = counts.get(stepKey) ?? 0;
 						if (err !== undefined) {
-							meta.set({ status: "errored", count, error: err });
+							meta.set({ status: "errored", count: c, error: err });
 						} else {
-							meta.set({ status: "completed", count });
+							meta.set({ status: "completed", count: c });
 						}
 					},
 				},
@@ -312,6 +327,41 @@ export function pipeline<S extends Record<string, StepDef>>(
 
 	Inspector.register(overallStatus, { kind: "pipeline-status", name: `${baseName}:status` });
 
+	// --- Run status derived from taskState instances ---
+	// Tracks actual work execution: idle (all idle), active (any running),
+	// completed (none running, at least one success), errored (none running, any error).
+	const taskEntries = opts?.tasks ? Object.values(opts.tasks).filter(Boolean) : [];
+	let runStatus: Store<PipelineStatus>;
+	if (taskEntries.length > 0) {
+		const taskStores = taskEntries as TaskState<any>[];
+		runStatus = derived(taskStores, () => {
+			let anyRunning = false;
+			let anyError = false;
+			let anySuccess = false;
+			let allIdle = true;
+
+			for (const task of taskStores) {
+				const s = task.get().status;
+				if (s === "running") anyRunning = true;
+				if (s === "error") anyError = true;
+				if (s === "success") anySuccess = true;
+				if (s !== "idle") allIdle = false;
+			}
+
+			if (anyRunning) return "active" as PipelineStatus;
+			if (anyError) return "errored" as PipelineStatus;
+			if (anySuccess) return "completed" as PipelineStatus;
+			if (allIdle) return "idle" as PipelineStatus;
+			return "idle" as PipelineStatus;
+		});
+		const runStatusUnsub = subscribe(runStatus, () => {});
+		unsubs.push(runStatusUnsub);
+		Inspector.register(runStatus, { kind: "pipeline-run-status", name: `${baseName}:runStatus` });
+	} else {
+		// No tasks registered — no work to track, stays idle
+		runStatus = state<PipelineStatus>("idle", { name: `${baseName}:runStatus` });
+	}
+
 	// --- Build result ---
 	const stepsResult = {} as { [K in keyof S]: Store<any> };
 	const stepMetaResult = {} as { [K in keyof S]: Store<StepMeta> };
@@ -325,7 +375,19 @@ export function pipeline<S extends Record<string, StepDef>>(
 		steps: stepsResult,
 		stepMeta: stepMetaResult,
 		status: overallStatus,
+		runStatus,
 		order,
+		reset() {
+			for (const meta of allMetas) {
+				(meta as any).set({ ...IDLE_STEP_META });
+			}
+			for (const key of counts.keys()) {
+				counts.set(key, 0);
+			}
+			for (const task of taskEntries as TaskState<any>[]) {
+				task.reset();
+			}
+		},
 		destroy() {
 			for (const unsub of unsubs) unsub();
 			unsubs.length = 0;

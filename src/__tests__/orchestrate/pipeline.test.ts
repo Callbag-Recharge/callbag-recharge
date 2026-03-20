@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
+import { producer } from "../../core/producer";
+import { combine } from "../../extra/combine";
 import { map } from "../../extra/map";
 import { subscribe } from "../../extra/subscribe";
+import { switchMap } from "../../extra/switchMap";
 import { pipe, state } from "../../index";
-import { fromTrigger, gate, pipeline, route, step, track } from "../../orchestrate";
+import { fromTrigger, gate, pipeline, route, step, taskState, track } from "../../orchestrate";
+import type { PipelineStatus } from "../../orchestrate/pipeline";
 
 // ==========================================================================
 // step()
@@ -282,6 +286,24 @@ describe("pipeline", () => {
 		// (internal subscription cleaned up)
 	});
 
+	it("reset() clears all step metas back to idle", () => {
+		const wf = pipeline({
+			a: step(state(0)),
+			b: step(["a"], (a) => derived([a], () => a.get() * 2)),
+		});
+
+		(wf.steps.a as any).set(5);
+		expect(wf.stepMeta.a.get().status).toBe("active");
+		expect(wf.stepMeta.b.get().status).toBe("active");
+
+		wf.reset();
+		expect(wf.stepMeta.a.get().status).toBe("idle");
+		expect(wf.stepMeta.b.get().status).toBe("idle");
+		expect(wf.status.get()).toBe("idle");
+
+		wf.destroy();
+	});
+
 	it("works with gate for human-in-the-loop", () => {
 		const wf = pipeline({
 			input: step(fromTrigger<string>()),
@@ -305,6 +327,484 @@ describe("pipeline", () => {
 
 		unsub();
 		wf.destroy();
+	});
+
+	// ======================================================================
+	// runStatus (taskState-based)
+	// ======================================================================
+
+	it("runStatus is idle when no tasks registered", () => {
+		const wf = pipeline({
+			source: step(state(0)),
+		});
+
+		expect(wf.runStatus.get()).toBe("idle");
+
+		(wf.steps.source as any).set(1);
+		// No tasks → stays idle (no work to track)
+		expect(wf.runStatus.get()).toBe("idle");
+
+		wf.destroy();
+	});
+
+	it("runStatus tracks taskState lifecycle", async () => {
+		const task = taskState<string>();
+		const wf = pipeline(
+			{
+				source: step(state(0)),
+				work: step(["source"], (s) => derived([s], () => s.get())),
+			},
+			{
+				tasks: { work: task },
+			},
+		);
+
+		expect(wf.runStatus.get()).toBe("idle");
+
+		// Start a task
+		const p = task.run(() => Promise.resolve("done"));
+		expect(wf.runStatus.get()).toBe("active");
+
+		// Wait for completion
+		await p;
+		expect(wf.runStatus.get()).toBe("completed");
+
+		wf.destroy();
+		task.destroy();
+	});
+
+	it("runStatus shows errored when task fails", async () => {
+		const task = taskState<string>();
+		const wf = pipeline(
+			{
+				source: step(state(0)),
+			},
+			{
+				tasks: { source: task },
+			},
+		);
+
+		expect(wf.runStatus.get()).toBe("idle");
+
+		// Run a failing task
+		await task.run(() => Promise.reject(new Error("boom"))).catch(() => {});
+		expect(wf.runStatus.get()).toBe("errored");
+
+		wf.destroy();
+		task.destroy();
+	});
+
+	it("runStatus re-triggers naturally without reset", async () => {
+		const task = taskState<string>();
+		const wf = pipeline(
+			{
+				source: step(state(0)),
+			},
+			{
+				tasks: { source: task },
+			},
+		);
+
+		// First run
+		await task.run(() => Promise.resolve("first"));
+		expect(wf.runStatus.get()).toBe("completed");
+
+		// Second run — runStatus goes active→completed again
+		const p = task.run(() => Promise.resolve("second"));
+		expect(wf.runStatus.get()).toBe("active");
+		await p;
+		expect(wf.runStatus.get()).toBe("completed");
+
+		wf.destroy();
+		task.destroy();
+	});
+
+	it("runStatus with multiple tasks: active while any running", async () => {
+		const t1 = taskState<string>();
+		const t2 = taskState<string>();
+		const wf = pipeline(
+			{
+				a: step(state(0)),
+				b: step(state(0)),
+			},
+			{
+				tasks: { a: t1, b: t2 },
+			},
+		);
+
+		expect(wf.runStatus.get()).toBe("idle");
+
+		// Start both
+		let resolve1: (v: string) => void;
+		let resolve2: (v: string) => void;
+		const p1 = t1.run(() => new Promise<string>((r) => (resolve1 = r)));
+		const p2 = t2.run(() => new Promise<string>((r) => (resolve2 = r)));
+		expect(wf.runStatus.get()).toBe("active");
+
+		// Complete first — still active (second running)
+		resolve1!("done1");
+		await p1;
+		expect(wf.runStatus.get()).toBe("active");
+
+		// Complete second — completed
+		resolve2!("done2");
+		await p2;
+		expect(wf.runStatus.get()).toBe("completed");
+
+		wf.destroy();
+		t1.destroy();
+		t2.destroy();
+	});
+
+	it("runStatus completes with combine+switchMap diamond (async tasks)", async () => {
+		// Reproduces the demo scenario: trigger → two parallel async fetches →
+		// combine → aggregate. The combine fires when EITHER dep changes, and
+		// switchMap emits innerStore.get() immediately (undefined). Without
+		// undefined guards, this causes premature aggregate triggers.
+		const t1 = taskState<string>();
+		const t2 = taskState<string>();
+		const tAgg = taskState<string>();
+
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline(
+			{
+				trigger: step(trigger),
+				fetchA: step(["trigger"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								t1.run(() => new Promise<string>((r) => setTimeout(() => r("a-result"), 50)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							}),
+						),
+					),
+				),
+				fetchB: step(["trigger"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								t2.run(() => new Promise<string>((r) => setTimeout(() => r("b-result"), 80)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							}),
+						),
+					),
+				),
+				agg: step(["fetchA", "fetchB"], (a, b) =>
+					pipe(
+						combine(a, b),
+						switchMap(([va, vb]: [string | null, string | null]) => {
+							// Guard: undefined = not yet produced
+							if (va === undefined || vb === undefined) {
+								return producer<string | null>(({ emit, complete }) => {
+									emit(null);
+									complete();
+								});
+							}
+							return producer<string | null>(({ emit, complete }) => {
+								tAgg
+									.run(() => new Promise<string>((r) => setTimeout(() => r("agg"), 30)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							});
+						}),
+					),
+				),
+			},
+			{ tasks: { fetchA: t1, fetchB: t2, agg: tAgg } },
+		);
+
+		expect(wf.runStatus.get()).toBe("idle");
+
+		// Fire trigger
+		trigger.fire("go");
+
+		// Wait for all async work to settle
+		await new Promise((r) => setTimeout(r, 200));
+
+		// All tasks should have completed
+		expect(t1.get().status).toBe("success");
+		expect(t2.get().status).toBe("success");
+		expect(tAgg.get().status).toBe("success");
+		expect(wf.runStatus.get()).toBe("completed");
+
+		wf.destroy();
+		t1.destroy();
+		t2.destroy();
+		tAgg.destroy();
+	});
+
+	it("re-trigger after reset: aggregate runs when both deps succeed", async () => {
+		// Reproduces the airflow demo bug: trigger → sync cron → two parallel
+		// async fetches → combine → aggregate. The switchMap fix ensures the
+		// synchronous cron emission is detected (no spurious undefined from .get()),
+		// so downstream switchMaps fire only once per trigger.
+		const t1 = taskState<string>();
+		const t2 = taskState<string>();
+		const tAgg = taskState<string>();
+
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline(
+			{
+				trigger: step(trigger),
+				// Synchronous cron: emit immediately, then fire-and-forget task tracking.
+				// Prevents double-fire downstream (the original bug was an async cron
+				// that emitted undefined first, then "triggered" via microtask).
+				cron: step(["trigger"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string>(({ emit, complete }) => {
+								emit("triggered");
+								complete();
+							}),
+						),
+					),
+				),
+				fetchA: step(["cron"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								t1.run(() => new Promise<string>((r) => setTimeout(() => r("a-result"), 30)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							}),
+						),
+					),
+				),
+				fetchB: step(["cron"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								t2.run(() => new Promise<string>((r) => setTimeout(() => r("b-result"), 50)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							}),
+						),
+					),
+				),
+				agg: step(["fetchA", "fetchB"], (a, b) =>
+					pipe(
+						combine(a, b),
+						switchMap(([va, vb]: [string | null, string | null]) => {
+							if (va === undefined || vb === undefined) {
+								return producer<string | null>(({ emit, complete }) => {
+									emit(null);
+									complete();
+								});
+							}
+							if (va === null && vb === null) {
+								return producer<string | null>(({ emit, complete }) => {
+									emit(null);
+									complete();
+								});
+							}
+							return producer<string | null>(({ emit, complete }) => {
+								tAgg
+									.run(() => new Promise<string>((r) => setTimeout(() => r("agg"), 20)))
+									.then((r) => {
+										emit(r);
+										complete();
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							});
+						}),
+					),
+				),
+			},
+			{ tasks: { fetchA: t1, fetchB: t2, agg: tAgg } },
+		);
+
+		// Run #1
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 200));
+		expect(t1.get().status).toBe("success");
+		expect(t2.get().status).toBe("success");
+		expect(tAgg.get().status).toBe("success");
+
+		// Reset and Run #2
+		wf.reset();
+		trigger.fire("go-again");
+		await new Promise((r) => setTimeout(r, 200));
+
+		// Both fetches should succeed and aggregate should have run
+		expect(t1.get().status).toBe("success");
+		expect(t2.get().status).toBe("success");
+		expect(tAgg.get().status).toBe("success");
+		expect(wf.runStatus.get()).toBe("completed");
+
+		wf.destroy();
+		t1.destroy();
+		t2.destroy();
+		tAgg.destroy();
+	});
+
+	it("runStatus does not fire completed before downstream tasks start (race fix)", async () => {
+		// Reproduces the airflow demo timing bug: when emit/complete is in a
+		// .then() callback AFTER task.run(), there's a microtask gap where
+		// runStatus sees all parallel tasks as "success" but downstream hasn't
+		// started yet. Fix: emit/complete inside task.run() body, before return.
+		const t1 = taskState<string>();
+		const t2 = taskState<string>();
+		const tAgg = taskState<string>();
+
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline(
+			{
+				trigger: step(trigger),
+				cron: step(["trigger"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string>(({ emit, complete }) => {
+								emit("triggered");
+								complete();
+							}),
+						),
+					),
+				),
+				fetchA: step(["cron"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								// CORRECT: emit/complete inside task.run() body
+								t1.run(async () => {
+									const r = await new Promise<string>((res) =>
+										setTimeout(() => res("a-result"), 30),
+									);
+									emit(r);
+									complete();
+									return r;
+								}).catch(() => {
+									emit(null);
+									complete();
+								});
+							}),
+						),
+					),
+				),
+				fetchB: step(["cron"], (src) =>
+					pipe(
+						src,
+						switchMap(() =>
+							producer<string | null>(({ emit, complete }) => {
+								// CORRECT: emit/complete inside task.run() body
+								t2.run(async () => {
+									const r = await new Promise<string>((res) =>
+										setTimeout(() => res("b-result"), 50),
+									);
+									emit(r);
+									complete();
+									return r;
+								}).catch(() => {
+									emit(null);
+									complete();
+								});
+							}),
+						),
+					),
+				),
+				agg: step(["fetchA", "fetchB"], (a, b) =>
+					pipe(
+						combine(a, b),
+						switchMap(([va, vb]: [string | null, string | null]) => {
+							if (va === undefined || vb === undefined) {
+								return producer<string | null>(({ emit, complete }) => {
+									emit(null);
+									complete();
+								});
+							}
+							if (va === null && vb === null) {
+								return producer<string | null>(({ emit, complete }) => {
+									emit(null);
+									complete();
+								});
+							}
+							return producer<string | null>(({ emit, complete }) => {
+								tAgg
+									.run(async () => {
+										const r = await new Promise<string>((res) => setTimeout(() => res("agg"), 20));
+										emit(r);
+										complete();
+										return r;
+									})
+									.catch(() => {
+										emit(null);
+										complete();
+									});
+							});
+						}),
+					),
+				),
+			},
+			{ tasks: { fetchA: t1, fetchB: t2, agg: tAgg } },
+		);
+
+		// Track runStatus transitions via subscribe (same pattern as demo)
+		const statuses: PipelineStatus[] = [];
+		const unsub = subscribe(wf.runStatus, (rs) => statuses.push(rs));
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 200));
+
+		// When completed fires, aggregate should have already run
+		expect(tAgg.get().status).toBe("success");
+		expect(wf.runStatus.get()).toBe("completed");
+
+		// Verify no premature "completed" before aggregate ran:
+		// statuses should show active → completed (not active → completed → active → completed)
+		const completedIndices = statuses
+			.map((s, i) => (s === "completed" ? i : -1))
+			.filter((i) => i >= 0);
+		expect(completedIndices.length).toBe(1); // completed fires exactly once
+
+		unsub();
+		wf.destroy();
+		t1.destroy();
+		t2.destroy();
+		tAgg.destroy();
 	});
 
 	it("all-source-steps pipeline does not bypass status", () => {

@@ -81,14 +81,6 @@ src/
 
 ---
 
-## 2b. Repository & release tooling
-
-This section is about the **repo layout**, not the runtime graph above.
-
-- **pnpm workspace** — The published library lives at the repo root; **VitePress docs** live in `site/` (`callbag-recharge-docs`, private). One **`pnpm-lock.yaml`** at the root; **Corepack** honors **`packageManager`** in root `package.json` (pnpm 10.x).
-- **Local setup** — `corepack enable`, then `pnpm install` (or `mise run bootstrap` if using the repo `.mise.toml`). **pnpm 10** may require **`pnpm.onlyBuiltDependencies`** for packages that run install scripts (e.g. native tooling).
-- **Releases** — Pushes to **`main`** run **semantic-release** (see `release.config.mjs`): version bump, `CHANGELOG.md`, git tag, npm publish (via **Trusted Publishing / OIDC**), GitHub Release. GitHub App + npm trusted-publisher setup: **`docs/github-actions-release-setup.md`**. Commits: **Angular-style** (`feat:`, `fix:`, …). See **`CONTRIBUTING.md`** for a commit cheat sheet.
-
 ---
 
 ## 3. Protocol: Type Constants & Signal Vocabulary
@@ -260,16 +252,6 @@ When the last subscriber leaves:
 
 `_cachedValue` is retained — `get()` returns the last cached value (or performs a fresh pull-recompute for derived).
 
-### Why ADOPT isn't needed
-
-The ADOPT protocol (REQUEST_ADOPT/GRANT_ADOPT handshake) was designed for a model where derived nodes hold an "internal terminator" in the output slot, requiring a handoff when external subscribers arrive. The actual implementation sidesteps this:
-
-- Dep connections are managed by `_lazyConnect()` / disconnect, independent of the output slot's dispatch logic
-- The output slot is purely a dispatch point: `null → fn → Set`
-- Subscriber arrival/departure is mechanical — no upstream awareness or signaling needed
-
-The `REQUEST_ADOPT`/`GRANT_ADOPT` symbols have been removed from `protocol.ts`.
-
 ---
 
 ## 7. `.get()` Semantics
@@ -393,88 +375,30 @@ Values from raw callbag deps are captured by calling `dep.get()` inside `recompu
 
 ## 10. Lifecycle: Startup, Teardown, Cleanup, Reconnect
 
-### Construction (startup)
+### Construction → Connection → Disconnection
 
-**Construction time** — runs once when the node is created:
+1. **Construction** (once): Initialize properties, prepare handler closures, register with Inspector. Do NOT connect to deps — fully lazy.
+2. **Connection** (first subscriber arrives): `_lazyConnect()` subscribes to each dep's `source()`. Handler-local state (counters, accumulators, flags) allocated fresh.
+3. **Disconnection** (last subscriber leaves): `_output = null`, disconnect from all deps, `_status = DISCONNECTED`. `_cachedValue` retained for `get()` pull-recompute.
 
-```
-derived([A], fn) or operator([A], init):
-  1. Initialize all instance properties (_cachedValue, _status, _flags, _output, etc.)
-  2. Prepare handler closures (but do NOT connect to deps yet)
-  3. Both derived and operator: wait for first subscriber (fully lazy)
-  4. Register with Inspector: kind, name, initial value
-```
-
-**Connection time** — runs when the first subscriber arrives:
-- `_lazyConnect()` subscribes to each dep's `source()`
-- Allocate handler-local state: counters, accumulators, skip counts, flags
-- This is the equivalent of `init()` running fresh in the operator handler
-
-**Disconnection time** — runs when all subscribers leave:
-- Release handler-local state
-- For both `derived` and `operator`: disconnect from deps, no reconnect until next subscriber; state is gone
-
-Dep connections are created and torn down with the subscriber lifecycle. Behavioral state (counters, queues) resets cleanly on each new subscription session.
-
-### Connection batching
-
-`beginDeferredStart()` / `endDeferredStart()` queues all chain activations. They fire together at `endDeferredStart()`, ensuring a subscriber's baseline is captured before any producer starts emitting.
-
-### Teardown (last subscriber leaves)
-
-```
-talkback(END) ← upstream from subscriber
-  → remove subscriber from output slot
-  → if output slot empty:
-      _output = null, disconnect from all deps, _status = DISCONNECTED
-      // _cachedValue retained — get() performs pull-recompute for derived
-```
+`beginDeferredStart()` / `endDeferredStart()` batches chain activations so a subscriber's baseline is captured before any producer emits.
 
 ### Completion/error teardown
 
-```
-complete() or error(e):
-  → if completed: return                          // idempotency guard
-  → completed = true
-  → B._status = COMPLETED or ERRORED
-  → if error: store error for late subscriber propagation
-      derived/dynamicDerived: _cachedValue = error (reuses existing field)
-      operator: _errorData = error (separate field, avoids resetOnTeardown collision)
-  → for each talkback: talkback(END)              // disconnect upstream
-  → talkbacks = []
-  → localOutput = _output; _output = null          // null before notifying
-  → _stop()                                       // cleanup BEFORE notifying
-  → for each sink in multi-sink:
-      try { sink(END) or sink(END, e) }           // exception-safe: one sink throwing
-      catch (_) {}                                // doesn't block other sinks
-  → single sink: sink(END) or sink(END, e)        // no try/catch needed
-```
-
-**Cleanup before notification:** ensures `resubscribable` re-subscription finds a clean state.
+Order: idempotency guard → set terminal status → store error (derived: `_cachedValue`; operator: `_errorData`) → disconnect upstream (`talkback(END)`) → null `_output` → `_stop()` cleanup → notify sinks with `END`/`END(error)`. Multi-sink: try/catch per sink. **Cleanup before notification** ensures `resubscribable` re-subscription finds clean state.
 
 ### D5: Error handling in derived/dynamicDerived
 
-User computation functions (`fn`) can throw. Error handling follows dual semantics:
-
-**Push path** (`_recompute`, `_lazyConnect`): try/catch around `fn()`. On error:
-- `_handleEnd(err)` sets ERRORED status, stores error in `_cachedValue`, disconnects upstream
-- Active subscribers receive `END(error)` via callbag protocol
-- For `_lazyConnect`: output is null when error fires (sink not yet registered), so `source()` checks ERRORED and sends `END(error)` to the late-arriving sink directly
-
-**Pull path** (`get()` when disconnected): `fn()` throws directly to the caller. No state mutation — the node remains usable for retry on next `get()` call.
-
-**`get()` on ERRORED node**: throws the stored error. Consistent with disconnected pull-compute behavior.
-
-**Late subscriber to ERRORED node**: `source()` checks ERRORED status → sends `START` + `END(error)` with stored error data.
-
-**V8 overhead**: try/catch has zero measurable overhead on the happy path (V8 JIT compiles try body as normal code when catch is never entered).
+- **Push path**: try/catch around `fn()` → `_handleEnd(err)` sets ERRORED, stores error, disconnects upstream. Late subscriber to ERRORED node gets `START` + `END(error)`.
+- **Pull path** (`get()` when disconnected): `fn()` throws directly to caller. No state mutation — retryable on next `get()`.
+- **`get()` on ERRORED node**: throws the stored error.
 
 ### Reconnect
 
-- **derived**: reconnects via `_lazyConnect()` when a new subscriber calls `source(START, ...)`. Handler closures re-subscribe to deps.
-- **operator**: reconnects when a new subscriber calls `source(START, ...)`. `init()` re-runs, handler-local state resets.
-- **producer**: `_start()` re-runs on new subscriber after last left. If `resetOnTeardown`, `_value` resets.
-- **effect**: no reconnect. Dispose and create new.
+- **derived**: `_lazyConnect()` re-subscribes to deps on new subscriber.
+- **operator**: `init()` re-runs, handler-local state resets.
+- **producer**: `_start()` re-runs. If `resetOnTeardown`, `_value` resets.
+- **effect**: no reconnect — dispose and create new.
 - **Completed nodes**: reject new subscribers (immediate START + END) unless `resubscribable`.
 
 ---
@@ -558,57 +482,13 @@ Type 1 is pure values only. Raw callbag sources feed into the graph via the "DAT
 
 ## 14. Optimization Guidelines
 
-### V8 hidden class: classes for hot paths
+See [`docs/optimizations.md`](optimizations.md) for the full optimization reference (V8 hidden classes, bitmask flags, SINGLE_DEP/P_SKIP_DIRTY signaling, handler closure zero-allocation, snapshot-free completion).
 
-`ProducerImpl`, `DerivedImpl`, `OperatorImpl` remain as classes. All instance properties initialized in constructor, consistent shape. Output slot (`_output`) declared in the class definition to maintain hidden class stability.
-
-```ts
-class DerivedImpl<T> {
-  _cachedValue: T | undefined;
-  _status: NodeStatus = "DISCONNECTED";
-  _output: ((type: number, data?: any) => void) | Set<any> | null = null;
-  _flags: number;
-  // ...
-}
-```
-
-### Bitmask flags (unchanged)
-
-Pack booleans into `_flags: number`. Boolean state such as `autoDirty`, `resetOnTeardown`, single-dep mode packed as bit flags. `P_SKIP_DIRTY` (bit 10) skips DIRTY dispatch for single-dep subscribers in unbatched paths.
-
-### SINGLE_DEP signaling and P_SKIP_DIRTY
-
-Single-dep subscribers (derived, effect, operator with one dep) send `talkback(STATE, SINGLE_DEP)` after receiving the START talkback. The source sets `P_SKIP_DIRTY` in `_flags`, skipping DIRTY dispatch in unbatched `emit()`/`set()` paths (the downstream node doesn't need DIRTY — DATA follows synchronously).
-
-**`_singleDepCount`** — per-ProducerImpl counter tracking how many active subscribers sent SINGLE_DEP. Each talkback closure has a local `isSingleDep` boolean; the counter aggregates across subscribers. Used to restore `P_SKIP_DIRTY` on MULTI→SINGLE transition (when one subscriber disconnects and the remaining one is single-dep).
-
-**Safety invariants:**
-- `P_SKIP_DIRTY` cleared on SINGLE→MULTI (second subscriber — diamond resolution needs DIRTY)
-- `P_SKIP_DIRTY` cleared on SINGLE→null (last subscriber leaves)
-- `P_SKIP_DIRTY` cleared on `complete()`/`error()` (terminal — resubscribable must start clean)
-- `_singleDepCount` reset to 0 on full disconnect, complete, or error
-- During batching, DIRTY is always dispatched (skip only applies to unbatched path)
-- Derived synthesizes DIRTY for its own downstream when receiving DATA-without-DIRTY
-
-### Method binding in constructor (unchanged)
-
-Bind public API methods in constructor, not as arrow functions.
-
-### Handler closures: zero-allocation
-
-The dep subscription handler closures should not allocate on every signal. They capture `this` and write to `_cachedValue` and `_status` in-place — no objects created per signal.
-
-### Snapshot-free completion (unchanged)
-
-Null `_output` before iterating, no `[...sinks]` snapshot.
-
-### Dep connection handlers built once
-
-Dep subscription handler closures are assembled once. `_lazyConnect()` subscribes to deps on first subscriber; disconnect tears them down. Reconnect re-subscribes using the same handler closures — no re-construction.
-
-### Effect as closure (unchanged)
-
-`effect` remains a pure closure. No class. All state in closure-local variables.
+Key principles:
+- Classes for hot paths (`ProducerImpl`, `DerivedImpl`, `OperatorImpl`) — all properties initialized in constructor for V8 hidden class stability.
+- Booleans packed into `_flags: number` as bit flags.
+- Handler closures capture `this`, write `_cachedValue`/`_status` in-place — zero allocation per signal.
+- `effect` is a pure closure (no class).
 
 ---
 
@@ -638,51 +518,7 @@ Inspector.inspect(store): {
 }
 ```
 
-### Proposed additions (planned)
-
-**1. Event log** — circular buffer of recent signal events:
-```ts
-Inspector.startRecording(maxEvents?: number): void;
-Inspector.stopRecording(): void;
-Inspector.events: Array<{ ts, store, kind, type, value? }>;
-Inspector.dumpEvents(): string;
-```
-
-**2. Dependency edges** — registered by operator/derived during chain assembly:
-```ts
-Inspector.registerEdge(parent: Store, child: Store): void;
-Inspector.getEdges(): Map<string, string[]>; // parent → children
-```
-
-**3. Signal hooks** — called by primitives on every emission:
-```ts
-Inspector.onEmit?: (store, value) => void;
-Inspector.onSignal?: (store, signal) => void;
-Inspector.onEnd?: (store, error) => void;
-Inspector.onStatus?: (store, status) => void;  // ← new: fired when _status changes
-```
-
-**4. `Inspector.dump()`** — structured snapshot for AI-assisted debugging:
-```ts
-Inspector.dump(): {
-  graph: Record<string, { kind, value, status, deps: string[] }>;
-  recentEvents: typeof Inspector.events;
-}
-```
-
-### Where handler closures register with Inspector
-
-The dep subscription handler closures are the natural hook for `Inspector.onEmit` and `Inspector.onStatus`. They already fire on every value and every status change. Adding inspector calls is zero-cost when hooks are null:
-
-```ts
-// Inside handler closure:
-node._cachedValue = computedValue;
-node._status = "SETTLED";
-if (Inspector.onEmit) Inspector.onEmit(node, computedValue);
-if (Inspector.onStatus) Inspector.onStatus(node, "SETTLED");
-```
-
-Similarly, the STATE handling path hooks into `onSignal` and `onStatus`.
+Inspector hooks into handler closures (zero-cost when disabled). See `src/core/inspector.ts` for the full API.
 
 ---
 
@@ -708,15 +544,7 @@ Raw callbag sinks (terminal consumers, not operators) need no wrapping — they 
 
 ---
 
-## 17. Open Questions
-
-### 17.1 Initial value on first connection — RESOLVED
-
-When C subscribes, `_lazyConnect()` connects to deps and computes the initial value. C gets a talkback that can pull `_cachedValue` via `talkback(DATA)`. If `get()` was called before any subscriber, `_cachedValue` is already populated via pull-recompute.
-
----
-
-## 18. Summary: Decision Tree for New Extras
+## 17. Summary: Decision Tree for New Extras
 
 ```
 Need to implement a new extra?
@@ -760,185 +588,35 @@ For all extras:
 
 ---
 
-## 19. Utils Layer — Composed Utilities
+## 19. Higher-Level Layers (Utils, Data, Memory, Orchestrate)
 
-`src/utils/` contains composed utilities built on core + extra. Includes pure strategies (backoff, eviction), reactive utilities (retry, connectionHealth, validationPipeline), and bridging tools (reactiveEviction).
+These layers build on core + extra. Read the source READMEs when working in these areas.
 
-### Backoff Strategies (`utils/backoff.ts`)
+### Utils (`src/utils/`)
 
-```ts
-type BackoffStrategy = (attempt: number, error?: unknown) => number | null;
-```
+Pure strategies and reactive utilities: `backoff.ts` (constant/linear/exponential/fibonacci/decorrelatedJitter), `eviction.ts` (fifo/lru/lfu/scored/random), `reactiveEviction.ts` (O(log n) min-heap with effect subscriptions).
 
-Returns ms to wait before next retry, or `null` to stop. Built-in: `constant`, `linear`, `exponential` (with jitter), `fibonacci`, `decorrelatedJitter` (AWS-recommended). `withMaxAttempts(strategy, n)` caps any strategy.
+### Data (`src/data/`)
 
-**Consumers:** `retry` (enhanced), future `circuitBreaker`, future `producer` reconnect.
+Reactive data structures using the **version-gated pattern**: `state<number>` version counter bumped on structural changes, `derived` stores materialize lazily. All implement `NodeV0` (`id`, `version`, `snapshot()`).
 
-### Eviction Policies (`utils/eviction.ts`)
+| Structure | Purpose |
+|-----------|---------|
+| `reactiveMap` | Key-value store with TTL, eviction, namespaces, keyspace events |
+| `reactiveLog` | Append-only log with bounded circular buffer, sequence numbers |
+| `reactiveIndex` | Secondary index (`indexKey → Set<primaryKey>`) with reverse map |
+| `pubsub` | Topic-based pub/sub — lazy `state` per topic, `equals: () => false` |
 
-```ts
-interface EvictionPolicy<K> {
-  touch(key: K): void;     insert(key: K): void;
-  delete(key: K): void;    evict(count?: number): K[];
-  size(): number;           clear(): void;
-}
-```
+### Memory (`src/memory/`)
 
-Pure bookkeeping — tracks access patterns, decides eviction order. Built-in: `fifo`, `lru`, `lfu`, `scored`, `random`.
+`collection` uses `reactiveIndex` for O(1) tag-based lookups. `byTag(tag)` delegates to `_tagIndex.get(tag)`.
 
-**Consumers:** `reactiveMap` (bounded), `collection` (scored), future patterns.
+### Orchestrate (`src/orchestrate/`)
 
-### Reactive Scored (`utils/reactiveEviction.ts`)
+Lightweight scheduling primitives — "Airflow in TypeScript" using `derived()` + `effect()` as the DAG executor.
 
-`reactiveScored(getStore, scoreOf)` — O(log n) min-heap that subscribes to score stores via `effect()`, auto-sifts on updates. Used by `collection` for decay-based memory eviction.
-
----
-
-## 20. Level 3 Data Structures
-
-`src/data/` contains reactive data structures built on core primitives + utils. Each uses the version-gated pattern: a `state<number>` version counter bumped on structural changes, with derived stores that materialize lazily from the version.
-
-### reactiveMap (`data/reactiveMap.ts`)
-
-Reactive key-value store. Single source of truth (`_map: Map`), internal state stores drive `select()`. Version-gated `keysStore`/`sizeStore`. Supports TTL, pluggable eviction, namespaces, keyspace events.
-
-### reactiveLog (`data/reactiveLog.ts`)
-
-Append-only reactive log. Each entry gets a monotonic sequence number. Supports bounded size (circular buffer — oldest trimmed on overflow). Reactive `lengthStore`, `latest`, `tail(n)`, and events.
-
-### reactiveIndex (`data/reactiveIndex.ts`)
-
-Reactive secondary index mapping `indexKey → Set<primaryKey>`. Maintains a reverse map (`primaryKey → Set<indexKey>`) for O(1) update/remove. Reactive `select(indexKey)`, `keysStore`, `sizeStore`. Designed to be driven by a source data structure that calls `add/remove/update` when entries change.
-
-### pubsub (`data/pubsub.ts`)
-
-Thin topic-based publish/subscribe channel. Each topic is a lazily created `state` store with `equals: () => false` (always emit). `publish(topic, msg)` sets the store; `subscribe(topic)` returns it. Zero cost for unobserved topics.
-
-**Pattern:** All data structures follow the same architecture:
-- Plain JS collections as source of truth (Map, array)
-- `state<number>` version counter for structural changes
-- `derived` stores for lazy reactive views
-- `state` with `equals: () => false` for event streams
-- `batch()` for atomic multi-mutation operations
-- `teardown()` in `destroy()` for cleanup
-
----
-
-## 21. NodeV0 — Serialization (Level 3)
-
-Every Level 3 data structure implements the `NodeV0` interface:
-
-```ts
-interface NodeV0 {
-  readonly id: string;      // user-specified or auto-generated
-  readonly version: number;  // monotonically increasing, bumped on structural changes
-}
-```
-
-**`id`** — user-specified via options (`{ id: "my-map" }`) or auto-generated (`rmap-1`, `rlog-2`, `ridx-3`). Stable across the lifetime of the structure.
-
-**`version`** — reads from the internal `_version` state counter. Increments on key add/delete (map), append/clear (log), index key add/remove (index). Value updates that don't change structure do not bump version.
-
-**`snapshot()`** — returns a JSON-serializable representation of the structure's current state:
-
-```ts
-reactiveMap.snapshot()   → { type: "reactiveMap",   id, version, entries: [k, v][] }
-reactiveLog.snapshot()   → { type: "reactiveLog",   id, version, entries, headSeq, tailSeq }
-reactiveIndex.snapshot() → { type: "reactiveIndex", id, version, index: Record<string, string[]> }
-```
-
-NodeV0 is the Level 3 minimum — negligible overhead (two fields). Level 4 adds `cid` + `prev` + `schema` (NodeV1) on demand.
-
----
-
-## 22. Collection Tag Index Integration
-
-`collection` (in `src/memory/`) uses `reactiveIndex` internally for O(1) tag-based lookups. When a node is added, its tags are indexed. An `effect` per node watches `meta` changes and updates the index when tags change. `byTag(tag)` delegates to `_tagIndex.get(tag)` instead of scanning all nodes.
-
-The `tagIndex` property is exposed on the `Collection` interface, enabling reactive tag queries:
-
-```ts
-const col = collection<string>();
-col.add("doc", { id: "d1", tags: ["important"] });
-col.tagIndex.select("important").get(); // Set{"d1"}
-```
-
----
-
-## 23. Orchestrate — Scheduling Primitives (Level 3E)
-
-`src/orchestrate/` provides lightweight scheduling primitives that compose with existing core primitives to build DAG-based task pipelines (think "Airflow in TypeScript"). No new scheduling engine — `derived()` + `effect()` with explicit deps IS the DAG executor (diamond resolution guarantees correct ordering).
-
-### fromCron (`orchestrate/fromCron.ts`)
-
-Tier 2 source (producer-based) that emits a `Date` on each cron schedule match. Uses standard 5-field cron expressions (`minute hour day-of-month month day-of-week`).
-
-```ts
-import { fromCron } from 'callbag-recharge/orchestrate'
-
-const daily = fromCron('0 9 * * *');        // 9am daily
-const everyFive = fromCron('*/5 * * * *');  // every 5 minutes
-const weekdays = fromCron('0 9 * * 1-5');   // 9am Mon-Fri
-```
-
-**Implementation:** Checks every `tickMs` (default 60s) via `setInterval`. Tracks last-fired minute key to prevent double-fires. Lazy start (callbag protocol) — no timers until first subscriber.
-
-**Cron parser:** Built-in zero-dependency parser (`orchestrate/cron.ts`) supporting `*`, numbers, ranges (`1-5`), lists (`1,3,5`), and steps (`*/5`, `1-10/2`). Validates at construction time. Does not support named months/days or non-standard extensions (`L`, `W`, `#`).
-
-**Timezone:** Uses `new Date()` (local time). For timezone-aware scheduling, compose with your preferred date library (e.g., luxon, date-fns-tz) using `producer()` directly.
-
-### taskState (`orchestrate/taskState.ts`)
-
-Reactive task execution tracker built on `state()`. Wraps any sync/async function with automatic status, duration, and error tracking.
-
-```ts
-import { taskState } from 'callbag-recharge/orchestrate'
-
-const task = taskState<Result>({ id: 'fetch-bank' });
-await task.run(() => plaid.sync());
-
-task.get().status   // 'success'
-task.get().duration // ms
-task.get().runCount // 1
-```
-
-**TaskMeta shape:**
-```ts
-{ status: 'idle' | 'running' | 'success' | 'error',
-  result?: T, error?: unknown,
-  lastRun?: number, duration?: number, runCount: number }
-```
-
-**Reactive:** Built on `state({ equals: () => false })` — every transition emits. Compose with `effect()` to react to status changes.
-
-**NodeV0:** Implements `id` + `version` + `snapshot()`. Version increments on run completion or reset. `taskState.from(snapshot)` restores from serialized state (running tasks are marked as errored on restore).
-
-### dag (`orchestrate/dag.ts`)
-
-Optional sugar for declaring task DAGs. Validates acyclicity via Kahn's algorithm (topological sort) and registers edges with Inspector for graph visualization. Does NOT create new nodes — it validates and annotates existing ones.
-
-```ts
-import { dag } from 'callbag-recharge/orchestrate'
-
-const { order, size } = dag([
-  { store: daily, name: 'cron' },
-  { store: fetchBank, deps: [daily], name: 'fetch-bank' },
-  { store: fetchCards, deps: [daily], name: 'fetch-cards' },
-  { store: aggregate, deps: [fetchBank, fetchCards], name: 'aggregate' },
-]);
-// Throws if a cycle is detected
-// order = topologically sorted stores (deps before dependents)
-```
-
-### Composing the Airflow pattern
-
-The DAG is not new code — `derived()` and `effect()` with explicit deps provide the execution graph with diamond resolution:
-
-```ts
-const daily = fromCron('0 9 * * *');
-const fetchBank = pipe(daily, exhaustMap(() => fromPromise(plaid.sync())), retry(3));
-const fetchCards = pipe(daily, exhaustMap(() => fromPromise(stripe.charges())), retry(3));
-const aggregate = derived([fetchBank, fetchCards], (bank, cards) => merge(bank, cards));
-const alerts = pipe(aggregate, filter(txns => txns.some(t => t.amount > 500)));
-effect([alerts], txns => telegram.send(format(txns)));
-```
+| Primitive | What it does |
+|-----------|-------------|
+| `fromCron(expr)` | Tier 2 source emitting `Date` on cron match (5-field, built-in parser) |
+| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. `NodeV0` compliant. |
+| `dag(nodes)` | Validates acyclicity (Kahn's), registers Inspector edges. No new nodes. |
