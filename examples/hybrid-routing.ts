@@ -6,8 +6,8 @@
  * Research shows this approach reduces cloud costs by 60% and latency by 40%.
  */
 
-import { pipe, producer, state } from "callbag-recharge";
-import { merge, rescue, subscribe, switchMap } from "callbag-recharge/extra";
+import { pipe, state } from "callbag-recharge";
+import { filter, fromPromise, merge, rescue, subscribe, switchMap } from "callbag-recharge/extra";
 import { route } from "callbag-recharge/orchestrate";
 
 // ── Types ────────────────────────────────────────────────────
@@ -61,29 +61,19 @@ const [localRoute, cloudRoute] = route(
 
 const localResponse = pipe(
 	localRoute,
+	filter((req): req is LLMRequest => req != null),
 	// switchMap runs local inference for each routed request
-	switchMap((req: LLMRequest | null) =>
-		producer<LLMResponse>(({ emit, complete, error }) => {
-			if (!req) return;
-			localInfer(req)
-				.then((res) => {
-					emit(res);
-					complete();
-				})
-				.catch((e) => error(e));
-		}),
-	),
+	switchMap((req) => fromPromise(localInfer(req))),
 	// rescue() catches local model errors and falls back to cloud
 	rescue(() =>
-		producer<LLMResponse>(({ emit, complete }) => {
-			emit({
+		fromPromise(
+			Promise.resolve({
 				text: "(cloud fallback response)",
 				model: "gpt-5.4-mini",
 				latencyMs: 800,
 				cost: 0.003,
-			});
-			complete();
-		}),
+			}),
+		),
 	),
 );
 
@@ -91,17 +81,8 @@ const localResponse = pipe(
 
 const cloudResponse = pipe(
 	cloudRoute,
-	switchMap((req: LLMRequest | null) =>
-		producer<LLMResponse>(({ emit, complete, error }) => {
-			if (!req) return;
-			cloudInfer(req)
-				.then((res) => {
-					emit(res);
-					complete();
-				})
-				.catch((e) => error(e));
-		}),
-	),
+	filter((req): req is LLMRequest => req != null),
+	switchMap((req) => fromPromise(cloudInfer(req))),
 );
 
 // ── Derived metrics ──────────────────────────────────────────

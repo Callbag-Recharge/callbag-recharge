@@ -110,13 +110,11 @@ describe("executionLog.connectPipeline", () => {
 
 		const wf = pipeline({
 			trigger: step(fromTrigger<number>()),
-			doubled: step(
-				(s: any) =>
-					pipe(
-						s,
-						map((x: number) => x * 2),
-					),
-				["trigger"],
+			doubled: step(["trigger"], (s: any) =>
+				pipe(
+					s,
+					map((x: number) => x * 2),
+				),
 			),
 		});
 

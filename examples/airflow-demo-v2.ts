@@ -11,8 +11,8 @@
  *
  * Run: npx tsx examples/airflow-demo-v2.ts
  */
-import { pipe, producer } from "callbag-recharge";
-import { map, subscribe, switchMap } from "callbag-recharge/extra";
+import { pipe } from "callbag-recharge";
+import { filter, fromPromise, map, subscribe, switchMap } from "callbag-recharge/extra";
 import {
 	checkpoint,
 	fromTrigger,
@@ -36,6 +36,26 @@ const adapter = memoryAdapter();
 let fraudCallCount = 0;
 
 // ---------------------------------------------------------------------------
+// Simulated async APIs
+// ---------------------------------------------------------------------------
+function fraudCheck(payment: {
+	userId: string;
+	amount: number;
+}): Promise<{ userId: string; amount: number; risk: string }> {
+	fraudCallCount++;
+	return new Promise((resolve, reject) => {
+		setTimeout(() => {
+			if (fraudCallCount % 5 === 0) {
+				reject(new Error("Fraud API unavailable"));
+				return;
+			}
+			const risk = payment.amount > 5000 ? "high" : "low";
+			resolve({ ...payment, risk });
+		}, 50);
+	});
+}
+
+// ---------------------------------------------------------------------------
 // Pipeline definition — declarative step wiring
 // ---------------------------------------------------------------------------
 const wf = pipeline({
@@ -43,78 +63,53 @@ const wf = pipeline({
 	trigger: step(fromTrigger<{ userId: string; amount: number }>({ name: "payment:trigger" })),
 
 	// Step 2: Validate — route valid vs invalid
-	validate: step(
-		(trigger) => {
-			const [valid, invalid] = route(
-				trigger,
-				(v) => v !== undefined && (v as any).amount > 0 && (v as any).amount < 10_000,
-				{ name: "payment:validate" },
-			);
-			// Side-effect: log invalid payments
-			subscribe(invalid, (v) => {
-				console.log(`[REJECTED] Invalid payment: $${v?.amount} for ${v?.userId}`);
-			});
-			return valid;
-		},
-		["trigger"],
-	),
+	validate: step(["trigger"], (trigger) => {
+		const [valid, invalid] = route(
+			trigger,
+			(v) => v !== undefined && (v as any).amount > 0 && (v as any).amount < 10_000,
+			{ name: "payment:validate" },
+		);
+		// Side-effect: log invalid payments
+		subscribe(invalid, (v) => {
+			console.log(`[REJECTED] Invalid payment: $${v?.amount} for ${v?.userId}`);
+		});
+		return valid;
+	}),
 
 	// Step 3: Fraud check — external API with retry + timeout + breaker + checkpoint
-	fraudCheck: step(
-		(validated) =>
-			pipe(
-				validated,
-				switchMap((payment) =>
-					producer<{ userId: string; amount: number; risk: string }>(
-						({ emit, complete, error }) => {
-							fraudCallCount++;
-							const timer = setTimeout(() => {
-								if (fraudCallCount % 5 === 0) {
-									error(new Error("Fraud API unavailable"));
-									return;
-								}
-								const risk = (payment?.amount ?? 0) > 5000 ? "high" : "low";
-								emit({ ...(payment as any), risk });
-								complete();
-							}, 50);
-							return () => clearTimeout(timer);
-						},
-					),
-				),
-				withRetry({ count: 2 }),
-				withTimeout(5000),
-				withBreaker(breaker),
-				checkpoint("fraud-check", adapter),
-				track({ name: "fraud-check" }),
-			),
-		["validate"],
+	fraudCheck: step(["validate"], (validated) =>
+		pipe(
+			validated,
+			filter((v): v is { userId: string; amount: number } => v != null),
+			switchMap((payment) => fromPromise(fraudCheck(payment))),
+			withRetry({ count: 2 }),
+			withTimeout(5000),
+			withBreaker(breaker),
+			checkpoint("fraud-check", adapter),
+			track({ name: "fraud-check" }),
+		),
 	),
 
 	// Step 4: Route by risk level
-	riskRoute: step(
-		(fraudChecked) => {
-			const [highRisk, lowRisk] = route(fraudChecked, (v: any) => v?.risk === "high", {
-				name: "risk:route",
-			});
-			// Attach both outputs — pipeline tracks the high-risk branch
-			(highRisk as any)._lowRisk = lowRisk;
-			return highRisk;
-		},
-		["fraudCheck"],
-	),
+	riskRoute: step(["fraudCheck"], (fraudChecked) => {
+		const [highRisk, lowRisk] = route(fraudChecked, (v: any) => v?.risk === "high", {
+			name: "risk:route",
+		});
+		// Attach both outputs — pipeline tracks the high-risk branch
+		(highRisk as any)._lowRisk = lowRisk;
+		return highRisk;
+	}),
 
 	// Step 5: Gate — human approval for high-risk
-	approval: step((highRisk) => pipe(highRisk, gate({ name: "approval" })), ["riskRoute"]),
+	approval: step(["riskRoute"], (highRisk) => pipe(highRisk, gate({ name: "approval" }))),
 
 	// Step 6a: Process approved high-risk
-	processHigh: step(
-		(approved) =>
-			pipe(
-				approved,
-				map((v: any) => ({ ...v, status: "approved:manual" })),
-				track({ name: "process:high" }),
-			),
-		["approval"],
+	processHigh: step(["approval"], (approved) =>
+		pipe(
+			approved,
+			map((v: any) => ({ ...v, status: "approved:manual" })),
+			track({ name: "process:high" }),
+		),
 	),
 });
 

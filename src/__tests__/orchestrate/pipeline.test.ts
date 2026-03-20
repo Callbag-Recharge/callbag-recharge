@@ -16,13 +16,25 @@ describe("step", () => {
 	});
 
 	it("creates a step def with deps", () => {
-		const s = step((a: any) => a, ["input"]);
+		const s = step(["input"], (a: any) => a);
 		expect(s.deps).toEqual(["input"]);
 	});
 
-	it("accepts name option", () => {
-		const s = step(state(0), [], { name: "myStep" });
+	it("accepts name option (no-deps form)", () => {
+		const s = step(state(0), { name: "myStep" });
 		expect(s.name).toBe("myStep");
+	});
+
+	it("accepts name option (deps-first form)", () => {
+		const s = step(["input"], (a: any) => a, { name: "namedDep" });
+		expect(s.name).toBe("namedDep");
+		expect(s.deps).toEqual(["input"]);
+	});
+
+	it("throws when deps-first form has no factory", () => {
+		expect(() => step(["a"] as any, undefined as any)).toThrow(
+			/deps-first form requires a factory/,
+		);
 	});
 });
 
@@ -33,7 +45,7 @@ describe("pipeline", () => {
 	it("wires a simple linear pipeline", () => {
 		const wf = pipeline({
 			source: step(state(0)),
-			doubled: step((s) => derived([s], () => s.get() * 2), ["source"]),
+			doubled: step(["source"], (s) => derived([s], () => s.get() * 2)),
 		});
 
 		expect(wf.order).toEqual(["source", "doubled"]);
@@ -49,7 +61,7 @@ describe("pipeline", () => {
 		const wf = pipeline({
 			a: step(state(10)),
 			b: step(state(20)),
-			sum: step((a, b) => derived([a, b], () => a.get() + b.get()), ["a", "b"]),
+			sum: step(["a", "b"], (a, b) => derived([a, b], () => a.get() + b.get())),
 		});
 
 		expect(wf.steps.sum.get()).toBe(30);
@@ -99,7 +111,7 @@ describe("pipeline", () => {
 
 	it("topological order respects dependencies", () => {
 		const wf = pipeline({
-			c: step((a, b) => derived([a, b], () => a.get() + b.get()), ["a", "b"]),
+			c: step(["a", "b"], (a, b) => derived([a, b], () => a.get() + b.get())),
 			a: step(state(1)),
 			b: step(state(2)),
 		});
@@ -118,7 +130,7 @@ describe("pipeline", () => {
 	it("throws on unknown dep", () => {
 		expect(() =>
 			pipeline({
-				a: step((x: any) => x, ["nonexistent"]),
+				a: step(["nonexistent"], (x: any) => x),
 			}),
 		).toThrow(/unknown step "nonexistent"/);
 	});
@@ -126,8 +138,8 @@ describe("pipeline", () => {
 	it("throws on cycle", () => {
 		expect(() =>
 			pipeline({
-				a: step((b: any) => b, ["b"]),
-				b: step((a: any) => a, ["a"]),
+				a: step(["b"], (b: any) => b),
+				b: step(["a"], (a: any) => a),
 			}),
 		).toThrow(/cycle detected/);
 	});
@@ -135,13 +147,11 @@ describe("pipeline", () => {
 	it("works with fromTrigger source", () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<number>()),
-			doubled: step(
-				(s) =>
-					pipe(
-						s,
-						map((x) => (x ?? 0) * 2),
-					),
-				["trigger"],
+			doubled: step(["trigger"], (s) =>
+				pipe(
+					s,
+					map((x) => (x ?? 0) * 2),
+				),
 			),
 		});
 
@@ -160,7 +170,7 @@ describe("pipeline", () => {
 	it("works with pipe operators", () => {
 		const wf = pipeline({
 			input: step(state(0)),
-			tracked: step((s) => pipe(s, track()), ["input"]),
+			tracked: step(["input"], (s) => pipe(s, track())),
 		});
 
 		(wf.steps.input as any).set(42);
@@ -192,9 +202,9 @@ describe("pipeline", () => {
 	it("diamond topology: fan-out and fan-in", () => {
 		const wf = pipeline({
 			source: step(state(1)),
-			left: step((s) => derived([s], () => s.get() * 2), ["source"]),
-			right: step((s) => derived([s], () => s.get() + 10), ["source"]),
-			merged: step((l, r) => derived([l, r], () => l.get() + r.get()), ["left", "right"]),
+			left: step(["source"], (s) => derived([s], () => s.get() * 2)),
+			right: step(["source"], (s) => derived([s], () => s.get() + 10)),
+			merged: step(["left", "right"], (l, r) => derived([l, r], () => l.get() + r.get())),
 		});
 
 		expect(wf.steps.merged.get()).toBe(13); // (1*2) + (1+10) = 2 + 11
@@ -208,15 +218,12 @@ describe("pipeline", () => {
 	it("works with route for conditional branching", () => {
 		const wf = pipeline({
 			input: step(fromTrigger<number>()),
-			router: step(
-				(s) => {
-					const [positive, negative] = route(s, (v) => (v ?? 0) > 0);
-					// Return positive branch, attach negative for external access
-					(positive as any)._negative = negative;
-					return positive;
-				},
-				["input"],
-			),
+			router: step(["input"], (s) => {
+				const [positive, negative] = route(s, (v) => (v ?? 0) > 0);
+				// Return positive branch, attach negative for external access
+				(positive as any)._negative = negative;
+				return positive;
+			}),
 		});
 
 		const positiveVals: number[] = [];
@@ -244,16 +251,13 @@ describe("pipeline", () => {
 		expect(() =>
 			pipeline({
 				a: step(source),
-				b: step(
-					(s) => {
-						wiredCount++;
-						return derived([s], () => s.get());
-					},
-					["a"],
-				),
-				c: step(() => {
+				b: step(["a"], (s) => {
+					wiredCount++;
+					return derived([s], () => s.get());
+				}),
+				c: step(["b"], () => {
 					throw new Error("factory boom");
-				}, ["b"]),
+				}),
 			}),
 		).toThrow(/factory boom/);
 
@@ -281,7 +285,7 @@ describe("pipeline", () => {
 	it("works with gate for human-in-the-loop", () => {
 		const wf = pipeline({
 			input: step(fromTrigger<string>()),
-			gated: step((s) => pipe(s, gate()), ["input"]),
+			gated: step(["input"], (s) => pipe(s, gate())),
 		});
 
 		const values: string[] = [];
