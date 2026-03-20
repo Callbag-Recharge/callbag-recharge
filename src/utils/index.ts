@@ -1,3 +1,6 @@
+// Async queue
+export type { AsyncQueueOptions, AsyncQueueResult } from "./asyncQueue";
+export { asyncQueue } from "./asyncQueue";
 // Backoff strategies
 export type { BackoffStrategy, ExponentialOptions, JitterMode } from "./backoff";
 export {
@@ -39,6 +42,9 @@ export type {
 	ConnectionStatus,
 } from "./connectionHealth";
 export { connectionHealth } from "./connectionHealth";
+// Dirty tracker
+export type { DirtyTrackerOptions, DirtyTrackerResult } from "./dirtyTracker";
+export { dirtyTracker } from "./dirtyTracker";
 export type { EvictionPolicy } from "./eviction";
 export { fifo, lfu, lru, random, scored } from "./eviction";
 // Rate limiter
@@ -55,3 +61,11 @@ export type {
 	StateMachineResult,
 } from "./stateMachine";
 export { stateMachine } from "./stateMachine";
+// Validation pipeline
+export type {
+	AsyncValidator,
+	SyncValidator,
+	ValidationPipelineOptions,
+	ValidationPipelineResult,
+} from "./validationPipeline";
+export { validationPipeline } from "./validationPipeline";

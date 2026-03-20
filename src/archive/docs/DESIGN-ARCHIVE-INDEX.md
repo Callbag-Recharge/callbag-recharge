@@ -236,6 +236,15 @@ Research across edge LLM landscape (Ollama, WebLLM, ExecuTorch, Apple Foundation
 
 **Outcome (Phase 1+2 shipped):** All 7 orchestration operators implemented: `gate()`, `track()`, `route()`, `withBreaker()`, `withRetry()`, `withTimeout()`, `fromTrigger()`. Plus `pipeline()` declarative builder, `checkpoint()` with pluggable adapters, `fromWebhook()`/`fromWebSocket()`/`toWebSocket()` adapters, and `airflow-demo-v2.ts` proving "n8n in 50 lines." Gap analysis identified persistence adapters and execution logging as the next priorities to move from demo to production.
 
+### Session text-editor-lego-plan (March 19) — Generic Legos + Text Editor Build Plan
+**Topic:** Audit existing patterns/utils for missing intermediate building blocks, design 10 reusable legos, compose into text editor pattern
+
+**Key insight:** The gap between core primitives and full patterns (chatStream, agentLoop) is too wide. Mid-size legos (dirtyTracker, selection, commandBus, validationPipeline) both stress-test library correctness (diamond resolution, batch atomicity, cleanup) and serve as reusable blocks for many downstream tools beyond the editor.
+
+**Rejected:** Build editor monolithically (no reuse); put reactive patterns in utils/ (violates import rules); reactiveList as reactiveMap wrapper (O(n) key remapping); build markdown parser in-library (rendering concern, not state).
+
+**Outcome:** 3-phase build plan. Phase 1: extract dirtyTracker + validationPipeline + asyncQueue from existing patterns. Phase 2: new primitives (selection, reactiveList, timer, commandBus, focusManager). Phase 3: compose into textBuffer → textEditor → examples. 13 steps total, 10 independently testable legos.
+
 ---
 
 ## Additional Sessions (Partial Coverage)
@@ -308,4 +317,4 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session edge-llm-strategy (March 19, 2026)
+**Archive Status:** Complete through Session text-editor-lego-plan (March 19, 2026)
