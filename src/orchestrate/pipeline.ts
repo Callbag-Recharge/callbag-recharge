@@ -8,8 +8,8 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     upper:   step(s => pipe(s, map(v => v.toUpperCase())), ["trigger"]),
-//     output:  step(s => pipe(s, track()), ["upper"]),
+//     upper:   step(["trigger"], s => pipe(s, map(v => v.toUpperCase()))),
+//     output:  step(["upper"], s => pipe(s, track())),
 //   });
 //   wf.steps.trigger.fire("hello");
 //   wf.status.get(); // { trigger: "active", upper: "active", output: "active" }
@@ -78,20 +78,43 @@ const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
  * const trigger = step(fromTrigger<string>());
  *
  * // Transform step (depends on trigger)
- * const upper = step(s => pipe(s, map(v => v.toUpperCase())), ["trigger"]);
+ * const upper = step(["trigger"], s => pipe(s, map(v => v.toUpperCase())));
  * ```
  *
  * @category orchestrate
  */
 export function step<T>(
 	factory: ((...deps: Store<any>[]) => Store<T>) | Store<T>,
-	deps?: string[],
+	opts?: { name?: string },
+): StepDef<T>;
+export function step<T>(
+	deps: string[],
+	factory: (...deps: Store<any>[]) => Store<T>,
+	opts?: { name?: string },
+): StepDef<T>;
+export function step<T>(
+	depsOrFactory: string[] | ((...deps: Store<any>[]) => Store<T>) | Store<T>,
+	factoryOrOpts?: ((...deps: Store<any>[]) => Store<T>) | Store<T> | { name?: string },
 	opts?: { name?: string },
 ): StepDef<T> {
+	// Deps-first: step(["a"], factory, opts?)
+	if (Array.isArray(depsOrFactory)) {
+		if (factoryOrOpts == null) {
+			throw new Error(
+				"step(): deps-first form requires a factory function or Store as second argument",
+			);
+		}
+		return {
+			factory: factoryOrOpts as ((...deps: Store<any>[]) => Store<T>) | Store<T>,
+			deps: depsOrFactory,
+			name: opts?.name,
+		};
+	}
+	// No-deps: step(factory, opts?)
 	return {
-		factory,
-		deps: deps ?? [],
-		name: opts?.name,
+		factory: depsOrFactory,
+		deps: [],
+		name: (factoryOrOpts as { name?: string } | undefined)?.name,
 	};
 }
 
@@ -121,7 +144,7 @@ export function step<T>(
  *
  * const wf = pipeline({
  *   trigger: step(fromTrigger<number>()),
- *   doubled: step(s => pipe(s, map(x => x * 2)), ["trigger"]),
+ *   doubled: step(["trigger"], s => pipe(s, map(x => x * 2))),
  * });
  *
  * subscribe(wf.steps.doubled, v => console.log(v));
