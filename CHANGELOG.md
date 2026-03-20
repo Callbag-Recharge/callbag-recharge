@@ -1,3 +1,10 @@
+# [0.5.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.4.0...v0.5.0) (2026-03-20)
+
+
+### Features
+
+* fix dependency hierarchy and update docs ([0c290d7](https://github.com/Callbag-Recharge/callbag-recharge/commit/0c290d7e28f0e5301b9014ec84a8d41826853cca))
+
 # [0.4.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.3.0...v0.4.0) (2026-03-20)
 
 
