@@ -1,3 +1,10 @@
+# [0.9.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.8.0...v0.9.0) (2026-03-21)
+
+
+### Features
+
+* add framework bindings ([9acf43a](https://github.com/Callbag-Recharge/callbag-recharge/commit/9acf43ab3bb7f3f6fc51c887526dc437a92b8790))
+
 # [0.8.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.7.0...v0.8.0) (2026-03-20)
 
 
