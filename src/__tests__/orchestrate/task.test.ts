@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { fromTrigger } from "../../extra/fromTrigger";
 import { subscribe } from "../../extra/subscribe";
-import { pipeline, step, TASK_STATE, task } from "../../orchestrate";
+import { pipeline, step, task } from "../../orchestrate";
 import type { PipelineStatus } from "../../orchestrate/pipeline";
+import { TASK_STATE } from "../../orchestrate/types";
 
 // ==========================================================================
 // task() — step definition

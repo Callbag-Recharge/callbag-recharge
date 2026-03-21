@@ -92,10 +92,10 @@ describe("fromWebSocket", () => {
 	it("emits messages from WebSocket", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
 		const values: any[] = [];
-		const unsub = subscribe(ws.messages, (v) => values.push(v));
+		const unsub = subscribe(ws, (v) => values.push(v));
 
 		// Wait for connection
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		lastCreatedWs!.simulateMessage("hello");
 		lastCreatedWs!.simulateMessage("world");
@@ -106,23 +106,40 @@ describe("fromWebSocket", () => {
 		ws.close();
 	});
 
-	it("tracks connection status", async () => {
+	it("tracks connection state", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		const statuses: string[] = [];
-		const unsub = subscribe(ws.messages, () => {});
-		const statusUnsub = subscribe(ws.status, (s) => statuses.push(s));
+		const states: string[] = [];
+		const unsub = subscribe(ws, () => {});
+		const stateUnsub = subscribe(ws.connectionState, (s) => states.push(s));
 
 		// Initially connecting, then open
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		ws.close();
-		await vi.waitFor(() => expect(ws.status.get()).toBe("closed"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("closed"));
 
-		expect(statuses).toContain("open");
-		expect(statuses).toContain("closed");
+		expect(states).toContain("open");
+		expect(states).toContain("closed");
 
 		unsub();
-		statusUnsub();
+		stateUnsub();
+	});
+
+	it("tracks lifecycle status via withStatus", async () => {
+		const ws = fromWebSocket("ws://localhost:8080");
+		const unsub = subscribe(ws, () => {});
+
+		// Before any message: pending
+		expect(ws.status.get()).toBe("pending");
+
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
+
+		// Send a message → status becomes active
+		lastCreatedWs!.simulateMessage("hello");
+		expect(ws.status.get()).toBe("active");
+
+		unsub();
+		ws.close();
 	});
 
 	it("custom parse function", async () => {
@@ -131,9 +148,9 @@ describe("fromWebSocket", () => {
 		});
 
 		const values: any[] = [];
-		const unsub = subscribe(ws.messages, (v) => values.push(v));
+		const unsub = subscribe(ws, (v) => values.push(v));
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		lastCreatedWs!.simulateMessage('{"key":"value"}');
 
@@ -145,9 +162,9 @@ describe("fromWebSocket", () => {
 
 	it("send() forwards data to WebSocket", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		const unsub = subscribe(ws.messages, () => {});
+		const unsub = subscribe(ws, () => {});
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		ws.send("outgoing");
 		expect(lastCreatedWs!.sent).toEqual(["outgoing"]);
@@ -158,33 +175,33 @@ describe("fromWebSocket", () => {
 
 	it("close() disconnects the WebSocket", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		const unsub = subscribe(ws.messages, () => {});
+		const unsub = subscribe(ws, () => {});
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		ws.close(1000, "done");
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("closed"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("closed"));
 
 		unsub();
 	});
 
 	it("get() returns undefined before any message", () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		expect(ws.messages.get()).toBeUndefined();
+		expect(ws.get()).toBeUndefined();
 		ws.close();
 	});
 
 	it("queues send() calls before connection opens", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		const unsub = subscribe(ws.messages, () => {});
+		const unsub = subscribe(ws, () => {});
 
 		// Send before open
 		ws.send("queued-1");
 		ws.send("queued-2");
 
 		// Wait for connection to open — queue should flush
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		expect(lastCreatedWs!.sent).toEqual(["queued-1", "queued-2"]);
 
@@ -199,14 +216,9 @@ describe("fromWebSocket", () => {
 		});
 
 		const values: any[] = [];
-		let ended = false;
-		const unsub = subscribe(ws.messages, (v) => values.push(v), {
-			onEnd: () => {
-				ended = true;
-			},
-		});
+		const unsub = subscribe(ws, (v) => values.push(v));
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		// Send invalid JSON — should warn and skip
 		lastCreatedWs!.simulateMessage("not-json{{{");
@@ -214,7 +226,6 @@ describe("fromWebSocket", () => {
 		lastCreatedWs!.simulateMessage('{"ok":true}');
 
 		expect(values).toEqual([{ ok: true }]);
-		expect(ended).toBe(false); // stream continues
 		expect(warnSpy).toHaveBeenCalledOnce();
 
 		warnSpy.mockRestore();
@@ -228,17 +239,15 @@ describe("fromWebSocket", () => {
 			onParseError: "error",
 		});
 
-		let endError: unknown;
-		const unsub = subscribe(ws.messages, () => {}, {
-			onEnd: (err) => {
-				endError = err;
-			},
-		});
+		const unsub = subscribe(ws, () => {});
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		lastCreatedWs!.simulateMessage("bad-json");
-		expect(endError).toBeInstanceOf(SyntaxError);
+
+		// withStatus should capture the error
+		expect(ws.status.get()).toBe("errored");
+		expect(ws.error.get()).toBeInstanceOf(SyntaxError);
 
 		unsub();
 		ws.close();
@@ -252,9 +261,9 @@ describe("fromWebSocket", () => {
 		});
 
 		const values: any[] = [];
-		const unsub = subscribe(ws.messages, (v) => values.push(v));
+		const unsub = subscribe(ws, (v) => values.push(v));
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		lastCreatedWs!.simulateMessage("bad");
 		lastCreatedWs!.simulateMessage('{"ok":1}');
@@ -276,15 +285,11 @@ describe("fromWebSocket", () => {
 		};
 
 		const ws = fromWebSocket("invalid://url");
-		let endError: unknown;
-		const unsub = subscribe(ws.messages, () => {}, {
-			onEnd: (err) => {
-				endError = err;
-			},
-		});
+		const unsub = subscribe(ws, () => {});
 
-		expect(ws.status.get()).toBe("closed");
-		expect(endError).toBeInstanceOf(Error);
+		expect(ws.connectionState.get()).toBe("closed");
+		expect(ws.status.get()).toBe("errored");
+		expect(ws.error.get()).toBeInstanceOf(Error);
 
 		unsub();
 	});
@@ -340,9 +345,9 @@ describe("toWebSocket", () => {
 
 	it("sends to WebSocketStore", async () => {
 		const ws = fromWebSocket("ws://localhost:8080");
-		const subUnsub = subscribe(ws.messages, () => {});
+		const subUnsub = subscribe(ws, () => {});
 
-		await vi.waitFor(() => expect(ws.status.get()).toBe("open"));
+		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("open"));
 
 		const source = state("test");
 		const unsub = toWebSocket(ws, source);

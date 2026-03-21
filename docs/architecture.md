@@ -680,7 +680,7 @@ Workflow nodes — users build pipelines with these building blocks. All nodes e
 | `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
 | `step(factory)` | Raw reactive source wrapper. For `fromTrigger()`, `state()`, or expert-only full reactive control. |
 | `gate(opts)` | Pipe operator for approval queuing — the building block under `approval()`. Also usable standalone for custom human-in-the-loop flows. |
-| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Metadata accessible via `.get()`, reactive subscriptions via `.inner` (the underlying store). Used internally by `task()`, but also standalone. |
+| `taskState(opts)` | Reactive task tracker with companion stores: `status`, `error`, `duration`, `runCount`, `result`, `lastRun`. Each companion is an independent `Store`. `.get()` returns composed `TaskMeta` for convenience. Used internally by `task()`, but also standalone. |
 | `executionLog(opts)` | Reactive execution history with pipeline auto-logging. Backed by `reactiveLog`. |
 
 ## 20. Companion Store Pattern (`with*()` Wrappers)
@@ -709,19 +709,34 @@ independently subscribable.
 ```ts
 // withStatus — the base wrapper for all async/streaming sources
 function withStatus<T>(store: Store<T>): Store<T> & {
-  status: Store<'pending' | 'active' | 'completed' | 'errored'>
+  status: Store<'idle' | 'pending' | 'active' | 'completed' | 'errored'>
   error: Store<Error | undefined>
 }
 
-// Adapters use withStatus internally
-fromWebSocket(url)  // → Store<T> & { status, error }
-fromHTTP(url)       // → Store<T> & { status, error }
-chatStream(opts)    // → Store<string> & { status, error, isStreaming, ... }
+// Adapters use withStatus internally — return Store<T> with companions
+fromWebSocket(url)  // → Store<T> & { status, error, connectionState, send(), close() }
+fromHTTP(url)       // → Store<T> & { status, error, fetchCount, refetch(), stop() }
+fromWebhook(opts)   // → Store<T> & { status, error, requestCount, handler, listen(), close() }
+chatStream(opts)    // → Store<string> & { status, error, ... }
+
+// fromLLM and fromMCP use WithStatusStatus enum for status stores
+fromLLM(opts)       // → { store, status, error, tokens, generate(), abort() }
+fromMCP(opts)       // → { tool() → { store, status, error, lastArgs, duration, call() } }
 
 // Domain wrappers add their own companions
 withRetry(store, config)   // → Store<T> & { retryCount, lastError, pending }
 withBreaker(store, breaker) // → Store<T> & { breakerState }
 ```
+
+**`WithStatusStatus` values:**
+
+| Value | Meaning |
+|-------|---------|
+| `idle` | No work requested yet (used by MCP tools, manual lifecycle). |
+| `pending` | Work has been initiated but no data received yet. Default for `withStatus()`. |
+| `active` | First DATA received; stream is live. |
+| `completed` | Terminal — END received cleanly. |
+| `errored` | Terminal — END received with error. |
 
 ### Key rules
 

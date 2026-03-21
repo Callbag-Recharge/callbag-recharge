@@ -17,6 +17,7 @@
 import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import type { WithStatusStatus } from "../utils/withStatus";
 
 export interface LLMMessage {
 	role: "user" | "assistant" | "system";
@@ -60,8 +61,8 @@ export interface LLMStore {
 	store: Store<string>;
 	/** Token usage from the last generation (reactive, populated on completion). */
 	tokens: Store<LLMTokenUsage>;
-	/** Whether a generation is currently streaming (reactive). */
-	streaming: Store<boolean>;
+	/** Lifecycle status: pending → active → completed/errored. */
+	status: Store<WithStatusStatus>;
 	/** Last error, if any (reactive). */
 	error: Store<unknown | undefined>;
 	/** Start a generation. Aborts any in-progress generation. */
@@ -129,16 +130,17 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  *
  * @param opts - Provider configuration (provider, baseURL, apiKey, model).
  *
- * @returns `LLMStore` — reactive stores for response text, token usage, streaming status, error, plus `generate()` and `abort()`.
+ * @returns `LLMStore` — reactive stores for response text, token usage, status, error, plus `generate()` and `abort()`.
  *
  * @remarks **Provider-agnostic:** Works with OpenAI, Ollama, Anthropic (via proxy), Vercel AI SDK, or any OpenAI-compatible endpoint.
  * @remarks **No hard deps:** Uses fetch + SSE line parsing. No SDK imports required.
  * @remarks **Auto-cancel:** Calling `generate()` while streaming aborts the previous generation.
  * @remarks **Token tracking:** `tokens` store populated on stream completion (when usage data is available).
+ * @remarks **Status:** Uses WithStatusStatus enum (pending → active → completed/errored) for consistent lifecycle tracking.
  *
  * @example
  * ```ts
- * import { fromLLM } from 'callbag-recharge/adapters/llm';
+ * import { fromLLM } from 'callbag-recharge/adapters';
  * import { effect } from 'callbag-recharge';
  *
  * const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
@@ -148,11 +150,9 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  * });
  *
  * llm.generate([{ role: 'user', content: 'What is TypeScript?' }]);
- * // llm.streaming.get() → true
+ * // llm.status.get() → "active"
  * // llm.store.get() → "TypeScript is..."
  * ```
- *
- * @seeAlso [chatStream](/api/chatStream) — full chat pattern, [tokenTracker](/api/tokenTracker) — token tracking
  *
  * @category adapters
  */
@@ -165,7 +165,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 
 	const storeState = state<string>("", { name: `${name}.store` });
 	const tokensState = state<LLMTokenUsage>({}, { name: `${name}.tokens` });
-	const streamingState = state<boolean>(false, { name: `${name}.streaming` });
+	const statusState = state<WithStatusStatus>("pending", { name: `${name}.status` });
 	const errorState = state<unknown | undefined>(undefined, { name: `${name}.error` });
 
 	let abortController: AbortController | null = null;
@@ -175,7 +175,9 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			abortController.abort();
 			abortController = null;
 		}
-		streamingState.set(false);
+		if (statusState.get() === "active") {
+			statusState.set("pending");
+		}
 	}
 
 	function generate(messages: LLMMessage[], genOpts?: GenerateOptions): void {
@@ -191,7 +193,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			storeState.set("");
 			tokensState.set({});
 			errorState.set(undefined);
-			streamingState.set(true);
+			statusState.set("active");
 		});
 
 		const url = buildURL(provider, baseURL);
@@ -271,22 +273,25 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			decoder.decode();
 
 			if (signal.aborted) return;
-			streamingState.set(false);
+			statusState.set("completed");
 			abortController = null;
 		} catch (err) {
 			if (signal.aborted) return;
 			batch(() => {
 				errorState.set(err);
-				streamingState.set(false);
+				statusState.set("errored");
 			});
 			abortController = null;
+		} finally {
+			// Clean up combined signal listeners to prevent memory leaks
+			(signal as any)._cleanup?.();
 		}
 	}
 
 	return {
 		store: storeState,
 		tokens: tokensState,
-		streaming: streamingState,
+		status: statusState,
 		error: errorState,
 		generate,
 		abort,
@@ -338,7 +343,8 @@ function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
 	};
 	a.addEventListener("abort", onAbort, { once: true });
 	b.addEventListener("abort", onAbort, { once: true });
-	// Expose cleanup for callers that complete without abort
-	(controller as any)._cleanup = cleanup;
-	return controller.signal;
+	// Expose cleanup on signal for callers that complete without abort
+	const sig = controller.signal;
+	(sig as any)._cleanup = cleanup;
+	return sig;
 }

@@ -44,24 +44,21 @@
 | ~~5a-0.3~~ | ~~JSDoc sanitization~~ | "DIRTY+value cycle" → "reactive update cycle", "sends END" → "terminates the store", "RESOLVED signals" → "suppression signaling", "callbag DATA/END" → "stream lifecycle events". Applied to gate, branch, pipeline, http, websocket, webhook, createStore. | ~~S~~ |
 | ~~5a-0.4~~ | ~~`batch()` audit~~ | `batch()` wraps multi-store transitions in taskState (run success/error/reset), fromHTTP (fetchCount+status), fromLLM (generate reset), fromMCP (tool call start/complete/error). | ~~S~~ |
 
----
-
-## Backlog
-
 ### Phase 5a: Uniform Metadata Pattern
 
 > **Goal:** Standardize all status/error/lifecycle metadata on the companion store pattern (§20).
-> Today, `taskState` packs all metadata into a single `Store<TaskMeta>`, while every other module
-> (withStatus, adapters, patterns) exposes individual companion stores. Consumers of TaskMeta must
-> subscribe to the entire object just to watch `status`, and can't pipe individual fields.
 >
-> **Breaking change:** `task.get().status` → `task.status.get()`. Affects pipeline consumers.
+> **Status:** Complete.
 
-| # | Deliverable | What | Effort |
+| # | Deliverable | What | Status |
 |---|-------------|------|--------|
-| 5a-1 | `taskState` companion refactor | Refactor `taskState` to expose `status`, `error`, `duration`, `runCount` as individual companion `Store` properties instead of a single packed `TaskMeta` value. Aligns with the `with*()` pattern used everywhere else. | M |
-| 5a-2 | `task()` flat companions | After 5a-1, flatten task's metadata: `task.status`, `task.error`, `task.duration`, `task.runCount` instead of `task._taskState`. Pipeline auto-detection updated accordingly. | M |
-| 5a-3 | Adapter `withStatus` reuse | Now that adapters can import from `utils/` (import rule update), refactor `fromHTTP`, `fromWebSocket`, `fromSSE`, `fromLLM`, `fromMCP`, `fromWebhook` to use `withStatus()` as the base layer instead of duplicating status/error store creation. Domain-specific companions added on top. | M |
+| ~~5a-1~~ | ~~`taskState` companion refactor~~ | `taskState` exposes `status`, `error`, `duration`, `runCount`, `result`, `lastRun` as individual companion `Store` properties. `inner` removed. `get()` returns composed `TaskMeta` for convenience/snapshot. | ~~S~~ |
+| ~~5a-2~~ | ~~`task()` flat companions~~ | `TaskStepDef` exposes `status`, `error`, `duration`, `runCount` as flat properties delegating to internal `taskState`. `TASK_STATE` symbol kept internal. Pipeline auto-detection unchanged. | ~~S~~ |
+| ~~5a-3~~ | ~~Adapter `withStatus` reuse~~ | `fromHTTP`, `fromWebSocket`, `fromWebhook` use `withStatus()` for lifecycle tracking. `fromLLM` and `fromMCP` standardized to `WithStatusStatus` enum. Domain-specific `HTTPStatus`, `WebSocketStatus`, `MCPToolStatus` types removed. WebSocket adds `connectionState` companion. Adapter return types extend `Store<T>` (no separate `.store` property). | ~~S~~ |
+
+---
+
+## Backlog
 
 ### Phase 5b: Orchestration — Production Parity
 

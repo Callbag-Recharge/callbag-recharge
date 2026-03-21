@@ -348,7 +348,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 	});
 
 	// --- Task status derived from taskState instances ---
-	// Auto-detect task states from task() step defs, merge with explicitly provided tasks.
+	// Auto-detect task states from task() step defs (via TASK_STATE symbol), merge with explicitly provided tasks.
 	const autoDetectedTasks: TaskState<any>[] = [];
 	for (const name of stepNames) {
 		const def = steps[name] as any;
@@ -365,16 +365,16 @@ export function pipeline<S extends Record<string, StepDef>>(
 	// Primary status: if tasks exist, derive from taskState. Otherwise fall back to stream status.
 	let status: Store<PipelineStatus>;
 	if (dedupedTasks.length > 0) {
-		// Subscribe to inner stores (the reactive source) for task metadata changes.
-		const taskInnerStores = dedupedTasks.map((ts) => ts.inner);
-		status = derived(taskInnerStores, () => {
+		// Subscribe to status companion stores for task metadata changes.
+		const taskStatusStores = dedupedTasks.map((ts) => ts.status);
+		status = derived(taskStatusStores, () => {
 			let anyRunning = false;
 			let anyError = false;
 			let allSuccess = true;
 			let allIdle = true;
 
-			for (const inner of taskInnerStores) {
-				const s = inner.get().status;
+			for (const statusStore of taskStatusStores) {
+				const s = statusStore.get();
 				if (s === "running") anyRunning = true;
 				if (s === "error") anyError = true;
 				if (s !== "success") allSuccess = false;

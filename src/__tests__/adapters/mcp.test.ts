@@ -168,7 +168,7 @@ describe("fromMCP", () => {
 			const unsub = subscribe(tool.status, (s) => statuses.push(s));
 
 			await tool.call({ query: "test" });
-			expect(statuses).toContain("calling");
+			expect(statuses).toContain("active");
 			expect(statuses).toContain("completed");
 			unsub();
 		});

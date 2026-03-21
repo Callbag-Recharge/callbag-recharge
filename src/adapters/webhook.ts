@@ -2,13 +2,13 @@
 // fromWebhook — HTTP trigger source (Node.js / edge)
 // ---------------------------------------------------------------------------
 // Creates a reactive source that emits parsed request bodies when an HTTP
-// endpoint receives POST requests. Works with Node.js http module or any
-// edge runtime that provides Request/Response.
+// endpoint receives POST requests. Uses withStatus() for lifecycle tracking
+// (§20 companion store pattern).
 //
 // Usage:
 //   const webhook = fromWebhook({ port: 3000, path: "/hook" });
-//   subscribe(webhook.store, payload => console.log(payload));
-//   // POST http://localhost:3000/hook  →  emits parsed body
+//   subscribe(webhook, payload => console.log(payload));
+//   subscribe(webhook.status, s => console.log(s));
 //   webhook.close();
 // ---------------------------------------------------------------------------
 
@@ -16,6 +16,8 @@ import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import type { WithStatusStatus } from "../utils/withStatus";
+import { withStatus } from "../utils/withStatus";
 
 export interface WebhookOptions {
 	/** Port to listen on. Required when no external server is provided. */
@@ -35,9 +37,11 @@ export interface WebhookOptions {
 	maxBodySize?: number;
 }
 
-export interface WebhookStore<T = unknown> {
-	/** Reactive store that emits parsed request bodies. */
-	store: Store<T | undefined>;
+export interface WebhookStore<T = unknown> extends Store<T | undefined> {
+	/** Lifecycle status: pending → active → completed/errored. */
+	status: Store<WithStatusStatus>;
+	/** Last error, if any. */
+	error: Store<Error | undefined>;
 	/** Number of requests received. */
 	requestCount: Store<number>;
 	/**
@@ -57,42 +61,9 @@ export interface WebhookStore<T = unknown> {
  *
  * @param opts - Configuration for the webhook server.
  *
- * @returns `WebhookStore<T>` — contains the reactive store, request handler, and server lifecycle methods.
+ * @returns `WebhookStore<T>` — reactive store with status, error, request count, handler, and lifecycle.
  *
- * @returnsTable store | Store\<T \| undefined\> | Reactive store emitting parsed request bodies.
- * requestCount | Store\<number\> | Number of requests received.
- * handler | (req, res) => void | Node.js-compatible request handler for use with existing servers.
- * listen() | () => Promise\<void\> | Start listening on configured port.
- * close() | () => void | Close server and clean up.
- *
- * @remarks **Tier 2:** Cycle boundary — each incoming request starts a new reactive update cycle.
- * @remarks **Standalone or embedded:** Use `listen()` for standalone, or `handler` to mount on an existing HTTP server.
- * @remarks **Body parsing:** Default is JSON.parse. Override with `parse` option for custom formats.
- * @remarks **Body size limit:** Default 1MB. Configure with `maxBodySize`. Rejects with 413 if exceeded.
- *
- * @example
- * ```ts
- * import { fromWebhook } from 'callbag-recharge/adapters/webhook';
- * import { subscribe } from 'callbag-recharge';
- *
- * const webhook = fromWebhook({ port: 3000, path: "/hook" });
- * subscribe(webhook.store, payload => console.log(payload));
- * await webhook.listen();
- * // POST http://localhost:3000/hook with JSON body → emits parsed body
- * webhook.close();
- * ```
- *
- * @example Mount on existing server
- * ```ts
- * import http from 'node:http';
- * import { fromWebhook } from 'callbag-recharge/adapters/webhook';
- *
- * const webhook = fromWebhook({ path: "/events" });
- * const server = http.createServer(webhook.handler);
- * server.listen(8080);
- * ```
- *
- * @seeAlso [fromTrigger](../orchestrate/fromTrigger) — manual trigger, [fromWebSocket](./websocket) — WebSocket source
+ * @remarks **Status:** Uses withStatus() for lifecycle tracking (pending → active → completed/errored).
  *
  * @category adapters
  */
@@ -118,6 +89,9 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	);
 
 	Inspector.register(store, { kind: "webhook" });
+
+	// Wrap with withStatus for lifecycle tracking
+	const tracked = withStatus(store);
 
 	let server: any = null;
 
@@ -204,7 +178,10 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	}
 
 	return {
-		store,
+		get: () => tracked.get() as T | undefined,
+		source: (type: number, payload?: any) => tracked.source(type, payload),
+		status: tracked.status,
+		error: tracked.error,
 		requestCount: requestCountStore,
 		handler,
 		listen,

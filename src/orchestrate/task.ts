@@ -45,8 +45,17 @@ export interface TaskOpts<T> {
 	timeout?: number;
 }
 
-/** Extended StepDef that carries an internal taskState for pipeline auto-detection. */
+/** Extended StepDef that carries task metadata as flat companion stores. */
 export interface TaskStepDef<T = any> extends StepDef<T> {
+	/** Reactive task status: idle → running → success/error. */
+	readonly status: Store<import("./types").TaskStatus>;
+	/** Last error, if any. */
+	readonly error: Store<unknown | undefined>;
+	/** Duration of last run in ms. */
+	readonly duration: Store<number | undefined>;
+	/** Total number of completed runs. */
+	readonly runCount: Store<number>;
+	/** @internal Pipeline auto-detection symbol. */
 	readonly [TASK_STATE]: TaskState<T>;
 }
 
@@ -297,6 +306,10 @@ export function task<T>(
 		factory: factory as any,
 		deps,
 		name: opts?.name,
+		status: ts.status,
+		error: ts.error,
+		duration: ts.duration,
+		runCount: ts.runCount,
 		[TASK_STATE]: ts,
 	};
 

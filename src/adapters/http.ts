@@ -2,11 +2,13 @@
 // fromHTTP — HTTP client source (fetch-based)
 // ---------------------------------------------------------------------------
 // Reactive source that fetches data from an HTTP endpoint. Supports
-// one-shot, polling, and custom transforms.
+// one-shot, polling, and custom transforms. Uses withStatus() for
+// lifecycle tracking (§20 companion store pattern).
 //
 // Usage:
 //   const data = fromHTTP("https://api.example.com/status", { poll: 5000 });
-//   subscribe(data.store, v => console.log(v));
+//   subscribe(data, v => console.log(v));
+//   subscribe(data.status, s => console.log(s));
 //   data.stop();
 // ---------------------------------------------------------------------------
 
@@ -14,8 +16,8 @@ import { producer } from "../core/producer";
 import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
-
-export type HTTPStatus = "idle" | "fetching" | "success" | "error";
+import type { WithStatusStatus } from "../utils/withStatus";
+import { withStatus } from "../utils/withStatus";
 
 export interface FromHTTPOptions {
 	/** HTTP method. Default: "GET". */
@@ -36,11 +38,11 @@ export interface FromHTTPOptions {
 	timeout?: number;
 }
 
-export interface HTTPStore<T = unknown> {
-	/** Reactive store emitting fetched values. */
-	store: Store<T | undefined>;
-	/** Fetch status store. */
-	status: Store<HTTPStatus>;
+export interface HTTPStore<T = unknown> extends Store<T | undefined> {
+	/** Lifecycle status: pending → active → completed/errored. */
+	status: Store<WithStatusStatus>;
+	/** Last error, if any. */
+	error: Store<Error | undefined>;
 	/** Number of completed fetches. */
 	fetchCount: Store<number>;
 	/** Manually trigger a fetch (useful with polling disabled). */
@@ -55,41 +57,24 @@ export interface HTTPStore<T = unknown> {
  * @param url - The URL to fetch.
  * @param opts - Optional configuration.
  *
- * @returns `HTTPStore<T>` — reactive store with status, fetch count, and manual refetch.
- *
- * @returnsTable store | Store\<T \| undefined\> | Reactive store emitting fetched values.
- * status | Store\<HTTPStatus\> | Fetch status: "idle", "fetching", "success", "error".
- * fetchCount | Store\<number\> | Number of completed fetches.
- * refetch() | () => void | Manually trigger a fetch.
- * stop() | () => void | Stop polling and cancel in-flight request.
+ * @returns `HTTPStore<T>` — reactive store with status, error, fetch count, and manual refetch.
  *
  * @remarks **Tier 2:** Cycle boundary — each fetch result starts a new reactive update cycle.
  * @remarks **Polling:** Set `poll` interval for periodic refetch. Omit for one-shot.
  * @remarks **Transform:** Default extracts JSON. Override with `transform` for text, blob, etc.
  * @remarks **Timeout:** Default 30s per request. Uses AbortController internally.
+ * @remarks **Status:** Uses withStatus() for lifecycle tracking (pending → active → completed/errored).
  *
  * @example
  * ```ts
- * import { fromHTTP } from 'callbag-recharge/adapters/http';
+ * import { fromHTTP } from 'callbag-recharge/adapters';
  * import { subscribe } from 'callbag-recharge';
  *
  * const api = fromHTTP("https://api.example.com/status", { poll: 5000 });
- * subscribe(api.store, data => console.log("status:", data));
- * // Fetches immediately, then every 5s
+ * subscribe(api, data => console.log("status:", data));
+ * subscribe(api.status, s => console.log("lifecycle:", s));
  * api.stop();
  * ```
- *
- * @example One-shot POST
- * ```ts
- * const result = fromHTTP("https://api.example.com/submit", {
- *   method: "POST",
- *   headers: { "Content-Type": "application/json" },
- *   body: { name: "test" },
- * });
- * subscribe(result.store, v => console.log(v));
- * ```
- *
- * @seeAlso [fromWebhook](./webhook) — HTTP trigger (server-side), [fromWebSocket](./websocket) — WebSocket source
  *
  * @category adapters
  */
@@ -102,14 +87,11 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 	const transform = opts?.transform ?? ((r: Response) => r.json());
 	const requestTimeout = opts?.timeout ?? 30000;
 
-	const statusStore = state<HTTPStatus>("idle", {
-		name: `${baseName}:status`,
-		equals: () => false,
-	});
 	const fetchCountStore = state<number>(0, { name: `${baseName}:fetchCount` });
 
 	let _emit: ((value: T) => void) | null = null;
 	let _error: ((e: unknown) => void) | null = null;
+	let _complete: (() => void) | null = null;
 	let pollTimer: ReturnType<typeof setTimeout> | null = null;
 	let currentAbort: AbortController | null = null;
 	let active = false;
@@ -138,8 +120,6 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 		);
 
 		try {
-			statusStore.set("fetching");
-
 			const body =
 				bodyOpt !== undefined
 					? typeof bodyOpt === "string"
@@ -166,13 +146,11 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 
 			batch(() => {
 				fetchCountStore.update((n) => n + 1);
-				statusStore.set("success");
 				_emit?.(data);
 			});
 		} catch (err: any) {
 			if (!active) return;
 			if (err?.name === "AbortError") return; // Cancelled
-			statusStore.set("error");
 			_error?.(err);
 		} finally {
 			clearTimeout(timeoutId);
@@ -197,9 +175,10 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 	let _refetch: (() => void) | null = null;
 
 	const store = producer<T>(
-		({ emit, error }) => {
+		({ emit, error, complete }) => {
 			_emit = emit;
 			_error = error;
+			_complete = complete;
 			active = true;
 
 			_refetch = () => {
@@ -215,6 +194,7 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 				active = false;
 				_emit = null;
 				_error = null;
+				_complete = null;
 				_refetch = null;
 				currentAbort?.abort();
 				currentAbort = null;
@@ -222,19 +202,19 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 					clearTimeout(pollTimer);
 					pollTimer = null;
 				}
-				// Don't overwrite error/success status on teardown
-				const currentStatus = statusStore.get();
-				if (currentStatus !== "error" && currentStatus !== "success") {
-					statusStore.set("idle");
-				}
 			};
 		},
 		{ name: baseName, kind: "http" },
 	);
 
+	// Wrap with withStatus for lifecycle tracking
+	const tracked = withStatus(store);
+
 	return {
-		store,
-		status: statusStore,
+		get: () => tracked.get() as T | undefined,
+		source: (type: number, payload?: any) => tracked.source(type, payload),
+		status: tracked.status,
+		error: tracked.error,
 		fetchCount: fetchCountStore,
 		refetch() {
 			_refetch?.();
@@ -247,10 +227,8 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 				clearTimeout(pollTimer);
 				pollTimer = null;
 			}
-			// Reset fetching status to idle on explicit stop
-			if (statusStore.get() === "fetching") {
-				statusStore.set("idle");
-			}
+			// Signal END so withStatus transitions to "completed"
+			_complete?.();
 		},
 	};
 }

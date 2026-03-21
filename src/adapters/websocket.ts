@@ -1,11 +1,13 @@
 // ---------------------------------------------------------------------------
 // WebSocket adapter — fromWebSocket / toWebSocket
 // ---------------------------------------------------------------------------
-// Reactive WebSocket bridge using browser-native WebSocket API. No deps.
+// Reactive WebSocket bridge using browser-native WebSocket API. Uses
+// withStatus() for lifecycle tracking (§20 companion store pattern).
 //
 // Usage:
 //   const ws = fromWebSocket("ws://localhost:8080");
-//   subscribe(ws.messages, msg => console.log(msg));
+//   subscribe(ws, msg => console.log(msg));
+//   subscribe(ws.status, s => console.log(s));
 //   ws.send("hello");
 //   ws.close();
 // ---------------------------------------------------------------------------
@@ -15,8 +17,10 @@ import { producer } from "../core/producer";
 import { state } from "../core/state";
 import { subscribe as coreSub } from "../core/subscribe";
 import type { Store } from "../core/types";
+import type { WithStatusStatus } from "../utils/withStatus";
+import { withStatus } from "../utils/withStatus";
 
-export type WebSocketStatus = "connecting" | "open" | "closing" | "closed";
+export type WebSocketConnectionState = "connecting" | "open" | "closed";
 
 export interface FromWebSocketOptions {
 	/** WebSocket subprotocols. */
@@ -42,11 +46,13 @@ export interface FromWebSocketOptions {
 	onParseError?: "warn" | "error" | "skip";
 }
 
-export interface WebSocketStore<T = unknown> {
-	/** Reactive store emitting parsed messages. */
-	messages: Store<T | undefined>;
-	/** Connection status store. */
-	status: Store<WebSocketStatus>;
+export interface WebSocketStore<T = unknown> extends Store<T | undefined> {
+	/** Lifecycle status: pending → active → completed/errored. */
+	status: Store<WithStatusStatus>;
+	/** Last error, if any. */
+	error: Store<Error | undefined>;
+	/** Domain-specific connection state: connecting → open → closed. */
+	connectionState: Store<WebSocketConnectionState>;
 	/** Send a message through the WebSocket. Queues if not yet open. */
 	send(data: string | ArrayBufferLike | Blob | ArrayBufferView): void;
 	/** Close the WebSocket connection. */
@@ -61,30 +67,24 @@ export interface WebSocketStore<T = unknown> {
  *
  * @returns `WebSocketStore<T>` — reactive message store with send/close methods.
  *
- * @returnsTable messages | Store\<T \| undefined\> | Reactive store emitting parsed messages.
- * status | Store\<WebSocketStatus\> | Connection status: "connecting", "open", "closing", "closed".
- * send(data) | (data) => void | Send data through the WebSocket. Queues if connecting.
- * close(code?, reason?) | (code?, reason?) => void | Close the connection.
- *
  * @remarks **Tier 2:** Cycle boundary — each message starts a new reactive update cycle.
  * @remarks **No deps:** Uses browser-native WebSocket API. Works in Node.js 21+ and all modern browsers.
  * @remarks **Reconnect:** Optional auto-reconnect with configurable delay.
  * @remarks **Send queue:** Messages sent before the connection is open are queued and flushed on open.
  * @remarks **Parse errors:** Default "warn" — logs and skips. Use "error" to terminate, "skip" to silently drop.
+ * @remarks **Status:** Uses withStatus() for lifecycle tracking (pending → active → completed/errored).
  *
  * @example
  * ```ts
- * import { fromWebSocket } from 'callbag-recharge/adapters/websocket';
+ * import { fromWebSocket } from 'callbag-recharge/adapters';
  * import { subscribe } from 'callbag-recharge';
  *
  * const ws = fromWebSocket("ws://localhost:8080");
- * subscribe(ws.messages, msg => console.log("received:", msg));
+ * subscribe(ws, msg => console.log("received:", msg));
  * subscribe(ws.status, s => console.log("status:", s));
  * ws.send("hello");
  * ws.close();
  * ```
- *
- * @seeAlso [fromWebhook](./webhook) — HTTP trigger, [fromEvent](/api/fromEvent) — DOM event source
  *
  * @category adapters
  */
@@ -97,8 +97,8 @@ export function fromWebSocket<T = unknown>(
 	const reconnectDelay = opts?.reconnect ?? false;
 	const onParseError = opts?.onParseError ?? "warn";
 
-	const statusStore = state<WebSocketStatus>("connecting", {
-		name: `${baseName}:status`,
+	const connectionStateStore = state<WebSocketConnectionState>("connecting", {
+		name: `${baseName}:connectionState`,
 		equals: () => false,
 	});
 
@@ -108,6 +108,7 @@ export function fromWebSocket<T = unknown>(
 	let _complete: (() => void) | null = null;
 	let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 	let intentionalClose = false;
+	let lastError: unknown = null;
 	const sendQueue: (string | ArrayBufferLike | Blob | ArrayBufferView)[] = [];
 
 	function flushSendQueue() {
@@ -118,18 +119,18 @@ export function fromWebSocket<T = unknown>(
 
 	function connect() {
 		intentionalClose = false;
-		statusStore.set("connecting");
+		connectionStateStore.set("connecting");
 
 		try {
 			ws = new WebSocket(url, opts?.protocols);
 		} catch (err) {
-			statusStore.set("closed");
+			connectionStateStore.set("closed");
 			_error?.(err);
 			return;
 		}
 
 		ws.onopen = () => {
-			statusStore.set("open");
+			connectionStateStore.set("open");
 			flushSendQueue();
 		};
 
@@ -148,12 +149,15 @@ export function fromWebSocket<T = unknown>(
 		};
 
 		ws.onerror = () => {
-			// WebSocket errors are followed by close, so we don't complete here
+			// Capture that an error preceded close — used in onclose to signal error vs clean close
+			lastError = new Error(`WebSocket error on ${url}`);
 		};
 
 		ws.onclose = () => {
-			statusStore.set("closed");
+			connectionStateStore.set("closed");
 			ws = null;
+			const err = lastError;
+			lastError = null;
 
 			if (!intentionalClose && reconnectDelay !== false) {
 				reconnectTimer = setTimeout(() => {
@@ -163,6 +167,8 @@ export function fromWebSocket<T = unknown>(
 						connect();
 					}
 				}, reconnectDelay);
+			} else if (err && !intentionalClose) {
+				_error?.(err);
 			} else {
 				_complete?.();
 			}
@@ -194,7 +200,7 @@ export function fromWebSocket<T = unknown>(
 					ws.close();
 					ws = null;
 				}
-				statusStore.set("closed");
+				connectionStateStore.set("closed");
 			};
 		},
 		{ name: baseName, kind: "websocket" },
@@ -202,9 +208,15 @@ export function fromWebSocket<T = unknown>(
 
 	Inspector.register(messages, { kind: "websocket" });
 
+	// Wrap with withStatus for lifecycle tracking
+	const tracked = withStatus(messages);
+
 	return {
-		messages,
-		status: statusStore,
+		get: () => tracked.get() as T | undefined,
+		source: (type: number, payload?: any) => tracked.source(type, payload),
+		status: tracked.status,
+		error: tracked.error,
+		connectionState: connectionStateStore,
 		send(data: string | ArrayBufferLike | Blob | ArrayBufferView) {
 			if (ws?.readyState === WebSocket.OPEN) {
 				ws.send(data);
@@ -240,23 +252,6 @@ export interface ToWebSocketOptions {
  * @param opts - Optional configuration.
  *
  * @returns `() => void` — unsubscribe function that stops sending.
- *
- * @remarks **Sink:** Subscribes to the source and forwards each value to the WebSocket via `send()`.
- * @remarks **Serialization:** Objects are JSON.stringify'd by default. Strings pass through as-is.
- *
- * @example
- * ```ts
- * import { state } from 'callbag-recharge';
- * import { fromWebSocket, toWebSocket } from 'callbag-recharge/adapters/websocket';
- *
- * const ws = fromWebSocket("ws://localhost:8080");
- * const output = state("hello");
- * const unsub = toWebSocket(ws, output);
- * output.set("world"); // sends "world" to WebSocket
- * unsub();
- * ```
- *
- * @seeAlso [fromWebSocket](./websocket) — WebSocket source, [subscribe](/api/subscribe) — general sink
  *
  * @category adapters
  */

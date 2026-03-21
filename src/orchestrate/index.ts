@@ -42,4 +42,3 @@ export type {
 	TaskStateSnapshot,
 	TaskStatus,
 } from "./types";
-export { TASK_STATE } from "./types";

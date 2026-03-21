@@ -65,8 +65,8 @@ describe("fromLLM", () => {
 
 		llm.generate([{ role: "user", content: "Hi" }]);
 
-		// Wait for async streaming
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		// Wait for streaming to complete
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(llm.store.get()).toBe("Hello world!");
 		expect(values).toEqual(["Hello", "Hello world", "Hello world!"]);
@@ -104,7 +104,7 @@ describe("fromLLM", () => {
 		});
 
 		llm.generate([{ role: "user", content: "Tell me about TS" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(llm.store.get()).toBe("TypeScript is great");
 
@@ -123,7 +123,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(llm.tokens.get()).toEqual({
 			promptTokens: 10,
@@ -137,7 +137,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({ provider: "ollama", model: "llama4", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(llm.tokens.get()).toEqual({
 			promptTokens: 10,
@@ -151,7 +151,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("errored"), { timeout: 1000 });
 
 		expect(llm.error.get()).toBeInstanceOf(Error);
 		expect((llm.error.get() as Error).message).toContain("429");
@@ -162,7 +162,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("errored"), { timeout: 1000 });
 
 		expect(llm.error.get()).toBeInstanceOf(Error);
 	});
@@ -185,10 +185,10 @@ describe("fromLLM", () => {
 
 		// Let fetch resolve
 		await new Promise((r) => setTimeout(r, 10));
-		expect(llm.streaming.get()).toBe(true);
+		expect(llm.status.get()).toBe("active");
 
 		llm.abort();
-		expect(llm.streaming.get()).toBe(false);
+		expect(llm.status.get()).toBe("pending");
 	});
 
 	it("generate auto-cancels previous generation", async () => {
@@ -202,7 +202,7 @@ describe("fromLLM", () => {
 		// Auto-cancels first
 		llm.generate([{ role: "user", content: "second" }]);
 
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		// Second call should have completed
 		expect(llm.store.get()).toBe("second");
@@ -219,7 +219,7 @@ describe("fromLLM", () => {
 			stop: ["\n"],
 		});
 
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		const body = JSON.parse(mockFetch.mock.calls[0][1].body);
 		expect(body.temperature).toBe(0.5);
@@ -233,7 +233,7 @@ describe("fromLLM", () => {
 		const llm = fromLLM({ provider: "ollama", model: "llama4", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }], { maxTokens: 200 });
 
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		const body = JSON.parse(mockFetch.mock.calls[0][1].body);
 		expect(body.options?.num_predict).toBe(200);
@@ -253,7 +253,7 @@ describe("fromLLM", () => {
 
 		llm.generate([{ role: "user", content: "test2" }]);
 		expect(llm.error.get()).toBeUndefined();
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 		expect(llm.store.get()).toBe("ok");
 	});
 
@@ -268,24 +268,24 @@ describe("fromLLM", () => {
 		});
 
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(mockFetch.mock.calls[0][0]).toBe("https://my-proxy.com/v1/chat/completions");
 	});
 
-	it("streaming store is reactive", async () => {
+	it("status store is reactive", async () => {
 		const mockFetch = vi.fn().mockResolvedValue(mockSSEResponse([openaiChunk("ok")]));
 
 		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 
-		const states: boolean[] = [];
-		const unsub = subscribe(llm.streaming, (v) => states.push(v));
+		const statuses: string[] = [];
+		const unsub = subscribe(llm.status, (v) => statuses.push(v));
 
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
-		expect(states[0]).toBe(true); // started streaming
-		expect(states[states.length - 1]).toBe(false); // finished
+		expect(statuses).toContain("active");
+		expect(statuses[statuses.length - 1]).toBe("completed");
 		unsub();
 	});
 
@@ -315,7 +315,7 @@ describe("fromLLM", () => {
 
 		// Second generate aborts first
 		llm.generate([{ role: "user", content: "second" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		// Should have second result, not first
 		expect(llm.store.get()).toBe("second");
@@ -332,7 +332,7 @@ describe("fromLLM", () => {
 
 		const llm = fromLLM({ provider: "openai", model: "gpt-5.4-mini", fetch: mockFetch as any });
 		llm.generate([{ role: "user", content: "test" }]);
-		await vi.waitFor(() => expect(llm.streaming.get()).toBe(false), { timeout: 1000 });
+		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		expect(llm.store.get()).toBe("Hello world");
 		expect(llm.error.get()).toBeUndefined();

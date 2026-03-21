@@ -7,12 +7,22 @@ describe("taskState", () => {
 
 	it("starts idle with zero runCount", () => {
 		const task = taskState();
-		expect(task.get().status).toBe("idle");
-		expect(task.get().runCount).toBe(0);
-		expect(task.get().result).toBeUndefined();
-		expect(task.get().error).toBeUndefined();
-		expect(task.get().lastRun).toBeUndefined();
-		expect(task.get().duration).toBeUndefined();
+		expect(task.status.get()).toBe("idle");
+		expect(task.runCount.get()).toBe(0);
+		expect(task.result.get()).toBeUndefined();
+		expect(task.error.get()).toBeUndefined();
+		expect(task.lastRun.get()).toBeUndefined();
+		expect(task.duration.get()).toBeUndefined();
+		task.destroy();
+	});
+
+	it("get() returns composed TaskMeta", () => {
+		const task = taskState();
+		const meta = task.get();
+		expect(meta.status).toBe("idle");
+		expect(meta.runCount).toBe(0);
+		expect(meta.result).toBeUndefined();
+		expect(meta.error).toBeUndefined();
 		task.destroy();
 	});
 
@@ -22,11 +32,11 @@ describe("taskState", () => {
 		const task = taskState<number>();
 		const result = await task.run(() => 42);
 		expect(result).toBe(42);
-		expect(task.get().status).toBe("success");
-		expect(task.get().result).toBe(42);
-		expect(task.get().runCount).toBe(1);
-		expect(task.get().duration).toBeGreaterThanOrEqual(0);
-		expect(task.get().lastRun).toBeGreaterThan(0);
+		expect(task.status.get()).toBe("success");
+		expect(task.result.get()).toBe(42);
+		expect(task.runCount.get()).toBe(1);
+		expect(task.duration.get()).toBeGreaterThanOrEqual(0);
+		expect(task.lastRun.get()).toBeGreaterThan(0);
 		task.destroy();
 	});
 
@@ -38,9 +48,9 @@ describe("taskState", () => {
 				throw err;
 			}),
 		).rejects.toThrow("boom");
-		expect(task.get().status).toBe("error");
-		expect(task.get().error).toBe(err);
-		expect(task.get().runCount).toBe(1);
+		expect(task.status.get()).toBe("error");
+		expect(task.error.get()).toBe(err);
+		expect(task.runCount.get()).toBe(1);
 		task.destroy();
 	});
 
@@ -52,8 +62,8 @@ describe("taskState", () => {
 			return "done";
 		});
 		expect(result).toBe("done");
-		expect(task.get().status).toBe("success");
-		expect(task.get().result).toBe("done");
+		expect(task.status.get()).toBe("success");
+		expect(task.result.get()).toBe("done");
 		task.destroy();
 	});
 
@@ -64,8 +74,8 @@ describe("taskState", () => {
 				throw new Error("async fail");
 			}),
 		).rejects.toThrow("async fail");
-		expect(task.get().status).toBe("error");
-		expect(task.get().error).toBeInstanceOf(Error);
+		expect(task.status.get()).toBe("error");
+		expect(task.error.get()).toBeInstanceOf(Error);
 		task.destroy();
 	});
 
@@ -75,8 +85,8 @@ describe("taskState", () => {
 		const task = taskState<number>();
 		const statusLog: string[] = [];
 
-		const dispose = effect([task.inner], () => {
-			statusLog.push(task.get().status);
+		const dispose = effect([task.status], () => {
+			statusLog.push(task.status.get());
 			return undefined;
 		});
 
@@ -118,27 +128,27 @@ describe("taskState", () => {
 				}),
 		);
 
-		expect(task.get().status).toBe("running");
+		expect(task.status.get()).toBe("running");
 		task.reset();
-		expect(task.get().status).toBe("idle");
+		expect(task.status.get()).toBe("idle");
 
 		// Resolve the in-flight promise — should NOT overwrite the idle state
 		resolve!(42);
 		await p;
-		expect(task.get().status).toBe("idle");
-		expect(task.get().runCount).toBe(0);
+		expect(task.status.get()).toBe("idle");
+		expect(task.runCount.get()).toBe(0);
 		task.destroy();
 	});
 
 	it("reset returns to idle", async () => {
 		const task = taskState<number>();
 		await task.run(() => 42);
-		expect(task.get().status).toBe("success");
+		expect(task.status.get()).toBe("success");
 
 		task.reset();
-		expect(task.get().status).toBe("idle");
-		expect(task.get().runCount).toBe(0);
-		expect(task.get().result).toBeUndefined();
+		expect(task.status.get()).toBe("idle");
+		expect(task.runCount.get()).toBe(0);
+		expect(task.result.get()).toBeUndefined();
 		task.destroy();
 	});
 
@@ -147,11 +157,11 @@ describe("taskState", () => {
 	it("increments runCount across runs", async () => {
 		const task = taskState<number>();
 		await task.run(() => 1);
-		expect(task.get().runCount).toBe(1);
+		expect(task.runCount.get()).toBe(1);
 
 		await task.run(() => 2);
-		expect(task.get().runCount).toBe(2);
-		expect(task.get().result).toBe(2);
+		expect(task.runCount.get()).toBe(2);
+		expect(task.result.get()).toBe(2);
 		task.destroy();
 	});
 
@@ -164,8 +174,8 @@ describe("taskState", () => {
 				throw new Error("fail");
 			}),
 		).rejects.toThrow();
-		expect(task.get().status).toBe("error");
-		expect(task.get().result).toBe(42); // previous result preserved
+		expect(task.status.get()).toBe("error");
+		expect(task.result.get()).toBe(42); // previous result preserved
 		task.destroy();
 	});
 
@@ -232,8 +242,8 @@ describe("taskState", () => {
 
 		const task2 = taskState.from(snap);
 		expect(task2.id).toBe("t1");
-		expect(task2.get().status).toBe("success");
-		expect(task2.get().result).toBe(42);
+		expect(task2.status.get()).toBe("success");
+		expect(task2.result.get()).toBe(42);
 		task2.destroy();
 	});
 
@@ -247,8 +257,8 @@ describe("taskState", () => {
 		};
 
 		const task2 = taskState.from(snap);
-		expect(task2.get().status).toBe("error");
-		expect(task2.get().error).toBeInstanceOf(Error);
+		expect(task2.status.get()).toBe("error");
+		expect(task2.error.get()).toBeInstanceOf(Error);
 		task2.destroy();
 	});
 
@@ -270,7 +280,7 @@ describe("taskState", () => {
 		const task = taskState<string>();
 		let resolve: (v: string) => void;
 		const p = task.run(() => new Promise<string>((r) => (resolve = r)));
-		expect(task.get().status).toBe("running");
+		expect(task.status.get()).toBe("running");
 
 		task.destroy();
 		resolve!("done");
@@ -278,21 +288,21 @@ describe("taskState", () => {
 
 		// Result is returned but status was NOT updated (destroyed guard)
 		expect(result).toBe("done");
-		expect(task.get().status).toBe("running"); // frozen — state store torn down
+		expect(task.status.get()).toBe("running"); // frozen — state store torn down
 	});
 
 	it("destroy during in-flight error discards error transition", async () => {
 		const task = taskState<string>();
 		let reject: (e: Error) => void;
 		const p = task.run(() => new Promise<string>((_, r) => (reject = r)));
-		expect(task.get().status).toBe("running");
+		expect(task.status.get()).toBe("running");
 
 		task.destroy();
 		reject!(new Error("boom"));
 		await expect(p).rejects.toThrow("boom");
 
 		// Error is re-thrown but status was NOT updated (destroyed guard)
-		expect(task.get().status).toBe("running"); // frozen
+		expect(task.status.get()).toBe("running"); // frozen
 	});
 
 	// --- Reactive ---
@@ -300,8 +310,8 @@ describe("taskState", () => {
 	it("effect fires on status transitions", async () => {
 		const task = taskState<number>();
 		const log: string[] = [];
-		const dispose = effect([task.inner], () => {
-			log.push(task.get().status);
+		const dispose = effect([task.status], () => {
+			log.push(task.status.get());
 			return undefined;
 		});
 
@@ -311,6 +321,33 @@ describe("taskState", () => {
 		expect(log).toContain("success");
 
 		dispose();
+		task.destroy();
+	});
+
+	// --- Companion stores ---
+
+	it("individual companion stores are independently subscribable", async () => {
+		const task = taskState<number>();
+		const statusLog: string[] = [];
+		const errorLog: (unknown | undefined)[] = [];
+
+		const d1 = effect([task.status], () => {
+			statusLog.push(task.status.get());
+			return undefined;
+		});
+		const d2 = effect([task.error], () => {
+			errorLog.push(task.error.get());
+			return undefined;
+		});
+
+		await task.run(() => 42);
+
+		expect(statusLog).toContain("running");
+		expect(statusLog).toContain("success");
+		expect(errorLog).toContain(undefined);
+
+		d1();
+		d2();
 		task.destroy();
 	});
 });

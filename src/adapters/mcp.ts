@@ -15,8 +15,7 @@
 import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
-
-export type MCPToolStatus = "idle" | "calling" | "completed" | "errored";
+import type { WithStatusStatus } from "../utils/withStatus";
 
 /**
  * Minimal MCP client interface. Compatible with @modelcontextprotocol/sdk Client.
@@ -55,7 +54,7 @@ export interface MCPToolStore<TArgs = Record<string, unknown>, TResult = unknown
 	/** Latest tool call result. */
 	store: Store<TResult | undefined>;
 	/** Current tool call status. */
-	status: Store<MCPToolStatus>;
+	status: Store<WithStatusStatus>;
 	/** Last error, if any. */
 	error: Store<unknown | undefined>;
 	/** Call the tool with arguments. */
@@ -163,7 +162,7 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 	): MCPToolStore<TArgs, TResult> {
 		const prefix = `${name}:${toolName}`;
 		const resultStore = state<TResult | undefined>(undefined, { name: `${prefix}.result` });
-		const statusStore = state<MCPToolStatus>("idle", { name: `${prefix}.status` });
+		const statusStore = state<WithStatusStatus>("idle", { name: `${prefix}.status` });
 		const errorStore = state<unknown | undefined>(undefined, { name: `${prefix}.error` });
 		const lastArgsStore = state<TArgs | undefined>(undefined, { name: `${prefix}.lastArgs` });
 		const durationStore = state<number | undefined>(undefined, { name: `${prefix}.duration` });
@@ -176,7 +175,7 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 			batch(() => {
 				lastArgsStore.set(args);
 				errorStore.set(undefined);
-				statusStore.set("calling");
+				statusStore.set("active");
 			});
 			const startTime = Date.now();
 

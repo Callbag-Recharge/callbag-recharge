@@ -19,7 +19,7 @@ import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 
-export type WithStatusStatus = "pending" | "active" | "completed" | "errored";
+export type WithStatusStatus = "idle" | "pending" | "active" | "completed" | "errored";
 
 export interface WithStatusOptions {
 	/** Initial status. Default: "pending". Use "active" for stores that already have a value. */
@@ -75,6 +75,10 @@ export function withStatus<T>(store: Store<T>, opts?: WithStatusOptions): WithSt
 
 	const inner = producer<T>(
 		({ emit, complete, error }) => {
+			// P6: Reset status/error on resubscription so stale state doesn't leak
+			statusStore.set(initialStatus);
+			errorStore.set(undefined);
+
 			const unsub = subscribe(
 				store,
 				(value) => {

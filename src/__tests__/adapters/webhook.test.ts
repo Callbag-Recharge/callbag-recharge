@@ -17,7 +17,7 @@ describe("fromWebhook", () => {
 		webhook = fromWebhook({ path: "/hook" });
 
 		const values: any[] = [];
-		const unsub = subscribe(webhook.store, (v) => values.push(v));
+		const unsub = subscribe(webhook, (v) => values.push(v));
 
 		// Simulate a POST request via the handler directly
 		const req = createMockReq("POST", "/hook", JSON.stringify({ key: "value" }));
@@ -61,7 +61,7 @@ describe("fromWebhook", () => {
 		webhook = fromWebhook({ path: "/" });
 
 		const values: any[] = [];
-		const unsub = subscribe(webhook.store, (v) => values.push(v));
+		const unsub = subscribe(webhook, (v) => values.push(v));
 
 		const req = createMockReq("POST", "/", "not-json{{{");
 		const res = createMockRes();
@@ -81,7 +81,7 @@ describe("fromWebhook", () => {
 		});
 
 		const values: any[] = [];
-		const unsub = subscribe(webhook.store, (v) => values.push(v));
+		const unsub = subscribe(webhook, (v) => values.push(v));
 
 		const req = createMockReq("POST", "/", "hello");
 		const res = createMockRes();
@@ -95,7 +95,7 @@ describe("fromWebhook", () => {
 
 	it("requestCount increments on each request", async () => {
 		webhook = fromWebhook({ path: "/" });
-		const unsub = subscribe(webhook.store, () => {});
+		const unsub = subscribe(webhook, () => {});
 
 		expect(webhook.requestCount.get()).toBe(0);
 
@@ -120,8 +120,8 @@ describe("fromWebhook", () => {
 
 		const v1: any[] = [];
 		const v2: any[] = [];
-		const u1 = subscribe(webhook.store, (v) => v1.push(v));
-		const u2 = subscribe(webhook.store, (v) => v2.push(v));
+		const u1 = subscribe(webhook, (v) => v1.push(v));
+		const u2 = subscribe(webhook, (v) => v2.push(v));
 
 		const req = createMockReq("POST", "/", JSON.stringify({ x: 1 }));
 		const res = createMockRes();
@@ -137,7 +137,7 @@ describe("fromWebhook", () => {
 
 	it("rejects body exceeding maxBodySize with 413", async () => {
 		webhook = fromWebhook({ path: "/", maxBodySize: 10 });
-		const unsub = subscribe(webhook.store, () => {});
+		const unsub = subscribe(webhook, () => {});
 
 		const req = createMockReq("POST", "/", "a]".repeat(20));
 		const res = createMockRes();
@@ -151,7 +151,7 @@ describe("fromWebhook", () => {
 
 	it("handles request stream errors gracefully", async () => {
 		webhook = fromWebhook({ path: "/" });
-		const unsub = subscribe(webhook.store, () => {});
+		const unsub = subscribe(webhook, () => {});
 
 		const req = createMockReqWithError("POST", "/");
 		const res = createMockRes();
@@ -182,7 +182,7 @@ describe("fromWebhook", () => {
 		webhook = fromWebhook({ port, path: "/test" });
 
 		const values: any[] = [];
-		const unsub = subscribe(webhook.store, (v) => values.push(v));
+		const unsub = subscribe(webhook, (v) => values.push(v));
 
 		await webhook.listen();
 

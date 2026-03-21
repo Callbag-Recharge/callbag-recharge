@@ -9,7 +9,7 @@ import type { NodeV0 } from "../data/types";
 // TaskState
 // ---------------------------------------------------------------------------
 
-/** Symbol key for pipeline auto-detection of task state. */
+/** @internal Symbol key for pipeline auto-detection of task state. */
 export const TASK_STATE: unique symbol = Symbol.for("callbag-recharge:taskState");
 
 export type TaskStatus = "idle" | "running" | "success" | "error";
@@ -27,14 +27,21 @@ export interface TaskMeta<T = unknown> {
 }
 
 export interface TaskState<T = unknown> extends NodeV0 {
-	/** Current task metadata. */
-	get(): TaskMeta<T>;
+	/** Reactive task status: idle → running → success/error. */
+	status: Store<TaskStatus>;
+	/** Last error, if any. Reset to undefined on new run or reset. */
+	error: Store<unknown | undefined>;
+	/** Duration of last run in ms. */
+	duration: Store<number | undefined>;
+	/** Total number of completed runs (success + error). */
+	runCount: Store<number>;
+	/** Last run result. */
+	result: Store<T | undefined>;
+	/** Timestamp (ms since epoch) of last run start. */
+	lastRun: Store<number | undefined>;
 
-	/**
-	 * Expert-level: the underlying reactive store for subscriptions.
-	 * Use with effect() or derived() when you need to react to metadata changes.
-	 */
-	inner: Store<TaskMeta<T>>;
+	/** Read all metadata at once (convenience). */
+	get(): TaskMeta<T>;
 
 	/**
 	 * Execute fn, tracking status/duration/error automatically.
