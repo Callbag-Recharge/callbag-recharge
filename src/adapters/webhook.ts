@@ -1,14 +1,16 @@
 // ---------------------------------------------------------------------------
-// fromWebhook — HTTP trigger source (Node.js / edge)
+// fromWebhook — HTTP trigger source with request-response (Node.js / edge)
 // ---------------------------------------------------------------------------
-// Creates a reactive source that emits parsed request bodies when an HTTP
-// endpoint receives POST requests. Uses withStatus() for lifecycle tracking
-// (§20 companion store pattern).
+// Creates a reactive source that emits WebhookRequest objects when an HTTP
+// endpoint receives POST requests. Each request carries a `respond()` method
+// so pipelines can wire output back as the HTTP response.
 //
 // Usage:
-//   const webhook = fromWebhook({ port: 3000, path: "/hook" });
-//   subscribe(webhook, payload => console.log(payload));
-//   subscribe(webhook.status, s => console.log(s));
+//   const webhook = fromWebhook<Input>({ port: 3000, path: "/hook" });
+//   subscribe(webhook, (req) => {
+//     const result = process(req.body);
+//     req.respond(result);
+//   });
 //   webhook.close();
 // ---------------------------------------------------------------------------
 
@@ -35,9 +37,29 @@ export interface WebhookOptions {
 	hostname?: string;
 	/** Maximum request body size in bytes. Default: 1MB. Rejects with 413 if exceeded. */
 	maxBodySize?: number;
+	/**
+	 * Response timeout in milliseconds. If `respond()` is not called within this
+	 * window, the server auto-responds with 504 Gateway Timeout.
+	 * Default: 30000 (30s).
+	 */
+	responseTimeout?: number;
 }
 
-export interface WebhookStore<T = unknown> extends Store<T | undefined> {
+/** A webhook request with body and response control. */
+export interface WebhookRequest<T = unknown> {
+	/** Parsed request body. */
+	body: T;
+	/**
+	 * Send the HTTP response. May only be called once.
+	 * @param data - Response body (JSON-serialized).
+	 * @param statusCode - HTTP status code. Default: 200.
+	 */
+	respond(data: unknown, statusCode?: number): void;
+	/** Whether a response has already been sent. */
+	responded: boolean;
+}
+
+export interface WebhookStore<T = unknown> extends Store<WebhookRequest<T> | undefined> {
 	/** Lifecycle status: pending → active → completed/errored. */
 	status: Store<WithStatusStatus>;
 	/** Last error, if any. */
@@ -57,13 +79,30 @@ export interface WebhookStore<T = unknown> extends Store<T | undefined> {
 }
 
 /**
- * Creates an HTTP trigger source. Emits parsed POST bodies as reactive values (Tier 2).
+ * Creates an HTTP trigger source. Emits `WebhookRequest<T>` objects with parsed body
+ * and a `respond()` method so pipelines can wire output back as the HTTP response.
  *
  * @param opts - Configuration for the webhook server.
  *
- * @returns `WebhookStore<T>` — reactive store with status, error, request count, handler, and lifecycle.
+ * @returns `WebhookStore<T>` — reactive store emitting request objects with response control.
  *
+ * @remarks **Request-response:** Each emitted request has a `respond(data, statusCode?)` method.
+ * Call it to send the HTTP response. If not called within `responseTimeout` (default 30s),
+ * the server auto-responds with 504 Gateway Timeout.
  * @remarks **Status:** Uses withStatus() for lifecycle tracking (pending → active → completed/errored).
+ *
+ * @example
+ * ```ts
+ * import { fromWebhook } from 'callbag-recharge/adapters';
+ * import { subscribe } from 'callbag-recharge';
+ *
+ * const webhook = fromWebhook<{ input: string }>({ port: 3000, path: "/process" });
+ * subscribe(webhook, (req) => {
+ *   const result = transform(req.body);
+ *   req.respond({ output: result });
+ * });
+ * await webhook.listen();
+ * ```
  *
  * @category adapters
  */
@@ -73,12 +112,13 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	const baseName = opts?.name ?? "webhook";
 	const hostname = opts?.hostname ?? "0.0.0.0";
 	const maxBodySize = opts?.maxBodySize ?? 1024 * 1024; // 1MB default
+	const responseTimeout = opts?.responseTimeout ?? 30_000;
 
 	const requestCountStore = state<number>(0, { name: `${baseName}:count` });
 
-	let _emit: ((value: T) => void) | null = null;
+	let _emit: ((value: WebhookRequest<T>) => void) | null = null;
 
-	const store = producer<T>(
+	const store = producer<WebhookRequest<T>>(
 		({ emit }) => {
 			_emit = emit;
 			return () => {
@@ -94,6 +134,7 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	const tracked = withStatus(store);
 
 	let server: any = null;
+	const _activeTimers = new Set<ReturnType<typeof setTimeout>>();
 
 	function handler(req: any, res: any) {
 		// Match method and path
@@ -138,9 +179,41 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 				const raw = Buffer.concat(chunks).toString("utf-8");
 				const parsed = raw.length > 0 ? (parse(raw) as T) : (undefined as T);
 				requestCountStore.update((n) => n + 1);
-				_emit?.(parsed);
-				res.writeHead(200, { "Content-Type": "application/json" });
-				res.end(JSON.stringify({ ok: true }));
+
+				let hasResponded = false;
+				let timer: ReturnType<typeof setTimeout> | null = null;
+
+				const request: WebhookRequest<T> = {
+					body: parsed,
+					get responded() {
+						return hasResponded;
+					},
+					respond(data: unknown, statusCode = 200) {
+						if (hasResponded) return;
+						hasResponded = true;
+						if (timer !== null) {
+							clearTimeout(timer);
+							_activeTimers.delete(timer);
+							timer = null;
+						}
+						res.writeHead(statusCode, { "Content-Type": "application/json" });
+						res.end(JSON.stringify(data));
+					},
+				};
+
+				// Auto-respond with 504 if respond() not called in time
+				timer = setTimeout(() => {
+					_activeTimers.delete(timer!);
+					timer = null;
+					if (!hasResponded) {
+						hasResponded = true;
+						res.writeHead(504, { "Content-Type": "application/json" });
+						res.end(JSON.stringify({ error: "Response timeout" }));
+					}
+				}, responseTimeout);
+				_activeTimers.add(timer);
+
+				_emit?.(request);
 			} catch (err: any) {
 				res.writeHead(400, { "Content-Type": "application/json" });
 				res.end(JSON.stringify({ error: err?.message ?? "Parse error" }));
@@ -173,12 +246,17 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	}
 
 	function close() {
+		// Clear all in-flight response timeout timers
+		for (const timer of _activeTimers) {
+			clearTimeout(timer);
+		}
+		_activeTimers.clear();
 		server?.close();
 		server = null;
 	}
 
 	return {
-		get: () => tracked.get() as T | undefined,
+		get: () => tracked.get() as WebhookRequest<T> | undefined,
 		source: (type: number, payload?: any) => tracked.source(type, payload),
 		status: tracked.status,
 		error: tracked.error,

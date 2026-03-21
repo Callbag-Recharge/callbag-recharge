@@ -17,7 +17,7 @@ export type {
 export { fromMCP } from "./mcp";
 export type { SSEOptions, SSEStore } from "./sse";
 export { toSSE } from "./sse";
-export type { WebhookOptions, WebhookStore } from "./webhook";
+export type { WebhookOptions, WebhookRequest, WebhookStore } from "./webhook";
 export { fromWebhook } from "./webhook";
 export type {
 	FromWebSocketOptions,

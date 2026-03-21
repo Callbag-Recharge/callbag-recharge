@@ -152,6 +152,45 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
+	it("restart preserves runCount, result, lastRun but resets status", async () => {
+		const task = taskState<number>();
+		await task.run(() => 42);
+		expect(task.status.get()).toBe("success");
+		expect(task.runCount.get()).toBe(1);
+		expect(task.result.get()).toBe(42);
+		expect(task.lastRun.get()).toBeDefined();
+
+		task.restart();
+		expect(task.status.get()).toBe("idle");
+		expect(task.error.get()).toBeUndefined();
+		expect(task.duration.get()).toBeUndefined();
+		// Preserved:
+		expect(task.runCount.get()).toBe(1);
+		expect(task.result.get()).toBe(42);
+		expect(task.lastRun.get()).toBeDefined();
+		task.destroy();
+	});
+
+	it("restart bumps generation (discards in-flight run)", async () => {
+		const task = taskState<number>();
+		let resolve!: (v: number) => void;
+		const p = task.run(
+			() =>
+				new Promise<number>((r) => {
+					resolve = r;
+				}),
+		);
+
+		task.restart();
+		resolve(99);
+		await p;
+
+		// Result should be discarded — status stays idle from restart
+		expect(task.status.get()).toBe("idle");
+		expect(task.runCount.get()).toBe(0); // preserved from before run (was 0)
+		task.destroy();
+	});
+
 	// --- Multiple runs ---
 
 	it("increments runCount across runs", async () => {

@@ -133,6 +133,10 @@ const REGISTRY = {
 	branch: "src/orchestrate/branch.ts",
 	approval: "src/orchestrate/approval.ts",
 	gate: "src/orchestrate/gate.ts",
+	executionLog: "src/orchestrate/executionLog.ts",
+	fileLogAdapter: "src/orchestrate/executionLogAdapters.ts",
+	sqliteLogAdapter: "src/orchestrate/executionLogAdapters.ts",
+	indexedDBLogAdapter: "src/orchestrate/executionLogAdapters.ts",
 
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",

@@ -50,8 +50,15 @@ export interface TaskState<T = unknown> extends NodeV0 {
 	 */
 	run(fn: () => T | Promise<T>): Promise<T>;
 
-	/** Reset to idle state (clears result, error, timing). */
+	/** Reset to idle state (clears result, error, timing, runCount). */
 	reset(): void;
+
+	/**
+	 * Lightweight re-trigger reset. Bumps generation (discards in-flight run),
+	 * resets status/error/duration to idle, but preserves runCount, result, lastRun.
+	 * Used by switchMap re-trigger paths in task()/forEach().
+	 */
+	restart(): void;
 
 	/** Return a JSON-serializable snapshot. */
 	snapshot(): TaskStateSnapshot<T>;

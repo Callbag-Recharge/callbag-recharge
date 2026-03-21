@@ -69,9 +69,9 @@
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 5b-1 | Persistent execution log adapters | `fileLogAdapter`, `sqliteLogAdapter`, `indexedDBLogAdapter` for `executionLog()`. Same pattern as `checkpointAdapters`. Enables debugging past runs. | S |
-| 5b-2 | `forEach` step (fan-out) | `forEach(dep, fn)` — spawns N parallel task instances from an array. n8n "Split in Batches" / Airflow `expand()`. | M |
-| 5b-3 | Webhook response wiring | Wire pipeline output back as HTTP response to `fromWebhook()`. Turns trigger-only webhooks into request→process→respond cycles. | M |
+| ~~5b-1~~ | ~~Persistent execution log adapters~~ | `fileLogAdapter` (JSONL, asyncQueue-serialized), `sqliteLogAdapter`, `indexedDBLogAdapter` for `executionLog()`. Same pattern as `checkpointAdapters`. IndexedDB adapters (both checkpoint + log) now retry once on stale connection after `onversionchange`. | ~~S~~ |
+| ~~5b-2~~ | ~~`forEach` step (fan-out)~~ | `forEach(dep, fn)` — single dep, spawns N parallel task instances from an array. Concurrency control, per-item fallback, switchMap re-trigger cancellation. Uses `taskState.restart()` to preserve cumulative `runCount` across re-triggers. | ~~M~~ |
+| ~~5b-3~~ | ~~Webhook response wiring~~ | `fromWebhook()` emits `WebhookRequest<T>` with `body` + `respond(data, statusCode?)`. Auto-504 on timeout (default 30s). Timer cleanup on `close()`. No fire-and-forget mode — always request-response. | ~~M~~ |
 | 5b-4 | `onFailure` step / dead letter | Route terminal failures to a handler step after retries exhausted. Dead letter queue pattern. | M |
 | 5b-5 | `wait` node | `wait(ms \| signal)` — intentional pause (duration or external signal). Distinct from `timeout()` (guard) and `gate()` (approval). | S |
 | 5b-6 | `subPipeline` step | Invoke one pipeline from another with lifecycle management. n8n "Execute Workflow" equivalent. | M |

@@ -242,32 +242,45 @@ export function indexedDBAdapter(opts?: IndexedDBAdapterOptions): CheckpointAdap
 		});
 	}
 
-	return {
-		async save(id: string, value: unknown): Promise<void> {
-			const { store } = await tx("readwrite");
-			return new Promise((resolve, reject) => {
-				const req = store.put(value, id);
-				req.onsuccess = () => resolve();
+	// Retry once on stale connection (e.g., after onversionchange closed _db)
+	async function withRetry<R>(
+		mode: IDBTransactionMode,
+		op: (store: IDBObjectStore) => IDBRequest<R>,
+	): Promise<R> {
+		try {
+			const { store } = await tx(mode);
+			return await new Promise<R>((resolve, reject) => {
+				const req = op(store);
+				req.onsuccess = () => resolve(req.result);
 				req.onerror = () => reject(req.error);
 			});
+		} catch (err: any) {
+			if (err?.name === "InvalidStateError" || _db === null) {
+				_db = null;
+				_openPromise = null;
+				const { store } = await tx(mode);
+				return new Promise<R>((resolve, reject) => {
+					const req = op(store);
+					req.onsuccess = () => resolve(req.result);
+					req.onerror = () => reject(req.error);
+				});
+			}
+			throw err;
+		}
+	}
+
+	return {
+		async save(id: string, value: unknown): Promise<void> {
+			await withRetry("readwrite", (store) => store.put(value, id));
 		},
 
 		async load(id: string): Promise<unknown | undefined> {
-			const { store } = await tx("readonly");
-			return new Promise((resolve, reject) => {
-				const req = store.get(id);
-				req.onsuccess = () => resolve(req.result ?? undefined);
-				req.onerror = () => reject(req.error);
-			});
+			const result = await withRetry("readonly", (store) => store.get(id));
+			return result ?? undefined;
 		},
 
 		async clear(id: string): Promise<void> {
-			const { store } = await tx("readwrite");
-			return new Promise((resolve, reject) => {
-				const req = store.delete(id);
-				req.onsuccess = () => resolve();
-				req.onerror = () => reject(req.error);
-			});
+			await withRetry("readwrite", (store) => store.delete(id));
 		},
 	};
 }

@@ -174,6 +174,17 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			});
 		},
 
+		restart() {
+			if (destroyed) return;
+			generation++;
+			batch(() => {
+				_status.set("idle");
+				_error.set(undefined);
+				_duration.set(undefined);
+				// Preserve: runCount, result, lastRun
+			});
+		},
+
 		snapshot(): TaskStateSnapshot<T> {
 			return {
 				type: "taskState",

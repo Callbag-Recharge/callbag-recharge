@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
+import type { WebhookRequest } from "../../adapters/webhook";
 import { fromWebhook } from "../../adapters/webhook";
 import { subscribe } from "../../extra/subscribe";
 
@@ -13,23 +14,85 @@ describe("fromWebhook", () => {
 		webhook = null;
 	});
 
-	it("handler emits parsed JSON body on POST", async () => {
+	it("handler emits WebhookRequest with parsed body on POST", async () => {
 		webhook = fromWebhook({ path: "/hook" });
 
-		const values: any[] = [];
+		const values: WebhookRequest[] = [];
 		const unsub = subscribe(webhook, (v) => values.push(v));
 
-		// Simulate a POST request via the handler directly
 		const req = createMockReq("POST", "/hook", JSON.stringify({ key: "value" }));
+		const res = createMockRes();
+
+		webhook.handler(req, res);
+
+		// respond() hasn't been called yet — no response
+		await new Promise((r) => setTimeout(r, 10));
+		expect(values).toHaveLength(1);
+		expect(values[0].body).toEqual({ key: "value" });
+		expect(values[0].responded).toBe(false);
+
+		// Call respond to send HTTP response
+		values[0].respond({ ok: true });
+		expect(res._statusCode).toBe(200);
+		expect(JSON.parse(res._body)).toEqual({ ok: true });
+		expect(values[0].responded).toBe(true);
+
+		expect(webhook.requestCount.get()).toBe(1);
+		unsub();
+	});
+
+	it("respond() with custom status code", async () => {
+		webhook = fromWebhook({ path: "/" });
+
+		const values: WebhookRequest[] = [];
+		const unsub = subscribe(webhook, (v) => values.push(v));
+
+		const req = createMockReq("POST", "/", JSON.stringify({ data: 1 }));
+		const res = createMockRes();
+
+		webhook.handler(req, res);
+		await new Promise((r) => setTimeout(r, 10));
+
+		values[0].respond({ created: true }, 201);
+		expect(res._statusCode).toBe(201);
+
+		unsub();
+	});
+
+	it("respond() is idempotent — second call is no-op", async () => {
+		webhook = fromWebhook({ path: "/" });
+
+		const values: WebhookRequest[] = [];
+		const unsub = subscribe(webhook, (v) => values.push(v));
+
+		const req = createMockReq("POST", "/", "{}");
+		const res = createMockRes();
+
+		webhook.handler(req, res);
+		await new Promise((r) => setTimeout(r, 10));
+
+		values[0].respond({ first: true });
+		values[0].respond({ second: true }); // should be ignored
+
+		expect(JSON.parse(res._body)).toEqual({ first: true });
+		unsub();
+	});
+
+	it("auto-responds with 504 on timeout", async () => {
+		webhook = fromWebhook({ path: "/", responseTimeout: 50 });
+
+		const unsub = subscribe(webhook, () => {
+			// Intentionally don't call respond()
+		});
+
+		const req = createMockReq("POST", "/", "{}");
 		const res = createMockRes();
 
 		webhook.handler(req, res);
 		await waitForRes(res);
 
-		expect(res._statusCode).toBe(200);
-		expect(values).toEqual([{ key: "value" }]);
-		expect(webhook.requestCount.get()).toBe(1);
-
+		expect(res._statusCode).toBe(504);
+		expect(JSON.parse(res._body)).toEqual({ error: "Response timeout" });
 		unsub();
 	});
 
@@ -80,22 +143,23 @@ describe("fromWebhook", () => {
 			parse: (body) => body.toUpperCase(),
 		});
 
-		const values: any[] = [];
+		const values: WebhookRequest[] = [];
 		const unsub = subscribe(webhook, (v) => values.push(v));
 
 		const req = createMockReq("POST", "/", "hello");
 		const res = createMockRes();
 
 		webhook.handler(req, res);
-		await waitForRes(res);
+		await new Promise((r) => setTimeout(r, 10));
 
-		expect(values).toEqual(["HELLO"]);
+		expect(values[0].body).toBe("HELLO");
+		values[0].respond({ ok: true });
 		unsub();
 	});
 
 	it("requestCount increments on each request", async () => {
 		webhook = fromWebhook({ path: "/" });
-		const unsub = subscribe(webhook, () => {});
+		const unsub = subscribe(webhook, (v) => v.respond({ ok: true }));
 
 		expect(webhook.requestCount.get()).toBe(0);
 
@@ -115,21 +179,26 @@ describe("fromWebhook", () => {
 		unsub();
 	});
 
-	it("multiple subscribers receive the same values", async () => {
+	it("multiple subscribers receive the same request", async () => {
 		webhook = fromWebhook({ path: "/" });
 
-		const v1: any[] = [];
-		const v2: any[] = [];
+		const v1: WebhookRequest[] = [];
+		const v2: WebhookRequest[] = [];
 		const u1 = subscribe(webhook, (v) => v1.push(v));
 		const u2 = subscribe(webhook, (v) => v2.push(v));
 
 		const req = createMockReq("POST", "/", JSON.stringify({ x: 1 }));
 		const res = createMockRes();
 		webhook.handler(req, res);
-		await waitForRes(res);
+		await new Promise((r) => setTimeout(r, 10));
 
-		expect(v1).toEqual([{ x: 1 }]);
-		expect(v2).toEqual([{ x: 1 }]);
+		expect(v1).toHaveLength(1);
+		expect(v2).toHaveLength(1);
+		expect(v1[0].body).toEqual({ x: 1 });
+
+		// Either subscriber can respond
+		v1[0].respond({ handled: true });
+		expect(res._statusCode).toBe(200);
 
 		u1();
 		u2();
@@ -177,12 +246,13 @@ describe("fromWebhook", () => {
 		await expect(webhook.listen()).rejects.toThrow(/port is required/);
 	});
 
-	it("listen() and close() lifecycle", async () => {
+	it("listen() and close() lifecycle with request-response", async () => {
 		const port = 19876 + Math.floor(Math.random() * 1000);
-		webhook = fromWebhook({ port, path: "/test" });
+		webhook = fromWebhook<{ hello: string }>({ port, path: "/test" });
 
-		const values: any[] = [];
-		const unsub = subscribe(webhook, (v) => values.push(v));
+		const unsub = subscribe(webhook, (req) => {
+			req.respond({ echo: req.body.hello });
+		});
 
 		await webhook.listen();
 
@@ -195,7 +265,8 @@ describe("fromWebhook", () => {
 		});
 
 		expect(response.status).toBe(200);
-		expect(values).toEqual([{ hello: "world" }]);
+		const json = await response.json();
+		expect(json).toEqual({ echo: "world" });
 
 		unsub();
 		webhook.close();

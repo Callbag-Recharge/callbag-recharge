@@ -23,6 +23,15 @@ export type {
 	ExecutionLogResult,
 } from "./executionLog";
 export { executionLog, memoryLogAdapter } from "./executionLog";
+export type {
+	FileLogAdapterOptions,
+	IndexedDBLogAdapterOptions,
+	SQLiteDatabase as SQLiteLogDatabase,
+	SQLiteLogAdapterOptions,
+} from "./executionLogAdapters";
+export { fileLogAdapter, indexedDBLogAdapter, sqliteLogAdapter } from "./executionLogAdapters";
+export type { ForEachOpts, ForEachStepDef } from "./forEach";
+export { forEach } from "./forEach";
 export type { GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
 export type {

@@ -181,7 +181,7 @@ export function task<T>(
 				// Reset taskState for re-trigger: switchMap cancels the previous inner
 				// producer, but the old task.run() may still be in-flight. Reset ensures
 				// the new run() won't throw "Task is already running".
-				ts.reset();
+				ts.restart();
 
 				// Run the task with cancellation support
 				return producer<T | null>(({ emit, complete }) => {
