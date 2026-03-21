@@ -137,6 +137,9 @@ const REGISTRY = {
 	fileLogAdapter: "src/orchestrate/executionLogAdapters.ts",
 	sqliteLogAdapter: "src/orchestrate/executionLogAdapters.ts",
 	indexedDBLogAdapter: "src/orchestrate/executionLogAdapters.ts",
+	onFailure: "src/orchestrate/onFailure.ts",
+	wait: "src/orchestrate/wait.ts",
+	subPipeline: "src/orchestrate/subPipeline.ts",
 
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",

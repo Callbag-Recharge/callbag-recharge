@@ -11,7 +11,7 @@
 // Usage:
 //   const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
 //   llm.generate([{ role: 'user', content: 'Hello' }]);
-//   effect([llm.store], () => console.log(llm.store.get()));
+//   effect([llm], () => console.log(llm.get()));
 // ---------------------------------------------------------------------------
 
 import { batch } from "../core/protocol";
@@ -56,9 +56,7 @@ export interface GenerateOptions {
 	signal?: AbortSignal;
 }
 
-export interface LLMStore {
-	/** Accumulated response text (reactive). */
-	store: Store<string>;
+export interface LLMStore extends Store<string> {
 	/** Token usage from the last generation (reactive, populated on completion). */
 	tokens: Store<LLMTokenUsage>;
 	/** Lifecycle status: pending → active → completed/errored. */
@@ -130,13 +128,14 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  *
  * @param opts - Provider configuration (provider, baseURL, apiKey, model).
  *
- * @returns `LLMStore` — reactive stores for response text, token usage, status, error, plus `generate()` and `abort()`.
+ * @returns `LLMStore` — `Store<string>` with `status`, `error`, `tokens` companion stores, plus `generate()` and `abort()`.
  *
  * @remarks **Provider-agnostic:** Works with OpenAI, Ollama, Anthropic (via proxy), Vercel AI SDK, or any OpenAI-compatible endpoint.
  * @remarks **No hard deps:** Uses fetch + SSE line parsing. No SDK imports required.
  * @remarks **Auto-cancel:** Calling `generate()` while streaming aborts the previous generation.
  * @remarks **Token tracking:** `tokens` store populated on stream completion (when usage data is available).
  * @remarks **Status:** Uses WithStatusStatus enum (pending → active → completed/errored) for consistent lifecycle tracking.
+ * @remarks **Persistent source:** This is a long-lived store backed by `state()`. It does not send callbag END — lifecycle is managed imperatively via `generate()`/`abort()`, not via stream completion. Do not wrap with `withStatus()` or `retry()` — use the built-in `.status` and `.error` companions instead.
  *
  * @example
  * ```ts
@@ -145,13 +144,13 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  *
  * const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
  *
- * effect([llm.store], () => {
- *   console.log(llm.store.get()); // accumulating response...
+ * effect([llm], () => {
+ *   console.log(llm.get()); // accumulating response...
  * });
  *
  * llm.generate([{ role: 'user', content: 'What is TypeScript?' }]);
  * // llm.status.get() → "active"
- * // llm.store.get() → "TypeScript is..."
+ * // llm.get() → "TypeScript is..."
  * ```
  *
  * @category adapters
@@ -176,7 +175,10 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			abortController = null;
 		}
 		if (statusState.get() === "active") {
-			statusState.set("pending");
+			batch(() => {
+				storeState.set("");
+				statusState.set("pending");
+			});
 		}
 	}
 
@@ -289,7 +291,8 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 	}
 
 	return {
-		store: storeState,
+		get: () => storeState.get(),
+		source: (type: number, payload?: any) => storeState.source(type, payload),
 		tokens: tokensState,
 		status: statusState,
 		error: errorState,

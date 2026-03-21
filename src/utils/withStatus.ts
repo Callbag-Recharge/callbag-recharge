@@ -116,15 +116,20 @@ export function withStatus<T>(store: Store<T>, opts?: WithStatusOptions): WithSt
 		{ initial: store.get(), resubscribable: true },
 	);
 
-	Inspector.register(inner, { kind: "withStatus" });
-
 	// Return a delegate object that exposes get()/source() from the
 	// producer but adds status/error companions without overwriting
 	// ProducerStore's .error() method.
-	return {
+	const delegate: WithStatusStore<T> = {
 		get: () => store.get(),
 		source: (type: number, payload?: any) => inner.source(type, payload),
+		get _status() {
+			return (inner as any)._status;
+		},
 		status: statusStore,
 		error: errorStore,
 	};
+
+	Inspector.register(delegate, { kind: "withStatus" });
+
+	return delegate;
 }

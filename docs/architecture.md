@@ -720,8 +720,8 @@ fromWebhook(opts)   // → Store<T> & { status, error, requestCount, handler, li
 chatStream(opts)    // → Store<string> & { status, error, ... }
 
 // fromLLM and fromMCP use WithStatusStatus enum for status stores
-fromLLM(opts)       // → { store, status, error, tokens, generate(), abort() }
-fromMCP(opts)       // → { tool() → { store, status, error, lastArgs, duration, call() } }
+fromLLM(opts)       // → Store<string> & { status, error, tokens, generate(), abort() }
+fromMCP(opts)       // → { tool() → Store<T> & { status, error, lastArgs, duration, call() } }
 
 // Domain wrappers add their own companions
 withRetry(store, config)   // → Store<T> & { retryCount, lastError, pending }

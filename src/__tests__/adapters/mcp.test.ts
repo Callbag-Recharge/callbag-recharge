@@ -56,7 +56,7 @@ describe("fromMCP", () => {
 			const search = mcp.tool("search");
 
 			expect(search.status.get()).toBe("idle");
-			expect(search.store.get()).toBeUndefined();
+			expect(search.get()).toBeUndefined();
 			expect(search.error.get()).toBeUndefined();
 			expect(search.lastArgs.get()).toBeUndefined();
 			expect(search.duration.get()).toBeUndefined();
@@ -70,7 +70,7 @@ describe("fromMCP", () => {
 			await search.call({ query: "weather" });
 
 			expect(search.status.get()).toBe("completed");
-			expect(search.store.get()).toEqual({ result: "ok" });
+			expect(search.get()).toEqual({ result: "ok" });
 			expect(search.lastArgs.get()).toEqual({ query: "weather" });
 			expect(search.duration.get()).toBeGreaterThanOrEqual(0);
 			expect(search.error.get()).toBeUndefined();
@@ -91,7 +91,7 @@ describe("fromMCP", () => {
 			const tool = mcp.tool("echo");
 
 			await tool.call({});
-			expect(tool.store.get()).toBe("Hello world");
+			expect(tool.get()).toBe("Hello world");
 		});
 
 		it("handles multiple text content blocks", async () => {
@@ -107,7 +107,7 @@ describe("fromMCP", () => {
 			const tool = mcp.tool("multi");
 
 			await tool.call({});
-			expect(tool.store.get()).toEqual(["line 1", "line 2"]);
+			expect(tool.get()).toEqual(["line 1", "line 2"]);
 		});
 
 		it("handles tool error response (isError)", async () => {
@@ -195,7 +195,7 @@ describe("fromMCP", () => {
 
 			await tool.call({});
 			expect(tool.status.get()).toBe("completed");
-			expect(tool.store.get()).toEqual([{ type: "image", data: "base64..." }]);
+			expect(tool.get()).toEqual([{ type: "image", data: "base64..." }]);
 		});
 
 		it("rejects concurrent calls on same tool", async () => {
@@ -220,7 +220,7 @@ describe("fromMCP", () => {
 
 			// Only first call should have been made
 			expect(client.callTool).toHaveBeenCalledTimes(1);
-			expect(tool.store.get()).toBe("first");
+			expect(tool.get()).toBe("first");
 		});
 
 		it("handles empty content array", async () => {
@@ -234,7 +234,7 @@ describe("fromMCP", () => {
 
 			await tool.call({});
 			expect(tool.status.get()).toBe("completed");
-			expect(tool.store.get()).toEqual([]);
+			expect(tool.get()).toEqual([]);
 		});
 	});
 

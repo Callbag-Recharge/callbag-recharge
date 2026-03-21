@@ -28,7 +28,7 @@ A function that takes `Store&lt;A&gt;` and returns `GatedStore&lt;A&gt;`.
 | `modify(fn)` | `(fn: (A) =&gt; A) =&gt; void` | Transform and forward next pending. |
 | `open()` | `() =&gt; void` | Flush pending + auto-approve future values. |
 | `close()` | `() =&gt; void` | Re-enable gating. |
-| `source` | `callbag` | Underlying callbag source for subscriptions. |
+| `source` | `(type, payload?) =&gt; void` | Underlying reactive source for subscriptions. |
 
 ## Basic Usage
 
@@ -48,7 +48,7 @@ gated.pending.get();  // []
 
 ## Options / Behavior Details
 
-- **Tier 2:** Cycle boundary — each approved value starts a new DIRTY+value cycle.
+- **Tier 2:** Cycle boundary — each approved value starts a new reactive update cycle.
 - **Queue:** Values queue while gate is closed. `maxPending` limits queue size (FIFO drop).
 - **Open/close:** `open()` flushes all pending and auto-approves future values. `close()` re-enables manual gating.
 - **Teardown:** After the gate's producer is torn down (unsubscribed), all controls throw. Re-subscribing resets the gate to a clean state.

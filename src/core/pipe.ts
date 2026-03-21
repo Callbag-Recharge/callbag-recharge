@@ -5,25 +5,25 @@ import type { Store, StoreOperator } from "./types";
 // ---------------------------------------------------------------------------
 
 export function pipe<A>(source: Store<A>): Store<A>;
-export function pipe<A, B>(source: Store<A>, op1: StoreOperator<A, B>): Store<B>;
-export function pipe<A, B, C>(
+export function pipe<A, R extends Store<any>>(source: Store<A>, op1: (source: Store<A>) => R): R;
+export function pipe<A, B, R extends Store<any>>(
+	source: Store<A>,
+	op1: StoreOperator<A, B>,
+	op2: (source: Store<B>) => R,
+): R;
+export function pipe<A, B, C, R extends Store<any>>(
 	source: Store<A>,
 	op1: StoreOperator<A, B>,
 	op2: StoreOperator<B, C>,
-): Store<C>;
-export function pipe<A, B, C, D>(
+	op3: (source: Store<C>) => R,
+): R;
+export function pipe<A, B, C, D, R extends Store<any>>(
 	source: Store<A>,
 	op1: StoreOperator<A, B>,
 	op2: StoreOperator<B, C>,
 	op3: StoreOperator<C, D>,
-): Store<D>;
-export function pipe<A, B, C, D, E>(
-	source: Store<A>,
-	op1: StoreOperator<A, B>,
-	op2: StoreOperator<B, C>,
-	op3: StoreOperator<C, D>,
-	op4: StoreOperator<D, E>,
-): Store<E>;
+	op4: (source: Store<D>) => R,
+): R;
 export function pipe(
 	source: Store<unknown>,
 	...ops: Array<StoreOperator<any, any>>

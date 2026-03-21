@@ -395,13 +395,13 @@ describe("withBreaker", () => {
 		// Subscribe to activate the operator
 		const unsub = subscribe(guarded, () => {});
 
-		expect((guarded as any).breakerState.get()).toBe("closed");
+		expect(guarded.breakerState.get()).toBe("closed");
 
 		// Open breaker and trigger a value
 		breaker.recordFailure();
 		input.set(1);
 
-		expect((guarded as any).breakerState.get()).toBe("open");
+		expect(guarded.breakerState.get()).toBe("open");
 		unsub();
 	});
 });

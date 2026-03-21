@@ -7,25 +7,25 @@ Each operator wraps the previous store; order matches visual reading order.
 
 ```ts
 function pipe<A>(source: Store<A>): Store<A>
-function pipe<A, B>(source: Store<A>, op1: StoreOperator<A, B>): Store<B>
-function pipe<A, B, C>(
+function pipe<A, R extends Store<any>>(source: Store<A>, op1: (source: Store<A>) => R): R
+function pipe<A, B, R extends Store<any>>(
+	source: Store<A>,
+	op1: StoreOperator<A, B>,
+	op2: (source: Store<B>) => R,
+): R
+function pipe<A, B, C, R extends Store<any>>(
 	source: Store<A>,
 	op1: StoreOperator<A, B>,
 	op2: StoreOperator<B, C>,
-): Store<C>
-function pipe<A, B, C, D>(
+	op3: (source: Store<C>) => R,
+): R
+function pipe<A, B, C, D, R extends Store<any>>(
 	source: Store<A>,
 	op1: StoreOperator<A, B>,
 	op2: StoreOperator<B, C>,
 	op3: StoreOperator<C, D>,
-): Store<D>
-function pipe<A, B, C, D, E>(
-	source: Store<A>,
-	op1: StoreOperator<A, B>,
-	op2: StoreOperator<B, C>,
-	op3: StoreOperator<C, D>,
-	op4: StoreOperator<D, E>,
-): Store<E>
+	op4: (source: Store<D>) => R,
+): R
 function pipe(
 	source: Store<unknown>,
 	...ops: Array<StoreOperator<any, any>>

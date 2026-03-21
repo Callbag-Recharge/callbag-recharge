@@ -8,7 +8,7 @@ Blocks values when the circuit breaker is open. Passes values when closed, trial
 function withBreaker<A>(
 	breaker: BreakerLike,
 	opts?: WithBreakerOptions,
-): StoreOperator<A, A>
+): (input: Store<A>) => WithBreakerStore<A>
 ```
 
 ## Parameters
@@ -20,7 +20,7 @@ function withBreaker<A>(
 
 ## Returns
 
-`StoreOperator&lt;A, A&gt;` — pipe-compatible operator. The returned store has a `breakerState` property.
+Pipe-compatible operator. The returned `WithBreakerStore&lt;A&gt;` has a `breakerState` companion store.
 
 ## Basic Usage
 

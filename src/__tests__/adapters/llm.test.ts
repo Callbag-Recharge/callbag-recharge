@@ -61,14 +61,14 @@ describe("fromLLM", () => {
 		});
 
 		const values: string[] = [];
-		const unsub = subscribe(llm.store, (v) => values.push(v));
+		const unsub = subscribe(llm, (v) => values.push(v));
 
 		llm.generate([{ role: "user", content: "Hi" }]);
 
 		// Wait for streaming to complete
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
-		expect(llm.store.get()).toBe("Hello world!");
+		expect(llm.get()).toBe("Hello world!");
 		expect(values).toEqual(["Hello", "Hello world", "Hello world!"]);
 		expect(llm.error.get()).toBeUndefined();
 
@@ -106,7 +106,7 @@ describe("fromLLM", () => {
 		llm.generate([{ role: "user", content: "Tell me about TS" }]);
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
-		expect(llm.store.get()).toBe("TypeScript is great");
+		expect(llm.get()).toBe("TypeScript is great");
 
 		const [url] = mockFetch.mock.calls[0];
 		expect(url).toBe("http://localhost:11434/api/chat");
@@ -189,6 +189,7 @@ describe("fromLLM", () => {
 
 		llm.abort();
 		expect(llm.status.get()).toBe("pending");
+		expect(llm.get()).toBe("");
 	});
 
 	it("generate auto-cancels previous generation", async () => {
@@ -205,7 +206,7 @@ describe("fromLLM", () => {
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		// Second call should have completed
-		expect(llm.store.get()).toBe("second");
+		expect(llm.get()).toBe("second");
 		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
 
@@ -254,7 +255,7 @@ describe("fromLLM", () => {
 		llm.generate([{ role: "user", content: "test2" }]);
 		expect(llm.error.get()).toBeUndefined();
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
-		expect(llm.store.get()).toBe("ok");
+		expect(llm.get()).toBe("ok");
 	});
 
 	it("supports custom baseURL", async () => {
@@ -318,7 +319,7 @@ describe("fromLLM", () => {
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
 		// Should have second result, not first
-		expect(llm.store.get()).toBe("second");
+		expect(llm.get()).toBe("second");
 		// Both fetches were called, proving first was cancelled and second started
 		expect(mockFetch).toHaveBeenCalledTimes(2);
 	});
@@ -334,7 +335,7 @@ describe("fromLLM", () => {
 		llm.generate([{ role: "user", content: "test" }]);
 		await vi.waitFor(() => expect(llm.status.get()).toBe("completed"), { timeout: 1000 });
 
-		expect(llm.store.get()).toBe("Hello world");
+		expect(llm.get()).toBe("Hello world");
 		expect(llm.error.get()).toBeUndefined();
 	});
 });

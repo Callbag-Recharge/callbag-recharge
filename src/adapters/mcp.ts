@@ -9,7 +9,7 @@
 //   const mcp = fromMCP({ client: myMCPClient });
 //   const search = mcp.tool<SearchArgs, SearchResult>('search');
 //   search.call({ query: 'weather' });
-//   effect([search.store], () => console.log(search.store.get()));
+//   effect([search], () => console.log(search.get()));
 // ---------------------------------------------------------------------------
 
 import { batch } from "../core/protocol";
@@ -50,9 +50,8 @@ export interface MCPToolInfo {
 	inputSchema?: unknown;
 }
 
-export interface MCPToolStore<TArgs = Record<string, unknown>, TResult = unknown> {
-	/** Latest tool call result. */
-	store: Store<TResult | undefined>;
+export interface MCPToolStore<TArgs = Record<string, unknown>, TResult = unknown>
+	extends Store<TResult | undefined> {
 	/** Current tool call status. */
 	status: Store<WithStatusStatus>;
 	/** Last error, if any. */
@@ -99,6 +98,7 @@ export interface MCPResult {
  * @remarks **No hard deps:** Uses a minimal `MCPClientLike` interface. Compatible with `@modelcontextprotocol/sdk` Client.
  * @remarks **Per-tool stores:** Each `tool()` call returns independent reactive stores for result, status, error.
  * @remarks **Lazy:** Tool/resource lists are not fetched until `refresh()` is called.
+ * @remarks **Persistent source:** Tool stores are backed by `state()`. They do not send callbag END — lifecycle is managed imperatively via `call()`. Do not wrap with `withStatus()` or `retry()` — use the built-in `.status` and `.error` companions instead.
  *
  * @example
  * ```ts
@@ -112,7 +112,7 @@ export interface MCPResult {
  * await search.call({ query: 'TypeScript reactive' });
  *
  * search.status.get(); // 'completed'
- * search.store.get();  // ['result1', 'result2']
+ * search.get();        // ['result1', 'result2']
  * ```
  *
  * @seeAlso [toolCallState](/api/toolCallState) — generic tool call state machine, [fromLLM](/api/fromLLM) — LLM adapter
@@ -237,7 +237,8 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 		}
 
 		return {
-			store: resultStore,
+			get: () => resultStore.get(),
+			source: (type: number, payload?: any) => resultStore.source(type, payload),
 			status: statusStore,
 			error: errorStore,
 			call,

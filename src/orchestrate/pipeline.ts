@@ -260,6 +260,11 @@ export function pipeline<S extends Record<string, StepDef>>(
 
 			storeMap.set(name, store);
 
+			// Auto-register task error companion stores (e.g., "fetch" → "fetch.error")
+			if ((def as any)[TASK_STATE]) {
+				storeMap.set(`${name}.error`, (def as any)[TASK_STATE].error);
+			}
+
 			// Auto-register branch fail stores (e.g., "validate" → "validate.fail")
 			if ((def as any)._failStore && depStores.length === 1) {
 				const failStore = (def as any)._failStore(depStores[0]);

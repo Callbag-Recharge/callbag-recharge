@@ -104,7 +104,7 @@ export type {
 } from "./validationPipeline";
 export { validationPipeline } from "./validationPipeline";
 // With breaker (circuit breaker operator)
-export type { BreakerLike, WithBreakerOptions } from "./withBreaker";
+export type { BreakerLike, WithBreakerOptions, WithBreakerStore } from "./withBreaker";
 export { CircuitOpenError, withBreaker } from "./withBreaker";
 // With status (async metadata wrapper)
 export type { WithStatusOptions, WithStatusStatus, WithStatusStore } from "./withStatus";

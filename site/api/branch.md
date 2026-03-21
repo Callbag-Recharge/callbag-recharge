@@ -41,5 +41,5 @@ const wf = pipeline({
 
 ## Options / Behavior Details
 
-- **Diamond-safe:** Both outputs use `route()` internally, which sends RESOLVED signals
-on the suppressed branch to prevent blocking downstream diamond joins.
+- **Diamond-safe:** Both outputs use `route()` internally, with suppression signaling
+on the inactive branch to prevent blocking downstream diamond joins.

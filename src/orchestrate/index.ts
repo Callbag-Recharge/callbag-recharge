@@ -34,6 +34,8 @@ export type { ForEachOpts, ForEachStepDef } from "./forEach";
 export { forEach } from "./forEach";
 export type { GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
+export type { OnFailureOpts, OnFailureStepDef } from "./onFailure";
+export { onFailure } from "./onFailure";
 export type {
 	PipelineInner,
 	PipelineResult,
@@ -42,6 +44,8 @@ export type {
 	StepMeta,
 } from "./pipeline";
 export { pipeline, step } from "./pipeline";
+export type { SubPipelineDef, SubPipelineOpts, SubPipelineStepDef } from "./subPipeline";
+export { subPipeline } from "./subPipeline";
 export type { TaskOpts, TaskStepDef } from "./task";
 export { task } from "./task";
 export { taskState } from "./taskState";
@@ -51,3 +55,5 @@ export type {
 	TaskStateSnapshot,
 	TaskStatus,
 } from "./types";
+export type { WaitOpts } from "./wait";
+export { wait } from "./wait";

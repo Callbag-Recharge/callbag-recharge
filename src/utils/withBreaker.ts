@@ -15,7 +15,7 @@ import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
-import type { Store, StoreOperator } from "../core/types";
+import type { Store } from "../core/types";
 
 /** Minimal interface for circuit breaker compatibility. */
 export interface BreakerLike {
@@ -37,13 +37,18 @@ export interface WithBreakerOptions {
 	onOpen?: "skip" | "error";
 }
 
+export interface WithBreakerStore<T> extends Store<T> {
+	/** Current circuit breaker state (e.g. "closed", "open", "half-open"). */
+	breakerState: Store<string>;
+}
+
 /**
  * Blocks values when the circuit breaker is open. Passes values when closed, trials on half-open (Tier 2).
  *
  * @param breaker - A circuit breaker instance (e.g. `circuitBreaker()` from utils).
  * @param opts - Optional behavior configuration.
  *
- * @returns `StoreOperator<A, A>` — pipe-compatible operator. The returned store has a `breakerState` property.
+ * @returns Pipe-compatible operator. The returned `WithBreakerStore<A>` has a `breakerState` companion store.
  *
  * @remarks **Tier 2:** Cycle boundary — each forwarded value starts a new DIRTY+value cycle.
  * @remarks **Pluggable:** Accepts any object with `canExecute()`, `recordSuccess()`, `recordFailure()`.
@@ -67,10 +72,10 @@ export interface WithBreakerOptions {
 export function withBreaker<A>(
 	breaker: BreakerLike,
 	opts?: WithBreakerOptions,
-): StoreOperator<A, A> {
+): (input: Store<A>) => WithBreakerStore<A> {
 	const onOpen = opts?.onOpen ?? "skip";
 
-	return (input: Store<A>) => {
+	return (input: Store<A>): WithBreakerStore<A> => {
 		const breakerState = state<string>(breaker.state, {
 			name: "breaker:state",
 			equals: Object.is,
@@ -114,11 +119,17 @@ export function withBreaker<A>(
 			{ initial: input.get() },
 		);
 
-		Inspector.register(store, { kind: "withBreaker" });
+		const delegate: WithBreakerStore<A> = {
+			get: () => store.get() as A,
+			source: (type: number, payload?: any) => store.source(type, payload),
+			get _status() {
+				return (store as any)._status;
+			},
+			breakerState,
+		};
 
-		// Attach breakerState as observable metadata
-		(store as any).breakerState = breakerState;
+		Inspector.register(delegate, { kind: "withBreaker" });
 
-		return store;
+		return delegate;
 	};
 }
