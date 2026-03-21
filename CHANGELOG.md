@@ -1,3 +1,10 @@
+# [0.12.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.11.0...v0.12.0) (2026-03-21)
+
+
+### Features
+
+* implement b 4-6, fix with breaker ([21ad911](https://github.com/Callbag-Recharge/callbag-recharge/commit/21ad911e0287718baa88a440615dea7e141d7fad))
+
 # [0.11.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.10.0...v0.11.0) (2026-03-21)
 
 
