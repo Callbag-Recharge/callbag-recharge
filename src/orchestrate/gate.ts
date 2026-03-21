@@ -59,9 +59,9 @@ export interface GatedStore<A> extends Store<A | undefined> {
  * modify(fn) | (fn: (A) => A) => void | Transform and forward next pending.
  * open() | () => void | Flush pending + auto-approve future values.
  * close() | () => void | Re-enable gating.
- * source | callbag | Underlying callbag source for subscriptions.
+ * source | (type, payload?) => void | Underlying reactive source for subscriptions.
  *
- * @remarks **Tier 2:** Cycle boundary — each approved value starts a new DIRTY+value cycle.
+ * @remarks **Tier 2:** Cycle boundary — each approved value starts a new reactive update cycle.
  * @remarks **Queue:** Values queue while gate is closed. `maxPending` limits queue size (FIFO drop).
  * @remarks **Open/close:** `open()` flushes all pending and auto-approves future values. `close()` re-enables manual gating.
  * @remarks **Teardown:** After the gate's producer is torn down (unsubscribed), all controls throw. Re-subscribing resets the gate to a clean state.

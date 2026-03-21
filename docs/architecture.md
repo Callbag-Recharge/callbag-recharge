@@ -86,8 +86,8 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 - `orchestrate/` imports from `core/`, `extra/`, `utils/`, and `data/`
 - `memory/` imports from `core/`, `utils/`, and `data/`
 - `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
-- `adapters/` imports from `core/`, `extra/`, `utils/`, and `data/`
-- `compat/` imports from `core/` and `extra/` only
+- `adapters/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
+- `compat/` imports from `core/`, `extra/`, `orchestrate/`, and `memory/` only
 - **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
@@ -674,13 +674,13 @@ Workflow nodes — users build pipelines with these building blocks. All nodes e
 
 | Node | What it does |
 |------|-------------|
-| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. Expert internals under `.inner` (streamStatus, stepMeta, topo order). |
+| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. `destroy()` tears down subscriptions and destroys auto-detected `task()` states (externally provided `opts.tasks` are left to the caller). Expert internals under `.inner` (streamStatus, stepMeta, topo order). |
 | `task(deps, fn, opts)` | Value-level work step. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
 | `branch(dep, pred)` | Binary conditional routing. Creates `name` (pass) + `name.fail` (fail) steps. |
 | `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
-| `step(factory)` | Raw callbag source wrapper. For `fromTrigger()`, `state()`, or expert-only full callbag control. |
+| `step(factory)` | Raw reactive source wrapper. For `fromTrigger()`, `state()`, or expert-only full reactive control. |
 | `gate(opts)` | Pipe operator for approval queuing — the building block under `approval()`. Also usable standalone for custom human-in-the-loop flows. |
-| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Used internally by `task()`, but also standalone for custom task lifecycle tracking. |
+| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Metadata accessible via `.get()`, reactive subscriptions via `.inner` (the underlying store). Used internally by `task()`, but also standalone. |
 | `executionLog(opts)` | Reactive execution history with pipeline auto-logging. Backed by `reactiveLog`. |
 
 ## 20. Companion Store Pattern (`with*()` Wrappers)

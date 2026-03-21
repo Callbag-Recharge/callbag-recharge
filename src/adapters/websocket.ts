@@ -66,7 +66,7 @@ export interface WebSocketStore<T = unknown> {
  * send(data) | (data) => void | Send data through the WebSocket. Queues if connecting.
  * close(code?, reason?) | (code?, reason?) => void | Close the connection.
  *
- * @remarks **Tier 2:** Cycle boundary — each message starts a new DIRTY+value cycle.
+ * @remarks **Tier 2:** Cycle boundary — each message starts a new reactive update cycle.
  * @remarks **No deps:** Uses browser-native WebSocket API. Works in Node.js 21+ and all modern browsers.
  * @remarks **Reconnect:** Optional auto-reconnect with configurable delay.
  * @remarks **Send queue:** Messages sent before the connection is open are queued and flushed on open.

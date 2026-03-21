@@ -14,6 +14,7 @@
 //   effect([llm.store], () => console.log(llm.store.get()));
 // ---------------------------------------------------------------------------
 
+import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 
@@ -186,10 +187,12 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			? combineSignals(abortController.signal, genOpts.signal)
 			: abortController.signal;
 
-		storeState.set("");
-		tokensState.set({});
-		errorState.set(undefined);
-		streamingState.set(true);
+		batch(() => {
+			storeState.set("");
+			tokensState.set({});
+			errorState.set(undefined);
+			streamingState.set(true);
+		});
 
 		const url = buildURL(provider, baseURL);
 		const body = buildBody(provider, model, messages, genOpts);
@@ -272,8 +275,10 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			abortController = null;
 		} catch (err) {
 			if (signal.aborted) return;
-			errorState.set(err);
-			streamingState.set(false);
+			batch(() => {
+				errorState.set(err);
+				streamingState.set(false);
+			});
 			abortController = null;
 		}
 	}

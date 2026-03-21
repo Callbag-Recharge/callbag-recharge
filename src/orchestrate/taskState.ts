@@ -15,7 +15,7 @@
 //   effect([cron], () => { task.run(() => fetchData()); });
 // ---------------------------------------------------------------------------
 
-import { teardown } from "../core/protocol";
+import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { WritableStore } from "../core/types";
 import type { TaskMeta, TaskState, TaskStateSnapshot } from "./types";
@@ -75,7 +75,7 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 		get() {
 			return _state.get();
 		},
-		source: _state.source,
+		inner: _state,
 
 		async run(fn: () => T | Promise<T>): Promise<T> {
 			if (destroyed) throw new Error("TaskState is destroyed");
@@ -91,29 +91,33 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 				// P4: If destroyed or reset() was called during await, discard
 				if (destroyed || gen !== generation) return result;
 				const duration = Date.now() - startTime;
-				_state.set({
-					status: "success",
-					result,
-					error: undefined,
-					lastRun: startTime,
-					duration,
-					runCount: prev.runCount + 1,
+				batch(() => {
+					_state.set({
+						status: "success",
+						result,
+						error: undefined,
+						lastRun: startTime,
+						duration,
+						runCount: prev.runCount + 1,
+					});
+					_version.update((v) => v + 1);
 				});
-				_version.update((v) => v + 1);
 				return result;
 			} catch (e) {
 				// P4: If destroyed or reset() was called during await, discard
 				if (destroyed || gen !== generation) throw e;
 				const duration = Date.now() - startTime;
-				_state.set({
-					status: "error",
-					result: prev.result,
-					error: e,
-					lastRun: startTime,
-					duration,
-					runCount: prev.runCount + 1,
+				batch(() => {
+					_state.set({
+						status: "error",
+						result: prev.result,
+						error: e,
+						lastRun: startTime,
+						duration,
+						runCount: prev.runCount + 1,
+					});
+					_version.update((v) => v + 1);
 				});
-				_version.update((v) => v + 1);
 				throw e;
 			}
 		},
@@ -121,8 +125,10 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 		reset() {
 			if (destroyed) return;
 			generation++;
-			_state.set({ ...IDLE_META } as TaskMeta<T>);
-			_version.update((v) => v + 1);
+			batch(() => {
+				_state.set({ ...IDLE_META } as TaskMeta<T>);
+				_version.update((v) => v + 1);
+			});
 		},
 
 		snapshot(): TaskStateSnapshot<T> {

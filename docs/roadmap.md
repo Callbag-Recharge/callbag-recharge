@@ -24,19 +24,25 @@
 
 ## In Progress
 
+(Nothing currently in progress.)
+
+---
+
+## What's Shipped (recent)
+
 ### Phase 5a-0: §1.14 Compliance Pass
 
 > **Goal:** Audit and fix all high-level modules for §1.14 compliance — no callbag protocol
 > leakage in public APIs of orchestrate/, patterns/, adapters/, compat/.
 >
-> **Status:** API leakage audit complete. Two mild violations found.
+> **Status:** Complete.
 
-| # | Deliverable | What | Effort |
+| # | Deliverable | What | Status |
 |---|-------------|------|--------|
-| 5a-0.1 | `taskState` inner isolation | Hide `taskState.source` behind an `inner` property. Pipeline reads from `inner.source` instead. | S |
-| 5a-0.2 | `task._taskState` encapsulation | Replace `_taskState` public property with Symbol key or `inner` property for pipeline auto-detection. | S |
-| 5a-0.3 | JSDoc sanitization | Replace callbag protocol terminology in high-level JSDoc: "DIRTY+value cycle" → "reactive update cycle", "sends END" → "terminates the store", "RESOLVED signals" → "suppression signaling", "callbag DATA/END" → "stream lifecycle events". Affects: gate.ts, branch.ts, pipeline.ts, http.ts, websocket.ts, webhook.ts, createStore. | S |
-| 5a-0.4 | `batch()` audit for companion stores | Audit all high-level modules that update multiple stores simultaneously. Ensure `batch()` wraps multi-store transitions (especially taskState, which will need it post-5a-1). | S |
+| ~~5a-0.1~~ | ~~`taskState` inner isolation~~ | `taskState.source` hidden behind `inner` property (`Store<TaskMeta>`). Pipeline subscribes to `inner` stores via `derived()`. | ~~S~~ |
+| ~~5a-0.2~~ | ~~`task._taskState` encapsulation~~ | `_taskState` replaced with `Symbol.for("callbag-recharge:taskState")` key. Exported as `TASK_STATE`. | ~~S~~ |
+| ~~5a-0.3~~ | ~~JSDoc sanitization~~ | "DIRTY+value cycle" → "reactive update cycle", "sends END" → "terminates the store", "RESOLVED signals" → "suppression signaling", "callbag DATA/END" → "stream lifecycle events". Applied to gate, branch, pipeline, http, websocket, webhook, createStore. | ~~S~~ |
+| ~~5a-0.4~~ | ~~`batch()` audit~~ | `batch()` wraps multi-store transitions in taskState (run success/error/reset), fromHTTP (fetchCount+status), fromLLM (generate reset), fromMCP (tool call start/complete/error). | ~~S~~ |
 
 ---
 

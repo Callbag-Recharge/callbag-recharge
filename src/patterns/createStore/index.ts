@@ -44,9 +44,9 @@ interface CreateStoreResult<T> extends StoreApi<T> {
 	store: WritableStore<T>;
 
 	/**
-	 * Destroy the store — sends END to all downstream subscribers and derived
+	 * Destroy the store — terminates all downstream subscribers and derived
 	 * stores, cascading through the entire subgraph. After destroy, the store
-	 * is in COMPLETED state and won't accept new values or subscriptions.
+	 * won't accept new values or subscriptions.
 	 */
 	destroy: () => void;
 }
@@ -164,7 +164,7 @@ export function createStore<T extends object>(initializer: StateCreator<T>): Cre
 		});
 	};
 
-	// destroy() uses protocol-level teardown — sends END to all downstream
+	// destroy() uses protocol-level teardown — terminates all downstream
 	// sinks (subscribers, select()-derived stores), cascading through the
 	// entire subgraph.
 	const destroy = () => {

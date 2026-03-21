@@ -65,7 +65,7 @@ export interface WebhookStore<T = unknown> {
  * listen() | () => Promise\<void\> | Start listening on configured port.
  * close() | () => void | Close server and clean up.
  *
- * @remarks **Tier 2:** Cycle boundary — each incoming request starts a new DIRTY+value cycle.
+ * @remarks **Tier 2:** Cycle boundary — each incoming request starts a new reactive update cycle.
  * @remarks **Standalone or embedded:** Use `listen()` for standalone, or `handler` to mount on an existing HTTP server.
  * @remarks **Body parsing:** Default is JSON.parse. Override with `parse` option for custom formats.
  * @remarks **Body size limit:** Default 1MB. Configure with `maxBodySize`. Rejects with 413 if exceeded.

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { fromTrigger } from "../../extra/fromTrigger";
 import { subscribe } from "../../extra/subscribe";
-import { pipeline, step, task } from "../../orchestrate";
+import { pipeline, step, TASK_STATE, task } from "../../orchestrate";
 import type { PipelineStatus } from "../../orchestrate/pipeline";
 
 // ==========================================================================
@@ -13,13 +13,13 @@ describe("task", () => {
 		const t = task(() => 42);
 		expect(t.deps).toEqual([]);
 		expect(t.factory).toBeDefined();
-		expect(t._taskState).toBeDefined();
+		expect(t[TASK_STATE]).toBeDefined();
 	});
 
 	it("creates a step def with deps", () => {
 		const t = task(["a", "b"], (a, b) => a + b);
 		expect(t.deps).toEqual(["a", "b"]);
-		expect(t._taskState).toBeDefined();
+		expect(t[TASK_STATE]).toBeDefined();
 	});
 
 	it("accepts name option", () => {

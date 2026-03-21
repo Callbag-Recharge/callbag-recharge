@@ -75,7 +75,7 @@ describe("taskState", () => {
 		const task = taskState<number>();
 		const statusLog: string[] = [];
 
-		const dispose = effect([task], () => {
+		const dispose = effect([task.inner], () => {
 			statusLog.push(task.get().status);
 			return undefined;
 		});
@@ -300,7 +300,7 @@ describe("taskState", () => {
 	it("effect fires on status transitions", async () => {
 		const task = taskState<number>();
 		const log: string[] = [];
-		const dispose = effect([task], () => {
+		const dispose = effect([task.inner], () => {
 			log.push(task.get().status);
 			return undefined;
 		});

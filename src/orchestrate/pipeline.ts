@@ -20,6 +20,7 @@ import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import type { TaskState } from "./types";
+import { TASK_STATE } from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,11 +46,11 @@ export interface StepMeta {
 	error?: unknown;
 }
 
-/** Expert-level internals — callbag lifecycle details. */
+/** Expert-level internals — stream lifecycle details. */
 export interface PipelineInner<S extends Record<string, StepDef>> {
-	/** Stream lifecycle status derived from callbag DATA/END signals. */
+	/** Stream lifecycle status derived from step data and termination events. */
 	streamStatus: Store<PipelineStatus>;
-	/** Per-step reactive metadata (callbag-level counts and stream status). */
+	/** Per-step reactive metadata (stream-level counts and lifecycle status). */
 	stepMeta: { [K in keyof S]: Store<StepMeta> };
 	/** Topologically sorted step names. */
 	order: string[];
@@ -64,17 +65,17 @@ export interface PipelineResult<S extends Record<string, StepDef>> {
 	reset(): void;
 	/** Dispose all internal subscriptions. */
 	destroy(): void;
-	/** Expert-level callbag internals. Most users don't need this. */
+	/** Expert-level stream internals. Most users don't need this. */
 	inner: PipelineInner<S>;
 }
 
 const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
 
 /**
- * **Advanced / expert-only.** Creates a raw step definition for `pipeline()` using callbag stores.
+ * **Advanced / expert-only.** Creates a raw step definition for `pipeline()` using reactive stores.
  *
  * Most users should use `task()` instead, which handles diamond joins, async lifecycle,
- * and status tracking automatically. Use `step()` only when you need full callbag control
+ * and status tracking automatically. Use `step()` only when you need full reactive control
  * (e.g., wrapping existing stores, custom operators, or source steps like `fromTrigger`).
  *
  * @param factory - A store, or a function that receives dependency stores and returns a store.
@@ -146,13 +147,14 @@ export function step<T>(
  * @returnsTable steps | Record | Access step stores by name.
  * status | Store\<PipelineStatus\> | Pipeline status: idle → active → completed/errored.
  * reset() | () => void | Reset all steps and tasks to idle for re-trigger.
- * destroy() | () => void | Dispose all internal subscriptions.
- * inner | PipelineInner | Expert-level callbag internals (streamStatus, stepMeta, order).
+ * destroy() | () => void | Dispose subscriptions and destroy auto-detected task states.
+ * inner | PipelineInner | Expert-level stream internals (streamStatus, stepMeta, order).
  *
  * @remarks **Auto-wiring:** Step deps are resolved by name. Factory functions receive dep stores in declared order.
  * @remarks **Topological sort:** Steps are wired in dependency order. Cycles are detected and throw.
  * @remarks **Auto status:** When using `task()` steps, `status` automatically tracks work execution (idle → active → completed/errored). Falls back to stream lifecycle tracking when no tasks are detected.
- * @remarks **opts.tasks:** Pass additional `TaskState` stores so `status` reflects work outside `task()`-wrapped steps (e.g. UI demos that run `taskState` manually). Duplicates are deduped with auto-detected task states.
+ * @remarks **opts.tasks:** Pass additional `TaskState` stores so `status` reflects work outside `task()`-wrapped steps (e.g. UI demos that run `taskState` manually). Duplicates are deduped with auto-detected task states. Note: `destroy()` does NOT destroy externally provided `opts.tasks` — the caller owns their lifecycle.
+ * @remarks **Destroy ownership:** `destroy()` tears down subscriptions, destroys auto-detected `task()` states, and invalidates approval controls. Externally provided `opts.tasks` are left alive since the caller owns them.
  * @remarks **Branch support:** Use `branch()` steps with compound deps like `"validate.fail"` for conditional routing.
  *
  * @example
@@ -346,11 +348,11 @@ export function pipeline<S extends Record<string, StepDef>>(
 	});
 
 	// --- Task status derived from taskState instances ---
-	// Auto-detect _taskState from task() step defs, merge with explicitly provided tasks.
+	// Auto-detect task states from task() step defs, merge with explicitly provided tasks.
 	const autoDetectedTasks: TaskState<any>[] = [];
 	for (const name of stepNames) {
 		const def = steps[name] as any;
-		if (def._taskState) autoDetectedTasks.push(def._taskState);
+		if (def[TASK_STATE]) autoDetectedTasks.push(def[TASK_STATE]);
 	}
 	if (opts?.tasks) {
 		for (const ts of Object.values(opts.tasks)) {
@@ -363,15 +365,16 @@ export function pipeline<S extends Record<string, StepDef>>(
 	// Primary status: if tasks exist, derive from taskState. Otherwise fall back to stream status.
 	let status: Store<PipelineStatus>;
 	if (dedupedTasks.length > 0) {
-		const taskStores = dedupedTasks;
-		status = derived(taskStores, () => {
+		// Subscribe to inner stores (the reactive source) for task metadata changes.
+		const taskInnerStores = dedupedTasks.map((ts) => ts.inner);
+		status = derived(taskInnerStores, () => {
 			let anyRunning = false;
 			let anyError = false;
 			let allSuccess = true;
 			let allIdle = true;
 
-			for (const ts of taskStores) {
-				const s = ts.get().status;
+			for (const inner of taskInnerStores) {
+				const s = inner.get().status;
 				if (s === "running") anyRunning = true;
 				if (s === "error") anyError = true;
 				if (s !== "success") allSuccess = false;
@@ -429,6 +432,13 @@ export function pipeline<S extends Record<string, StepDef>>(
 			_destroyed = true;
 			for (const unsub of unsubs) unsub();
 			unsubs.length = 0;
+			// Destroy auto-detected task states (pipeline owns these).
+			// Externally provided opts.tasks are NOT destroyed — caller owns those.
+			for (const task of dedupedTasks) {
+				if (!opts?.tasks || !Object.values(opts.tasks).includes(task)) {
+					task.destroy();
+				}
+			}
 			// Invalidate approval controls so stale calls throw
 			for (const name of stepNames) {
 				const def = steps[name] as any;

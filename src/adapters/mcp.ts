@@ -12,6 +12,7 @@
 //   effect([search.store], () => console.log(search.store.get()));
 // ---------------------------------------------------------------------------
 
+import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 
@@ -172,9 +173,11 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 		async function call(args: TArgs): Promise<void> {
 			if (calling) return; // concurrency guard
 			calling = true;
-			lastArgsStore.set(args);
-			errorStore.set(undefined);
-			statusStore.set("calling");
+			batch(() => {
+				lastArgsStore.set(args);
+				errorStore.set(undefined);
+				statusStore.set("calling");
+			});
 			const startTime = Date.now();
 
 			try {
@@ -184,7 +187,6 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 				});
 
 				const duration = Date.now() - startTime;
-				durationStore.set(duration);
 
 				if (response.isError) {
 					const errorText = response.content
@@ -192,8 +194,11 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 						.map((c) => c.text ?? "")
 						.join("\n");
 					const err = new Error(errorText || "MCP tool returned error");
-					errorStore.set(err);
-					statusStore.set("errored");
+					batch(() => {
+						durationStore.set(duration);
+						errorStore.set(err);
+						statusStore.set("errored");
+					});
 					return;
 				}
 
@@ -215,13 +220,18 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 					result = response.content;
 				}
 
-				resultStore.set(result as TResult);
-				statusStore.set("completed");
+				batch(() => {
+					durationStore.set(duration);
+					resultStore.set(result as TResult);
+					statusStore.set("completed");
+				});
 			} catch (err) {
 				const duration = Date.now() - startTime;
-				durationStore.set(duration);
-				errorStore.set(err);
-				statusStore.set("errored");
+				batch(() => {
+					durationStore.set(duration);
+					errorStore.set(err);
+					statusStore.set("errored");
+				});
 			} finally {
 				calling = false;
 			}

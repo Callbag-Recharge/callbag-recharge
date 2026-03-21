@@ -26,6 +26,7 @@ import type { RetryOptions } from "../utils/retry";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
 import type { TaskState } from "./types";
+import { TASK_STATE } from "./types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -46,7 +47,7 @@ export interface TaskOpts<T> {
 
 /** Extended StepDef that carries an internal taskState for pipeline auto-detection. */
 export interface TaskStepDef<T = any> extends StepDef<T> {
-	_taskState: TaskState<T>;
+	readonly [TASK_STATE]: TaskState<T>;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,7 +63,7 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  * @param fn - Function receiving dep values, returns result or Promise.
  * @param opts - Optional configuration (skip, fallback, retry, timeout).
  *
- * @returns `TaskStepDef<T>` — step definition with attached `_taskState` for pipeline auto-detection.
+ * @returns `TaskStepDef<T>` — step definition for pipeline() with internal task tracking.
  *
  * @remarks **Auto-join:** Deps wait for ALL deps to emit non-undefined values before calling fn.
  * @remarks **Re-trigger:** New upstream values cancel the previous in-flight execution (switchMap semantics).
@@ -296,7 +297,7 @@ export function task<T>(
 		factory: factory as any,
 		deps,
 		name: opts?.name,
-		_taskState: ts,
+		[TASK_STATE]: ts,
 	};
 
 	return def;

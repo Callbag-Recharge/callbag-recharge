@@ -14,6 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
+import { teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 import type { ListSnapshot, NodeV0 } from "./types";
@@ -101,6 +102,8 @@ export function reactiveList<T>(
 	const listId = opts?.id ?? `rlist-${counter}`;
 	const prefix = opts?.name ?? listId;
 
+	let destroyed = false;
+
 	// Source of truth
 	const _items: T[] = [...initial];
 
@@ -129,18 +132,21 @@ export function reactiveList<T>(
 	}
 
 	function set(index: number, value: T): void {
+		if (destroyed) return;
 		if (index < 0 || index >= _items.length) return;
 		_items[index] = value;
 		bump();
 	}
 
 	function push(...items: T[]): void {
+		if (destroyed) return;
 		if (items.length === 0) return;
 		_items.push(...items);
 		bump();
 	}
 
 	function pop(): T | undefined {
+		if (destroyed) return undefined;
 		if (_items.length === 0) return undefined;
 		const item = _items.pop();
 		bump();
@@ -148,6 +154,7 @@ export function reactiveList<T>(
 	}
 
 	function insert(index: number, ...items: T[]): void {
+		if (destroyed) return;
 		if (items.length === 0) return;
 		if (index < 0) return;
 		const idx = Math.min(index, _items.length);
@@ -156,6 +163,7 @@ export function reactiveList<T>(
 	}
 
 	function remove(index: number, count = 1): T[] {
+		if (destroyed) return [];
 		if (index < 0 || index >= _items.length || count <= 0) return [];
 		const removed = _items.splice(index, count);
 		bump();
@@ -163,6 +171,7 @@ export function reactiveList<T>(
 	}
 
 	function move(from: number, to: number): void {
+		if (destroyed) return;
 		if (from < 0 || from >= _items.length) return;
 		if (to < 0 || to >= _items.length) return;
 		if (from === to) return;
@@ -172,6 +181,7 @@ export function reactiveList<T>(
 	}
 
 	function swap(i: number, j: number): void {
+		if (destroyed) return;
 		if (i < 0 || i >= _items.length) return;
 		if (j < 0 || j >= _items.length) return;
 		if (i === j) return;
@@ -182,6 +192,7 @@ export function reactiveList<T>(
 	}
 
 	function clear(): void {
+		if (destroyed) return;
 		if (_items.length === 0) return;
 		_items.length = 0;
 		bump();
@@ -219,13 +230,22 @@ export function reactiveList<T>(
 	}
 
 	function destroy(): void {
+		if (destroyed) return;
+		destroyed = true;
 		_items.length = 0;
+		for (const s of _atCache.values()) teardown(s);
 		_atCache.clear();
+		for (const s of _sliceCache.values()) teardown(s);
 		_sliceCache.clear();
+		teardown(itemsStore);
+		teardown(lengthStore);
+		teardown(_version);
 	}
 
 	return {
-		id: listId,
+		get id() {
+			return listId;
+		},
 		get version() {
 			return _version.get();
 		},
@@ -248,3 +268,15 @@ export function reactiveList<T>(
 		destroy,
 	};
 }
+
+/**
+ * Restore a reactiveList from a snapshot. Preserves id; version resets to 0.
+ */
+reactiveList.from = function from<T>(
+	snap: ListSnapshot<T>,
+	opts?: Omit<ReactiveListOptions, "id">,
+): ReactiveListResult<T> {
+	const list = reactiveList<T>([], { ...opts, id: snap.id });
+	if (snap.items.length > 0) list.push(...snap.items);
+	return list;
+};

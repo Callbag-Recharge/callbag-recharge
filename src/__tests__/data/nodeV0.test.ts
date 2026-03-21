@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { reactiveIndex } from "../../data/reactiveIndex";
+import { reactiveList } from "../../data/reactiveList";
 import { reactiveLog } from "../../data/reactiveLog";
 import { reactiveMap } from "../../data/reactiveMap";
 
@@ -267,5 +268,79 @@ describe("NodeV0: reactiveIndex", () => {
 		expect(Object.isFrozen(empty)).toBe(true);
 
 		idx.destroy();
+	});
+});
+
+describe("NodeV0: reactiveList", () => {
+	it("auto-generates id", () => {
+		const list = reactiveList();
+		expect(list.id).toMatch(/^rlist-/);
+		list.destroy();
+	});
+
+	it("accepts custom id", () => {
+		const list = reactiveList([], { id: "my-list" });
+		expect(list.id).toBe("my-list");
+		list.destroy();
+	});
+
+	it("version starts at 0 and increments on every mutation", () => {
+		const list = reactiveList<number>();
+		expect(list.version).toBe(0);
+
+		list.push(1);
+		expect(list.version).toBe(1);
+
+		list.push(2);
+		expect(list.version).toBe(2);
+
+		list.clear();
+		expect(list.version).toBe(3);
+
+		list.destroy();
+	});
+
+	it("snapshot() returns serializable representation", () => {
+		const list = reactiveList([1, 2, 3], { id: "snap-list" });
+		list.push(4);
+
+		const snap = list.snapshot();
+		expect(snap.type).toBe("reactiveList");
+		expect(snap.id).toBe("snap-list");
+		expect(snap.version).toBe(1);
+		expect(snap.items).toEqual([1, 2, 3, 4]);
+
+		const json = JSON.stringify(snap);
+		const parsed = JSON.parse(json);
+		expect(parsed.items).toEqual([1, 2, 3, 4]);
+
+		list.destroy();
+	});
+
+	it("from() restores from snapshot", () => {
+		const list1 = reactiveList([10, 20, 30], { id: "roundtrip-list" });
+		list1.push(40);
+		const snap = list1.snapshot();
+		list1.destroy();
+
+		const list2 = reactiveList.from(snap);
+		expect(list2.id).toBe("roundtrip-list");
+		expect(list2.items.get()).toEqual([10, 20, 30, 40]);
+		expect(list2.length.get()).toBe(4);
+		list2.destroy();
+	});
+
+	it("mutations are no-ops after destroy", () => {
+		const list = reactiveList([1, 2, 3]);
+		const vBefore = list.version;
+		list.destroy();
+
+		list.push(4);
+		list.set(0, 99);
+		list.insert(0, 100);
+		// version should not have advanced beyond the pre-destroy value
+		expect(list.version).toBe(vBefore);
+		// snapshot reflects cleared state
+		expect(list.snapshot().items).toEqual([]);
 	});
 });

@@ -11,6 +11,7 @@
 // ---------------------------------------------------------------------------
 
 import { producer } from "../core/producer";
+import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 
@@ -62,7 +63,7 @@ export interface HTTPStore<T = unknown> {
  * refetch() | () => void | Manually trigger a fetch.
  * stop() | () => void | Stop polling and cancel in-flight request.
  *
- * @remarks **Tier 2:** Cycle boundary — each fetch result starts a new DIRTY+value cycle.
+ * @remarks **Tier 2:** Cycle boundary — each fetch result starts a new reactive update cycle.
  * @remarks **Polling:** Set `poll` interval for periodic refetch. Omit for one-shot.
  * @remarks **Transform:** Default extracts JSON. Override with `transform` for text, blob, etc.
  * @remarks **Timeout:** Default 30s per request. Uses AbortController internally.
@@ -163,9 +164,11 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 
 			if (!active) return;
 
-			fetchCountStore.update((n) => n + 1);
-			statusStore.set("success");
-			_emit(data);
+			batch(() => {
+				fetchCountStore.update((n) => n + 1);
+				statusStore.set("success");
+				_emit?.(data);
+			});
 		} catch (err: any) {
 			if (!active) return;
 			if (err?.name === "AbortError") return; // Cancelled

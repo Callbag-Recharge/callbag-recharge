@@ -42,8 +42,8 @@ export interface BranchStepDef<T = any> extends StepDef<T | undefined> {
  * @returns `BranchStepDef<T>` — step definition for pipeline(). The matching branch
  * is the step itself; `"stepName.fail"` is auto-registered by pipeline().
  *
- * @remarks **Diamond-safe:** Both outputs use `route()` internally, which sends RESOLVED signals
- * on the suppressed branch to prevent blocking downstream diamond joins.
+ * @remarks **Diamond-safe:** Both outputs use `route()` internally, with suppression signaling
+ * on the inactive branch to prevent blocking downstream diamond joins.
  *
  * @example
  * ```ts
