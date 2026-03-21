@@ -124,6 +124,7 @@ const REGISTRY = {
 	checkpoint: "src/utils/checkpoint.ts",
 	tokenTracker: "src/utils/tokenTracker.ts",
 	withBreaker: "src/utils/withBreaker.ts",
+	withStatus: "src/utils/withStatus.ts",
 	dag: "src/utils/dag.ts",
 
 	// Orchestrate — workflow nodes

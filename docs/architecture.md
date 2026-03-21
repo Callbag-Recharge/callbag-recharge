@@ -79,6 +79,37 @@ src/
 - `compat/` imports from `core/` only
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
+### Site & Demo Structure
+
+```
+site/.vitepress/theme/
+├── components/
+│   ├── HomeLayout.vue        ← homepage layout
+│   ├── showcases/            ← hero apps: polished UI, no code panel
+│   │   ├── MarkdownEditor/   ← H1: split-pane editor + live preview
+│   │   ├── AIChat/           ← H2: WebLLM chat, streaming, token meter
+│   │   └── WorkflowBuilder/  ← H3: code-first n8n, live DAG, persistence
+│   └── examples/             ← code examples: interactive GUI + source panel
+│       ├── AirflowPipeline/  ← D1: DAG execution, diamond, circuit breaker
+│       ├── FormBuilder/      ← D2: formField, sync + async validation
+│       ├── AgentLoop/        ← D3: agentLoop, gate, approval
+│       ├── RealtimeDashboard/ ← D4: reactiveMap, sampling, eviction
+│       ├── StateMachine/     ← D5: stateMachine, typed transitions
+│       └── CompatComparison/ ← D6: same app in 4 state libraries
+├── custom.css
+└── index.ts                  ← component registration
+```
+
+**Showcases** are standalone apps — users interact with them as products. No code panel,
+no "primitives used" legend. Backing state lives in `store.ts` using only library primitives.
+
+**Examples** follow the AirflowPipeline pattern: a split-pane with interactive GUI on top
+and a highlighted source panel below. Backing logic in `pipeline.ts` or `store.ts`, imported
+as raw text via `?raw` for the code panel. Hover/run interactions highlight corresponding source lines.
+
+Both tiers use the same wiring pattern: a pure `.ts` file (library only) + a `.vue` file
+(bridges to Vue via `subscribe()`). No mocks — real library execution.
+
 ---
 
 ---
@@ -632,3 +663,69 @@ Workflow nodes and orchestration-specific plumbing. Users build pipelines with t
 Generic operators/sources that were previously here have moved to their natural homes:
 - **`extra/`**: `fromTrigger`, `fromCron`, `cron`, `route`, `timeout`
 - **`utils/`**: `track`, `checkpoint`, `checkpointAdapters`, `tokenTracker`, `withBreaker`, `dag`, `retry` (with `retryMeta`)
+
+## 20. Companion Store Pattern (`with*()` Wrappers)
+
+`Store<T>` is pure: `get()`, `set()`, `source()`. It carries a value, nothing more. But
+async/streaming sources (WebSocket, HTTP, LLM, pipelines) have lifecycle metadata — status,
+errors, retry counts — that consumers need. The question is: where does that metadata live?
+
+### Why not in the store
+
+Putting metadata inside the value (`Store<{ value: T, status, error }>`) breaks composition.
+Every operator in a pipe chain would need to understand the wrapper shape. `map`, `filter`,
+`derived` — they all operate on `T`, not `{ value: T, … }`.
+
+A separate `StreamStore<T>` type fails similarly. After `pipe(wsStore, map(x => x.data))`,
+the result is a plain `Store` — the `StreamStore` type is lost at the first operator.
+`derived`/`operator` can't propagate status because they don't know (or care) whether their
+upstream is sync or async.
+
+### Solution: companion stores as properties
+
+`with*()` wrappers return `Store<T> & { companion: Store<…>, … }` — the original store,
+extended with additional stores as properties. Each companion is itself a plain `Store`,
+independently subscribable.
+
+```ts
+// withStatus — the base wrapper for all async/streaming sources
+function withStatus<T>(store: Store<T>): Store<T> & {
+  status: Store<'pending' | 'active' | 'completed' | 'errored'>
+  error: Store<Error | undefined>
+}
+
+// Adapters use withStatus internally
+fromWebSocket(url)  // → Store<T> & { status, error }
+fromHTTP(url)       // → Store<T> & { status, error }
+chatStream(opts)    // → Store<string> & { status, error, isStreaming, ... }
+
+// Domain wrappers add their own companions
+withRetry(store, config)   // → Store<T> & { retryCount, lastError, pending }
+withBreaker(store, breaker) // → Store<T> & { breakerState }
+```
+
+### Key rules
+
+1. **`Store<T>` stays pure.** No metadata fields on the base type.
+2. **`with*()`  returns `Store<T> & { … }`** — still assignable to `Store<T>`.
+3. **Companions are plain `Store<T>`** — framework bindings (`useSubscribe(ws.status)`) work with no special casing.
+4. **Operators don't propagate companions.** After `pipe(ws, map(...))`, the result is a plain `Store`. If you need the status, keep a reference to the source.
+5. **Wrappers compose.** `withRetry(withStatus(raw))` accumulates companions from both.
+
+### Framework bindings
+
+Thin hooks that bridge `Store<T>` into framework reactivity. Because companions are plain
+stores, no overloads or special types are needed.
+
+```ts
+// React
+const data   = useSubscribe(ws)          // Store<T> → T
+const status = useSubscribe(ws.status)   // Store<string> → string
+
+// Vue
+const data   = useSubscribe(ws)          // Store<T> → Ref<T>
+const status = useSubscribe(ws.status)   // Store<string> → Ref<string>
+```
+
+`useStore(store)` is for writable stores (returns `[value, setter]` in React, `Ref<T>` in Vue).
+`useSubscribe(store)` is for read-only subscriptions — any `Store<T>`, including companions.

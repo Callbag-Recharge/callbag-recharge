@@ -64,6 +64,8 @@ export default defineConfig({
 		"src/compat/signals/index.ts",
 		"src/compat/jotai/index.ts",
 		"src/compat/zustand/index.ts",
+		"src/compat/vue/index.ts",
+		"src/compat/react/index.ts",
 		"src/utils/index.ts",
 		"src/data/index.ts",
 		"src/memory/index.ts",

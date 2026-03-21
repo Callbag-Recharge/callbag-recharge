@@ -32,6 +32,9 @@ importers:
       '@types/node':
         specifier: ^25.5.0
         version: 25.5.0
+      '@types/react':
+        specifier: ^19.2.14
+        version: 19.2.14
       bmad-method:
         specifier: ^6.2.0
         version: 6.2.0
@@ -53,6 +56,9 @@ importers:
       vitest:
         specifier: ^3.0.0
         version: 3.2.4(@types/debug@4.1.12)(@types/node@25.5.0)(tsx@4.21.0)(yaml@2.8.2)
+      vue:
+        specifier: ^3.5.30
+        version: 3.5.30(typescript@5.9.3)
 
   site:
     dependencies:
@@ -65,7 +71,7 @@ importers:
     devDependencies:
       vitepress:
         specifier: ^1.6.3
-        version: 1.6.4(@algolia/client-search@5.49.2)(@types/node@25.5.0)(postcss@8.5.8)(search-insights@2.17.3)(typescript@5.9.3)
+        version: 1.6.4(@algolia/client-search@5.49.2)(@types/node@25.5.0)(@types/react@19.2.14)(postcss@8.5.8)(search-insights@2.17.3)(typescript@5.9.3)
 
 packages:
 
@@ -1074,6 +1080,9 @@ packages:
 
   '@types/normalize-package-data@2.4.4':
     resolution: {integrity: sha512-37i+OaWTh9qeK4LSHPsyRC7NahnGotNuZvjLSgcPzblpHB3rrCJxAOgI5gCdKm7coonsaX1Of0ILiTcnZjbfxA==}
+
+  '@types/react@19.2.14':
+    resolution: {integrity: sha512-ilcTH/UniCkMdtexkoCN0bI7pMcJDvmQFPvuPvmEaYA/NSfFTAgdUSLAoVjaRJm7+6PvcM+q1zYOwS4wTYMF9w==}
 
   '@types/unist@3.0.3':
     resolution: {integrity: sha512-ko/gIFJRv177XgZsZcBwnqJN5x/Gien8qNOn0D5bQU/zAzVf9Zt3BlcUiLqhV9y4ARk0GbT3tnUiPNgnTXzc/Q==}
@@ -3292,9 +3301,9 @@ snapshots:
 
   '@docsearch/css@3.8.2': {}
 
-  '@docsearch/js@3.8.2(@algolia/client-search@5.49.2)(search-insights@2.17.3)':
+  '@docsearch/js@3.8.2(@algolia/client-search@5.49.2)(@types/react@19.2.14)(search-insights@2.17.3)':
     dependencies:
-      '@docsearch/react': 3.8.2(@algolia/client-search@5.49.2)(search-insights@2.17.3)
+      '@docsearch/react': 3.8.2(@algolia/client-search@5.49.2)(@types/react@19.2.14)(search-insights@2.17.3)
       preact: 10.29.0
     transitivePeerDependencies:
       - '@algolia/client-search'
@@ -3303,13 +3312,14 @@ snapshots:
       - react-dom
       - search-insights
 
-  '@docsearch/react@3.8.2(@algolia/client-search@5.49.2)(search-insights@2.17.3)':
+  '@docsearch/react@3.8.2(@algolia/client-search@5.49.2)(@types/react@19.2.14)(search-insights@2.17.3)':
     dependencies:
       '@algolia/autocomplete-core': 1.17.7(@algolia/client-search@5.49.2)(algoliasearch@5.49.2)(search-insights@2.17.3)
       '@algolia/autocomplete-preset-algolia': 1.17.7(@algolia/client-search@5.49.2)(algoliasearch@5.49.2)
       '@docsearch/css': 3.8.2
       algoliasearch: 5.49.2
     optionalDependencies:
+      '@types/react': 19.2.14
       search-insights: 2.17.3
     transitivePeerDependencies:
       - '@algolia/client-search'
@@ -3932,6 +3942,10 @@ snapshots:
       undici-types: 7.18.2
 
   '@types/normalize-package-data@2.4.4': {}
+
+  '@types/react@19.2.14':
+    dependencies:
+      csstype: 3.2.3
 
   '@types/unist@3.0.3': {}
 
@@ -5911,10 +5925,10 @@ snapshots:
       tsx: 4.21.0
       yaml: 2.8.2
 
-  vitepress@1.6.4(@algolia/client-search@5.49.2)(@types/node@25.5.0)(postcss@8.5.8)(search-insights@2.17.3)(typescript@5.9.3):
+  vitepress@1.6.4(@algolia/client-search@5.49.2)(@types/node@25.5.0)(@types/react@19.2.14)(postcss@8.5.8)(search-insights@2.17.3)(typescript@5.9.3):
     dependencies:
       '@docsearch/css': 3.8.2
-      '@docsearch/js': 3.8.2(@algolia/client-search@5.49.2)(search-insights@2.17.3)
+      '@docsearch/js': 3.8.2(@algolia/client-search@5.49.2)(@types/react@19.2.14)(search-insights@2.17.3)
       '@iconify-json/simple-icons': 1.2.74
       '@shikijs/core': 2.5.0
       '@shikijs/transformers': 2.5.0

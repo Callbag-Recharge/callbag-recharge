@@ -15,6 +15,7 @@ import { derived } from "../../core/derived";
 import { effect } from "../../core/effect";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { dirtyTracker } from "../../utils/dirtyTracker";
 
 export interface FormFieldOptions<T> {
 	/** Sync validation — return error string or true/undefined for valid. */
@@ -89,9 +90,7 @@ export function formField<T>(initial: T, opts?: FormFieldOptions<T>): FormFieldR
 		{ name: `${name}.error` },
 	);
 
-	const dirty = derived([valueStore], () => !Object.is(valueStore.get(), initial), {
-		name: `${name}.dirty`,
-	});
+	const tracker = dirtyTracker(valueStore, initial, { name });
 
 	const valid = derived([errorStore], () => errorStore.get() === "", { name: `${name}.valid` });
 
@@ -202,13 +201,14 @@ export function formField<T>(initial: T, opts?: FormFieldOptions<T>): FormFieldR
 	function dispose(): void {
 		cancelAsync();
 		disposeEffect();
+		tracker.dispose();
 	}
 
 	return {
 		value: valueStore,
 		set: setValue,
 		error: errorStore,
-		dirty,
+		dirty: tracker.dirty,
 		touched: touchedStore,
 		valid,
 		validating: validatingStore,

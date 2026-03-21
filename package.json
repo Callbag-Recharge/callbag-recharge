@@ -278,6 +278,26 @@
 				"default": "./dist/adapters/mcp.cjs"
 			}
 		},
+		"./compat/vue": {
+			"import": {
+				"types": "./dist/compat/vue/index.d.ts",
+				"default": "./dist/compat/vue/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/vue/index.d.cts",
+				"default": "./dist/compat/vue/index.cjs"
+			}
+		},
+		"./compat/react": {
+			"import": {
+				"types": "./dist/compat/react/index.d.ts",
+				"default": "./dist/compat/react/index.js"
+			},
+			"require": {
+				"types": "./dist/compat/react/index.d.cts",
+				"default": "./dist/compat/react/index.cjs"
+			}
+		},
 		"./extra/*": {
 			"import": {
 				"types": "./dist/extra/*.d.ts",
@@ -287,6 +307,18 @@
 				"types": "./dist/extra/*.d.cts",
 				"default": "./dist/extra/*.cjs"
 			}
+		}
+	},
+	"peerDependencies": {
+		"react": ">=18.0.0",
+		"vue": ">=3.3.0"
+	},
+	"peerDependenciesMeta": {
+		"vue": {
+			"optional": true
+		},
+		"react": {
+			"optional": true
 		}
 	},
 	"files": [
@@ -337,13 +369,15 @@
 		"@semantic-release/npm": "^13.1.5",
 		"@semantic-release/release-notes-generator": "^14.0.1",
 		"@types/node": "^25.5.0",
+		"@types/react": "^19.2.14",
 		"bmad-method": "^6.2.0",
 		"esbuild": "^0.24.2",
 		"semantic-release": "^25.0.3",
 		"tsup": "^8.5.1",
 		"tsx": "^4.21.0",
 		"typescript": "^5.7.0",
-		"vitest": "^3.0.0"
+		"vitest": "^3.0.0",
+		"vue": "^3.5.30"
 	},
 	"pnpm": {
 		"onlyBuiltDependencies": [

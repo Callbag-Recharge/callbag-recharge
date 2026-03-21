@@ -12,13 +12,13 @@
 |----------|------:|------------|
 | Core | 6 | `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect` + protocol, inspector, pipe, bitmask |
 | Extra | 65 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, …), sources (`fromPromise`, `fromCron`, `fromEvent`, …), sinks (`subscribe`, `forEach`) |
-| Utils | 21 | `retry`, `withBreaker`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, … |
+| Utils | 22 | `retry`, `withBreaker`, `withStatus`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, … |
 | Data | 5 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub` |
 | Memory | 3 | `collection`, `decay`, `node` |
 | Orchestrate | 7 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, … |
 | Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
-| Compat | 4 | Jotai, Nanostores, TC39 Signals, Zustand |
+| Compat | 6 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`), React (`useStore`/`useSubscribe`) |
 
 ---
 
@@ -51,6 +51,73 @@
 | 5b-10 | `sensor` step | `sensor(poll, pred, interval)` — Airflow sensor pattern. Poll external condition until true, then proceed. | S |
 | 5b-11 | `loop` step | `loop(pred, steps)` — declarative iteration in pipeline builder. Repeat sub-graph until condition met. | M |
 
+### Phase 5c: `with*()` Wrappers & Framework Bindings
+
+> **Goal:** Formalize the `with*()` companion-store pattern so all async/streaming sources expose
+> consistent metadata (status, error). Then build framework bindings that bridge any `Store<T>` —
+> including companion stores — into Vue/React/Svelte/Solid.
+>
+> **Design:** `Store<T>` stays pure (just `get`/`set`/`source`). `with*()` wrappers return
+> `Store<T> & { status: Store<…>, error: Store<…>, … }` — still a `Store<T>`, but with extra
+> companion stores as properties. Adapters (`fromWebSocket`, `fromHTTP`, `chatStream`, etc.) use
+> `withStatus()` internally so all async sources share a consistent API. Companions are themselves
+> plain `Store<T>`, so framework bindings (`useSubscribe(ws.status)`) work with no special casing.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| ~~5c-0~~ | ~~`withStatus` wrapper~~ | ~~Shipped.~~ `withStatus(store)` → `Store<T> & { status, error }`. Producer-backed with proper teardown. | ~~S~~ |
+| ~~5c-1~~ | ~~Vue binding~~ | ~~Shipped.~~ `useStore(store)` → writable `Ref<T>`, `useSubscribe(store)` → readonly `Ref<T>`. `onScopeDispose` cleanup. | ~~S~~ |
+| ~~5c-2~~ | ~~React binding~~ | ~~Shipped.~~ `useStore(store)` → `[value, set]`, `useSubscribe(store)` → `value`. Via `useSyncExternalStore` + core `subscribe()`. | ~~S~~ |
+| 5c-3 | Svelte binding | `useSubscribe(store)` → Svelte readable store (implements Svelte store contract). | S |
+| 5c-4 | Solid binding | `useSubscribe(store)` → Solid signal. Via `createSignal` + `onCleanup`. | S |
+
+**Naming:** `useStore()` for writable stores (read + set). `useSubscribe()` for read-only
+subscriptions — any `Store<T>`, including companions like `ws.status`. The name signals that
+it creates a sink that activates the upstream chain. See architecture §20 for full design.
+
+**Build order:** 5c-0 first (formalizes the pattern adapters already follow), then 5c-1 (Vue, for
+our demos), then 5c-2 (React, largest audience). 5c-3/5c-4 as community demand arises.
+
+Existing `with*()` wrappers (`withBreaker`, `withRetry`) already follow this shape — they return
+`Store<T>` extended with domain-specific companion stores. 5c-0 just adds the base `withStatus`
+and makes the convention explicit.
+
+### Demo Suite
+
+> **Goal:** Demos are the ground truth — if the demo works, the feature works.
+> Two tiers: **showcase apps** (polished, no source panel — the "wow" demos) and
+> **code examples** (with source, for builders to reference — replaces stale `src/examples/`).
+>
+> **Pattern:** `site/.vitepress/theme/components/<Name>/store.ts` (pure library code) +
+> `<Name>.vue` (Vue reactivity via `useStore()` from 5c-1). No mocks — real library execution.
+
+#### Showcase Apps (homepage heroes)
+
+Full-featured apps. Users interact with them as products — no code panel, no "primitives used"
+legend. The point is "look what you can build", not "look at our API".
+
+| # | App | What the user experiences |
+|---|-----|--------------------------|
+| H1 | **Markdown Editor** | Split-pane: CodeMirror left, live Markdown preview right. Toolbar with undo/redo, word count, cursor position, auto-save dot. Feels like a real editor. |
+| H2 | **AI Chat (WebLLM)** | Chat UI running a model in-browser via WebGPU (no API key). Tokens stream in real-time, cancel mid-response, retry, token usage meter. Feels like ChatGPT lite. |
+| H3 | **Workflow Builder** | Code-first n8n. Left: CodeMirror editor with `pipeline()` code. Right: live DAG (Vue Flow). Press "Update" → code parses into a visual graph. Fire triggers, watch nodes animate, inspect logs, execution history persists to IndexedDB. Feels like a workflow tool. |
+
+**Build order:** H1 → H2 → H3 (each builds on confidence from the last; H3 may depend on 5b-1)
+
+#### Code Examples (doc pages)
+
+Interactive demos with visible source. Embedded in API/pattern doc pages so builders can see
+exactly how to use each primitive. These replace `src/examples/` as the canonical reference.
+
+| # | Example | What it teaches |
+|---|---------|-----------------|
+| D1 | **Airflow Pipeline** (shipped) | `pipeline` + `step` + `taskState` wiring, diamond resolution |
+| D2 | **Form Builder** | `formField` pattern, sync + async validation, derived aggregation |
+| D3 | **Agent Loop** | `agentLoop` + `gate` + `approval`, tool call cycle |
+| D4 | **Real-time Dashboard** | `reactiveMap` + `reactiveLog`, live aggregation, sampling |
+| D5 | **State Machine Visualizer** | `stateMachine` util, typed transitions, graph rendering |
+| D6 | **Compat Comparison** | Same counter/todo in callbag-recharge vs Jotai vs Zustand vs Signals |
+
 ### Phase 6: Deep Memory
 
 > **Goal:** Reactive agentic memory — vector search, knowledge graphs, memory lifecycle.
@@ -75,6 +142,8 @@
 | 7a | Redis adapter | `fromRedis(sub, channel)` / `toRedis(pub, channel)`. Peer dep: ioredis. | S |
 | 7b | PostgreSQL adapter | `fromPgNotify(pool, channel)`. Peer dep: pg. | S |
 | 7c | Kafka adapter | `fromKafka(consumer, topic)` / `toKafka(producer, topic)`. Peer dep: kafkajs. | M |
+| 7d | gRPC stream adapter | `fromGrpcStream(call)` / `toGrpcStream(call)`. Peer dep: @grpc/grpc-js. | M |
+| 7e | NATS adapter | `fromNats(nc, subject)` / `toNats(nc, subject)`. Peer dep: nats. | S |
 
 ### Phase 8: Persistence + Distribution
 

@@ -81,6 +81,14 @@ export type {
 	StateMachineResult,
 } from "./stateMachine";
 export { stateMachine } from "./stateMachine";
+// Timer
+export type {
+	CountdownOptions,
+	CountdownResult,
+	StopwatchOptions,
+	StopwatchResult,
+} from "./timer";
+export { countdown, stopwatch } from "./timer";
 // Token tracker
 export type { TokenMeta, TokenTrackedStore, TokenUsage } from "./tokenTracker";
 export { tokenTracker } from "./tokenTracker";
@@ -98,3 +106,6 @@ export { validationPipeline } from "./validationPipeline";
 // With breaker (circuit breaker operator)
 export type { BreakerLike, WithBreakerOptions } from "./withBreaker";
 export { CircuitOpenError, withBreaker } from "./withBreaker";
+// With status (async metadata wrapper)
+export type { WithStatusOptions, WithStatusStatus, WithStatusStore } from "./withStatus";
+export { withStatus } from "./withStatus";
