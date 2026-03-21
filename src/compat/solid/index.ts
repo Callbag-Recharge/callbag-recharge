@@ -38,12 +38,12 @@ export type Accessor<T> = () => T;
 export function useSubscribe<T>(store: Store<T>): Accessor<T> {
 	const [value, setValue] = createSignal(store.get(), { equals: false });
 
-	const unsub = subscribe(store, (v) => {
+	const sub = subscribe(store, (v) => {
 		setValue(() => v);
 	});
 
 	if (getOwner()) {
-		onCleanup(unsub);
+		onCleanup(() => sub.unsubscribe());
 	} else if (typeof console !== "undefined") {
 		console.warn(
 			"[callbag-recharge] useSubscribe called outside a Solid reactive owner — subscription will not be auto-disposed.",

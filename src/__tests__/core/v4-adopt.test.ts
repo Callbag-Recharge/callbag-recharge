@@ -29,7 +29,7 @@ describe("Output slot transitions", () => {
 		expect(b.get()).toBe(6);
 		expect(values).toEqual([6]);
 
-		unsub();
+		unsub.unsubscribe();
 		// B disconnects from upstream (no STANDALONE mode)
 		expect((b as any)._flags & 2).toBeFalsy(); // D_CONNECTED cleared
 		a.set(10);
@@ -48,7 +48,7 @@ describe("Output slot transitions", () => {
 		expect(c.get()).toBe(30); // 10 + 20
 		expect(values).toEqual([30]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		// v6: C disconnects from upstream when last subscriber leaves.
 		// D_CONNECTED should be cleared.
@@ -78,8 +78,8 @@ describe("Output slot transitions", () => {
 		// B's output slot is MULTI (Set) — c and d both have dep connections to b
 		// established at construction (STANDALONE mode)
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 
 		// All stores still reactive in STANDALONE mode
 		a.set(20);

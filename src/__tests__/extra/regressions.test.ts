@@ -355,7 +355,7 @@ describe("remember regression", () => {
 		s.emit(42);
 		expect(r.get()).toBe(42);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(r.get()).toBeUndefined(); // must be cleared
 	});
 
@@ -366,7 +366,7 @@ describe("remember regression", () => {
 		// First subscription
 		const unsub1 = subscribe(r, () => {});
 		s.emit(42);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Re-subscribe — producer retains 42, remember should re-seed
 		subscribe(r, () => {});
@@ -395,7 +395,7 @@ describe("scan reconnect regression", () => {
 		s.set(2);
 		// acc reset to 0 on subscribe, push receives 2 → reducer(0, 2) = 2
 		expect(scanned.get()).toBe(2);
-		unsub();
+		unsub.unsubscribe();
 
 		// Pull mode again — acc retains push-mode value (2), getter applies reducer
 		s.set(10);
@@ -414,7 +414,7 @@ describe("scan reconnect regression", () => {
 
 		// Subscribe and unsub: acc resets to seed=0 on reconnect
 		const unsub = subscribe(scanned, () => {});
-		unsub();
+		unsub.unsubscribe();
 
 		// After reconnect cycle, acc was reset to seed=0, getter re-applies: reducer(0, 5) = 5
 		expect(scanned.get()).toBe(5);
@@ -524,7 +524,7 @@ describe("subject conditional dedup regression", () => {
 		// Connect, set, disconnect
 		const unsub = subscribe(s, () => {});
 		s.next(5);
-		unsub();
+		unsub.unsubscribe();
 
 		// Set same value while disconnected — always accepted (no sinks = no dedup)
 		s.next(5);

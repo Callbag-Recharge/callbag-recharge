@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { subscribe as coreSubscribe } from "../../core/subscribe";
 import { fromTrigger } from "../../extra/fromTrigger";
 import { subscribe } from "../../extra/subscribe";
 import { join } from "../../orchestrate/join";
@@ -28,7 +29,7 @@ describe("join (merge strategies step)", () => {
 			const last = results[results.length - 1];
 			expect(last).toEqual([1, 2, 3, 4, 5, 6]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -49,7 +50,7 @@ describe("join (merge strategies step)", () => {
 			const last = results[results.length - 1];
 			expect(last).toEqual([1]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -71,7 +72,7 @@ describe("join (merge strategies step)", () => {
 			const last = results[results.length - 1];
 			expect(last).toEqual([1, 2, 3]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 	});
@@ -107,7 +108,7 @@ describe("join (merge strategies step)", () => {
 				{ id: 3, score: 200 },
 			]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -128,7 +129,7 @@ describe("join (merge strategies step)", () => {
 			const last = results[results.length - 1];
 			expect(last).toEqual([{ id: 1, val: "new" }]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -156,7 +157,7 @@ describe("join (merge strategies step)", () => {
 			// Order: 3 first (from a), then 1 (from a), then 2 (from b, new key)
 			expect(last.map((i: any) => i.id)).toEqual([3, 1, 2]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 	});
@@ -189,7 +190,7 @@ describe("join (merge strategies step)", () => {
 			// Only id=1 exists in both
 			expect(last).toEqual([{ id: 1, name: "Alice", score: 100 }]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -210,7 +211,7 @@ describe("join (merge strategies step)", () => {
 			const last = results[results.length - 1];
 			expect(last).toEqual([]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -242,7 +243,7 @@ describe("join (merge strategies step)", () => {
 			// Only id=1 exists in all three
 			expect(last).toEqual([{ id: 1, x: 1, y: 10, z: 100 }]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 	});
@@ -266,7 +267,7 @@ describe("join (merge strategies step)", () => {
 
 			expect(wf.status.get()).toBe("completed");
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -292,7 +293,7 @@ describe("join (merge strategies step)", () => {
 			expect(realResults.length).toBeGreaterThan(0);
 			expect(realResults[realResults.length - 1]).toEqual([1, 2, 3, 4]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -318,7 +319,7 @@ describe("join (merge strategies step)", () => {
 			// Error should be tracked in taskState
 			expect(merged.error.get()).toBeInstanceOf(TypeError);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -348,8 +349,67 @@ describe("join (merge strategies step)", () => {
 			// Should have at least 2 real results from 2 triggers
 			expect(results.length).toBeGreaterThanOrEqual(2);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
+		});
+	});
+
+	// -------------------------------------------------------------------------
+	// lifecycle signals (5f-7)
+	// -------------------------------------------------------------------------
+	describe("lifecycle signals", () => {
+		it("RESET resets taskState via signal interceptor", async () => {
+			const joinStep = join(["left", "right"], "append");
+
+			const wf = pipeline({
+				trigger: step(fromTrigger<string>()),
+				left: task(["trigger"], (_signal) => [1, 2]),
+				right: task(["trigger"], (_signal) => [3, 4]),
+				merged: joinStep,
+			});
+
+			const unsub = subscribe(wf.steps.merged, () => {});
+
+			(wf.steps.trigger as any).fire("go");
+			await new Promise((r) => setTimeout(r, 50));
+
+			expect(joinStep.status.get()).toBe("success");
+			expect(joinStep.runCount.get()).toBeGreaterThanOrEqual(1);
+
+			// RESET cascades through the pipeline — resets join's taskState
+			wf.reset();
+			expect(joinStep.status.get()).toBe("idle");
+
+			unsub.unsubscribe();
+			wf.destroy();
+		});
+
+		it("TEARDOWN via pipeline.destroy() cleans up the join step", async () => {
+			const joinStep = join(["left", "right"], "append");
+
+			const wf = pipeline({
+				trigger: step(fromTrigger<string>()),
+				left: task(["trigger"], (_signal) => [1]),
+				right: task(["trigger"], (_signal) => [2]),
+				merged: joinStep,
+			});
+
+			let ended = false;
+			const unsub = coreSubscribe(wf.steps.merged, () => {}, {
+				onEnd: () => {
+					ended = true;
+				},
+			});
+
+			(wf.steps.trigger as any).fire("go");
+			await new Promise((r) => setTimeout(r, 50));
+
+			// destroy sends TEARDOWN through the graph
+			wf.destroy();
+
+			// Subscription should have received END
+			expect(ended).toBe(true);
+			unsub.unsubscribe();
 		});
 	});
 });

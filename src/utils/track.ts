@@ -94,7 +94,7 @@ export function track<A>(opts?: { name?: string }): StoreOperator<A, A> {
 				// Reset meta on connection
 				meta.set({ ...IDLE_META });
 
-				const unsub = subscribe(
+				const sub = subscribe(
 					input,
 					(v) => {
 						count++;
@@ -132,7 +132,7 @@ export function track<A>(opts?: { name?: string }): StoreOperator<A, A> {
 				);
 
 				return () => {
-					unsub();
+					sub.unsubscribe();
 				};
 			},
 			{ initial: input.get() },

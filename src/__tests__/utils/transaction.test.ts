@@ -81,7 +81,7 @@ describe("transaction", () => {
 			b.set(20);
 		});
 
-		unsub();
+		unsub.unsubscribe();
 		// Should see 30 (final), not 12 (partial: a=10, b=2)
 		expect(values).toEqual([30]);
 	});
@@ -104,7 +104,7 @@ describe("transaction", () => {
 			// expected
 		}
 
-		unsub();
+		unsub.unsubscribe();
 		// Rollback restores to 1+2=3, but since that's the original value,
 		// derived may or may not emit. The key invariant is the final state.
 		expect(a.get()).toBe(1);

@@ -301,4 +301,53 @@ describe("compat/signals", () => {
 			dispose();
 		});
 	});
+
+	// -----------------------------------------------------------------------
+	// SignalWatcher.destroy (5f-10)
+	// -----------------------------------------------------------------------
+
+	describe("SignalWatcher.destroy", () => {
+		it("unwatches all signals via TEARDOWN", () => {
+			const a = new Signal.State(0);
+			const b = new Signal.State(0);
+			let notifyCount = 0;
+
+			const watcher = new Signal.subtle.Watcher(() => {
+				notifyCount++;
+			});
+			watcher.watch(a, b);
+
+			a.set(1);
+			expect(notifyCount).toBe(1);
+
+			watcher.destroy();
+
+			// After destroy, changes should not trigger notifications
+			a.set(2);
+			b.set(1);
+			expect(notifyCount).toBe(1); // unchanged
+
+			// getPending should return empty
+			expect(watcher.getPending()).toEqual([]);
+		});
+
+		it("unwatch sends TEARDOWN signal", () => {
+			const a = new Signal.State(0);
+			let notifyCount = 0;
+
+			const watcher = new Signal.subtle.Watcher(() => {
+				notifyCount++;
+			});
+			watcher.watch(a);
+
+			a.set(1);
+			expect(notifyCount).toBe(1);
+
+			watcher.unwatch(a);
+
+			// After unwatch, changes should not notify
+			a.set(2);
+			expect(notifyCount).toBe(1);
+		});
+	});
 });

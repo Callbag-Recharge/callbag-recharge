@@ -1,6 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
-import { beginDeferredStart, END, endDeferredStart, START } from "../core/protocol";
+import type { LifecycleSignal } from "../core/protocol";
+import { beginDeferredStart, END, endDeferredStart, START, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
 /**
@@ -19,7 +20,7 @@ import type { Store } from "../core/types";
  */
 export function race<T>(...sources: Store<T>[]): Store<T | undefined> {
 	const store = producer<T>(
-		({ emit, error, complete }) => {
+		({ emit, error, complete, onSignal }) => {
 			if (sources.length === 0) {
 				complete();
 				return undefined;
@@ -28,7 +29,9 @@ export function race<T>(...sources: Store<T>[]): Store<T | undefined> {
 			let winnerIndex = -1;
 			let done = false;
 			let completedCount = 0;
-			const talkbacks: (((type: number) => void) | null)[] = new Array(sources.length).fill(null);
+			const talkbacks: (((type: number, data?: any) => void) | null)[] = new Array(
+				sources.length,
+			).fill(null);
 
 			function cleanup(exceptIndex: number) {
 				for (let i = 0; i < talkbacks.length; i++) {
@@ -45,7 +48,7 @@ export function race<T>(...sources: Store<T>[]): Store<T | undefined> {
 				const idx = i;
 				sources[idx].source(START, (type: number, data: unknown) => {
 					if (type === START) {
-						talkbacks[idx] = data as (type: number) => void;
+						talkbacks[idx] = data as (type: number, data?: any) => void;
 						// If a winner was already chosen (sync emit during deferred start),
 						// immediately disconnect this loser.
 						if (winnerIndex !== -1 && winnerIndex !== idx) {
@@ -91,6 +94,12 @@ export function race<T>(...sources: Store<T>[]): Store<T | undefined> {
 			}
 
 			endDeferredStart();
+
+			onSignal((s: LifecycleSignal) => {
+				for (const tb of talkbacks) {
+					if (tb) tb(STATE, s);
+				}
+			});
 
 			return () => {
 				done = true;

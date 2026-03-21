@@ -18,7 +18,7 @@ describe("checkpoint", () => {
 		source.set(1);
 		source.set(2);
 		source.set(3);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([1, 2, 3]);
 	});
@@ -30,7 +30,7 @@ describe("checkpoint", () => {
 
 		const unsub = subscribe(durable, () => {});
 		source.set(42);
-		unsub();
+		unsub.unsubscribe();
 
 		// Value should be saved in adapter
 		expect(adapter.load("test-2")).toBe(42);
@@ -45,7 +45,7 @@ describe("checkpoint", () => {
 		const values1: number[] = [];
 		const unsub1 = subscribe(durable1, (v) => values1.push(v!));
 		source.set(42);
-		unsub1();
+		unsub1.unsubscribe();
 		expect(values1).toEqual([42]);
 
 		// Second run — new checkpoint with same id should recover
@@ -60,7 +60,7 @@ describe("checkpoint", () => {
 		// Then receive new values
 		source2.set(100);
 		expect(values2).toEqual([42, 100]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("meta tracks recovery and persist count", () => {
@@ -81,7 +81,7 @@ describe("checkpoint", () => {
 		source.set(2);
 		expect(meta.get().persistCount).toBe(2);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("meta.recovered is true when loading saved value", () => {
@@ -96,7 +96,7 @@ describe("checkpoint", () => {
 
 		const unsub = subscribe(durable, () => {});
 		expect(meta.get().recovered).toBe(true);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("clear() removes saved value from adapter", () => {
@@ -110,7 +110,7 @@ describe("checkpoint", () => {
 		(durable as any).clear();
 		expect(adapter.load("test-6")).toBeUndefined();
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns undefined before any value", () => {
@@ -129,7 +129,7 @@ describe("checkpoint", () => {
 		const unsub = subscribe(durable, () => {});
 		source.set(99);
 		expect(durable.get()).toBe(99);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream errors", () => {
@@ -145,7 +145,7 @@ describe("checkpoint", () => {
 
 		// Complete the source — durable should forward completion
 		// (state doesn't easily error, but we verify the onEnd path)
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("clear() works even when producer is inactive", () => {
@@ -194,7 +194,7 @@ describe("checkpoint", () => {
 		// Should get: recovered value first, then buffered values
 		expect(values).toEqual(["recovered", 100, 200]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("handles async save rejection without crashing", () => {
@@ -218,7 +218,7 @@ describe("checkpoint", () => {
 		source.set(42);
 		expect(values).toEqual([42]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("different checkpoint ids are independent", () => {
@@ -240,8 +240,8 @@ describe("checkpoint", () => {
 		expect(valuesA).toEqual(["alpha"]);
 		expect(valuesB).toEqual(["beta"]);
 
-		unsubA();
-		unsubB();
+		unsubA.unsubscribe();
+		unsubB.unsubscribe();
 	});
 });
 

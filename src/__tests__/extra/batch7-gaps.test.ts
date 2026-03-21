@@ -152,8 +152,8 @@ describe("flat", () => {
 		// Producer is multicast — only one outer subscription
 		expect(outerSubCount).toBe(1);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -247,7 +247,7 @@ describe("repeat", () => {
 		});
 		const unsub = subscribe(r, () => {});
 		expect(cleanedUp).toBe(false);
-		unsub();
+		unsub.unsubscribe();
 		expect(cleanedUp).toBe(true);
 	});
 
@@ -271,7 +271,7 @@ describe("repeat", () => {
 		vi.advanceTimersByTime(10); // complete round 2 → resubscribe
 		expect(values).toEqual([1, 2, 3]);
 
-		unsub(); // stop
+		unsub.unsubscribe(); // stop
 		vi.advanceTimersByTime(100);
 		expect(values).toEqual([1, 2, 3]); // no more
 	});
@@ -434,7 +434,7 @@ describe("pipeRaw", () => {
 		const fused = pipeRaw(s, (v) => v + 100);
 		const unsub = subscribe(fused, () => {});
 		expect(fused.get()).toBe(101);
-		unsub();
+		unsub.unsubscribe();
 
 		s.set(5);
 		// After disconnect, get() uses pull-based getter

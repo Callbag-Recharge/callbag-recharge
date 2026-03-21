@@ -16,6 +16,8 @@
 
 import { derived } from "../core/derived";
 import { Inspector } from "../core/inspector";
+import type { Subscription } from "../core/protocol";
+import { RESET, TEARDOWN } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
@@ -231,7 +233,8 @@ export function pipeline<S extends Record<string, StepDef>>(
 	const storeMap = new Map<string, Store<any>>();
 	const metaMap = new Map<string, Store<StepMeta>>();
 	const counts = new Map<string, number>();
-	const unsubs: (() => void)[] = [];
+	const unsubs: Subscription[] = [];
+	const stepSubs: Subscription[] = [];
 
 	// Wrap wiring in try/catch — on factory throw, clean up already-wired subscriptions
 	try {
@@ -300,13 +303,14 @@ export function pipeline<S extends Record<string, StepDef>>(
 				},
 			);
 			unsubs.push(unsub);
+			stepSubs.push(unsub);
 
 			// Register with Inspector
 			Inspector.register(store, { kind: "pipeline-step", name: `${baseName}:${stepName}` });
 		}
 	} catch (err) {
 		// Clean up already-wired subscriptions on failure
-		for (const unsub of unsubs) unsub();
+		for (const unsub of unsubs) unsub.unsubscribe();
 		throw err;
 	}
 
@@ -422,28 +426,33 @@ export function pipeline<S extends Record<string, StepDef>>(
 		steps: stepsResult,
 		status,
 		reset() {
+			if (_destroyed) return;
 			for (const meta of allMetas) {
 				(meta as any).set({ ...IDLE_STEP_META });
 			}
 			for (const key of counts.keys()) {
 				counts.set(key, 0);
 			}
-			for (const task of dedupedTasks) {
-				task.reset();
+			// Signal cascades through graph — each step handles its own RESET
+			// (task() intercepts RESET and calls ts.reset(), etc.)
+			for (const sub of stepSubs) {
+				sub.signal(RESET);
 			}
 		},
 		destroy() {
 			if (_destroyed) return;
 			_destroyed = true;
-			for (const unsub of unsubs) unsub();
-			unsubs.length = 0;
-			// Destroy auto-detected task states (pipeline owns these).
-			// Externally provided opts.tasks are NOT destroyed — caller owns those.
-			for (const task of dedupedTasks) {
-				if (!opts?.tasks || !Object.values(opts.tasks).includes(task)) {
-					task.destroy();
-				}
+			// TEARDOWN cascades through graph — each step handles its own teardown
+			// (task() intercepts TEARDOWN and calls ts.destroy(), etc.)
+			for (const sub of stepSubs) {
+				sub.signal(TEARDOWN);
 			}
+			// Defensive cleanup: unsubscribe all subscriptions even though TEARDOWN
+			// should have completed them. Handles edge cases where steps don't propagate
+			// TEARDOWN correctly (e.g., raw step() stores without onSignal handlers).
+			for (const unsub of unsubs) unsub.unsubscribe();
+			unsubs.length = 0;
+			stepSubs.length = 0;
 			// Invalidate approval controls so stale calls throw
 			for (const name of stepNames) {
 				const def = steps[name] as any;

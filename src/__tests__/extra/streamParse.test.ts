@@ -163,7 +163,7 @@ describe("streamParse", () => {
 			expect(parsed.get()).toEqual({ step: 1, done: true });
 
 			expect(values.length).toBeGreaterThanOrEqual(2);
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("simulates streaming accumulation", () => {
@@ -185,7 +185,7 @@ describe("streamParse", () => {
 			accumulated.set('{"name": "Bob", "age": 30}');
 			expect(parsed.get()).toEqual({ name: "Bob", age: 30 });
 
-			unsub();
+			unsub.unsubscribe();
 		});
 	});
 

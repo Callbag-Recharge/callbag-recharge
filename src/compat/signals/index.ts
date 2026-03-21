@@ -12,6 +12,7 @@
 
 import { derived } from "../../core/derived";
 import { effect } from "../../core/effect";
+import type { Subscription } from "../../core/protocol";
 import { batch } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe as coreSubscribe } from "../../core/subscribe";
@@ -116,7 +117,7 @@ class SignalComputed<T> {
  */
 class SignalWatcher {
 	private _notify: () => void;
-	private _unsubs = new Map<SignalState<any> | SignalComputed<any>, () => void>();
+	private _unsubs = new Map<SignalState<any> | SignalComputed<any>, Subscription>();
 	private _pending = new Set<SignalState<any> | SignalComputed<any>>();
 
 	constructor(notify: () => void) {
@@ -126,7 +127,7 @@ class SignalWatcher {
 	watch(...signals: Array<SignalState<any> | SignalComputed<any>>): void {
 		for (const signal of signals) {
 			if (this._unsubs.has(signal)) continue;
-			const unsub = coreSubscribe(
+			const sub = coreSubscribe(
 				signal._store,
 				() => {
 					this._pending.add(signal);
@@ -140,15 +141,18 @@ class SignalWatcher {
 					},
 				},
 			);
-			this._unsubs.set(signal, unsub);
+			this._unsubs.set(signal, sub);
 		}
 	}
 
 	unwatch(...signals: Array<SignalState<any> | SignalComputed<any>>): void {
 		for (const signal of signals) {
-			const unsub = this._unsubs.get(signal);
-			if (unsub) {
-				unsub();
+			const sub = this._unsubs.get(signal);
+			if (sub) {
+				// Disconnect without destroying the watched store — unsubscribe
+				// only removes this watcher's sink, leaving the store alive for
+				// other consumers.
+				sub.unsubscribe();
 				this._unsubs.delete(signal);
 				this._pending.delete(signal);
 			}
@@ -163,6 +167,17 @@ class SignalWatcher {
 		const result = [...this._pending];
 		this._pending.clear();
 		return result;
+	}
+
+	/**
+	 * Destroy — disconnect all watched signals without terminating them.
+	 */
+	destroy(): void {
+		for (const [, sub] of this._unsubs) {
+			sub.unsubscribe();
+		}
+		this._unsubs.clear();
+		this._pending.clear();
 	}
 }
 

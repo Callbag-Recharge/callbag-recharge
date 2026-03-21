@@ -363,7 +363,7 @@ describe("last", () => {
 		const s = state(0);
 		const l = pipe(s, last());
 		const unsub = subscribe(l, () => {});
-		unsub(); // should not throw
+		unsub.unsubscribe(); // should not throw
 	});
 
 	it("new subscriber after completion receives END immediately", () => {
@@ -639,8 +639,8 @@ describe("partition", () => {
 		const unsub1 = subscribe(evens, () => {});
 		const unsub2 = subscribe(odds, () => {});
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 		// should not throw — upstream is disconnected
 	});
 
@@ -651,7 +651,7 @@ describe("partition", () => {
 		subscribe(evens, (v) => evenValues.push(v));
 		const unsubOdds = subscribe(odds, () => {});
 
-		unsubOdds(); // remove odds subscriber
+		unsubOdds.unsubscribe(); // remove odds subscriber
 		s.set(2); // evens should still receive
 
 		expect(evenValues).toEqual([2]);
@@ -750,7 +750,7 @@ describe("repeat", () => {
 	it("cleans up current subscription on unsubscribe", () => {
 		const r = repeat(() => state(0));
 		const unsub = subscribe(r, () => {});
-		unsub(); // should not throw
+		unsub.unsubscribe(); // should not throw
 	});
 
 	it("creates fresh source on each repetition via factory", () => {

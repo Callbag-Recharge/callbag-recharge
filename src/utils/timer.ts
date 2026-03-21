@@ -1,35 +1,34 @@
 // ---------------------------------------------------------------------------
-// timer — reactive countdown and stopwatch
+// timer — reactive countdown and stopwatch (signal-based lifecycle)
 // ---------------------------------------------------------------------------
-// Reactive timers with pause/resume/reset. Built on state + derived.
-// interval() exists as a raw callbag source; these are controlled timer
-// patterns with reactive state.
+// Reactive timers controlled entirely via lifecycle signals.
+// No imperative methods — auto-starts on first subscription,
+// controlled via sub.signal(PAUSE/RESUME/RESET) from subscribers.
 //
-// Built on: state, derived
+// PAUSE  — stop ticking, preserve current state
+// RESUME — resume ticking (or start from reset state)
+// RESET  — stop ticking, restore to initial values
+// TEARDOWN — handled by producer cleanup (dispose ticker)
+//
+// Built on: producer, derived
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
-import { state } from "../core/state";
+import { producer } from "../core/producer";
+import { PAUSE, RESET, RESUME } from "../core/protocol";
 import type { Store } from "../core/types";
 
 // ---------------------------------------------------------------------------
-// Shared ticker — internal helper
+// Shared ticker — internal helper (unchanged)
 // ---------------------------------------------------------------------------
 
 interface Ticker {
-	/** Start or restart the ticker. */
 	start(): void;
-	/** Pause — returns the partial-tick delta and stops the interval. */
 	pause(): number;
-	/** Resume from paused state. */
 	resume(): void;
-	/** Stop the interval without computing a delta. */
 	stop(): void;
-	/** True if currently ticking. */
 	readonly active: boolean;
-	/** True after dispose() has been called. */
 	readonly disposed: boolean;
-	/** Dispose — stops interval, prevents future operations. */
 	dispose(): void;
 }
 
@@ -106,6 +105,12 @@ export interface CountdownOptions {
 	name?: string;
 }
 
+interface CountdownState {
+	remaining: number;
+	active: boolean;
+	expired: boolean;
+}
+
 export interface CountdownResult {
 	/** Milliseconds remaining. */
 	remaining: Store<number>;
@@ -113,39 +118,32 @@ export interface CountdownResult {
 	active: Store<boolean>;
 	/** Whether the countdown has reached zero. */
 	expired: Store<boolean>;
-	/** Start the countdown. */
-	start(): void;
-	/** Pause the countdown. */
-	pause(): void;
-	/** Resume from paused state. */
-	resume(): void;
-	/** Reset the countdown (stops if running). */
-	reset(ms?: number): void;
-	/** Dispose — clears timers and prevents further operations. */
-	dispose(): void;
 }
 
 /**
- * Creates a reactive countdown timer.
+ * Creates a reactive countdown timer controlled via lifecycle signals.
+ *
+ * Auto-starts on first subscription. Control via `sub.signal(PAUSE/RESUME/RESET)`.
+ * RESET stops and restores to initial duration. RESUME starts/resumes ticking.
  *
  * @param ms - Duration in milliseconds.
  * @param opts - Optional configuration.
  *
- * @returns `CountdownResult` — reactive remaining/active/expired stores + control methods.
- *
- * @remarks **Tick interval:** Defaults to 100ms. Remaining is updated each tick.
- * @remarks **Expired:** Becomes true when remaining reaches 0. Timer auto-stops.
+ * @returns `CountdownResult` — reactive remaining/active/expired stores.
  *
  * @example
  * ```ts
  * import { countdown } from 'callbag-recharge/utils/timer';
+ * import { subscribe, PAUSE, RESUME, RESET } from 'callbag-recharge';
  *
- * const timer = countdown(5000); // 5 seconds
- * timer.start();
- * timer.remaining.get(); // ~5000
- * timer.pause();
- * timer.resume();
- * timer.dispose();
+ * const timer = countdown(5000);
+ * const sub = subscribe(timer.remaining, (v) => console.log(v));
+ * // Timer auto-starts, counting down from 5000
+ * sub.signal(PAUSE);   // pause
+ * sub.signal(RESUME);  // resume
+ * sub.signal(RESET);   // stop + reset to 5000
+ * sub.signal(RESUME);  // start again
+ * sub.unsubscribe();   // disconnect (timer stops if no other subscribers)
  * ```
  *
  * @category utils
@@ -154,58 +152,68 @@ export function countdown(ms: number, opts?: CountdownOptions): CountdownResult 
 	const tickMs = Math.max(1, opts?.tickMs ?? 100);
 	const prefix = opts?.name ?? "countdown";
 
-	const remainingStore = state<number>(ms, { name: `${prefix}.remaining` });
-	const activeStore = state<boolean>(false, { name: `${prefix}.active` });
+	const initial: CountdownState = { remaining: ms, active: false, expired: false };
 
-	const expired = derived([remainingStore], () => remainingStore.get() <= 0, {
-		name: `${prefix}.expired`,
-	});
+	const internal = producer<CountdownState>(
+		({ emit, onSignal }) => {
+			let remaining = ms;
+			let active = true;
 
-	const ticker = createTicker(tickMs, (delta) => {
-		const remaining = remainingStore.get() - delta;
-		if (remaining <= 0) {
-			remainingStore.set(0);
-			activeStore.set(false);
-			ticker.stop();
-		} else {
-			remainingStore.set(remaining);
-		}
-	});
+			const ticker = createTicker(tickMs, (delta) => {
+				remaining -= delta;
+				if (remaining <= 0) {
+					remaining = 0;
+					active = false;
+					ticker.stop();
+				}
+				emit({ remaining, active, expired: remaining <= 0 });
+			});
+
+			function emitState(): void {
+				emit({ remaining, active, expired: remaining <= 0 });
+			}
+
+			onSignal((s) => {
+				if (s === PAUSE) {
+					if (!ticker.active) return;
+					const delta = ticker.pause();
+					if (delta > 0) remaining = Math.max(0, remaining - delta);
+					active = false;
+					emitState();
+				} else if (s === RESUME) {
+					if (ticker.active || remaining <= 0) return;
+					ticker.resume();
+					active = true;
+					emitState();
+				} else if (s === RESET) {
+					ticker.stop();
+					remaining = ms;
+					active = false;
+					emitState();
+				}
+			});
+
+			// Auto-start
+			emitState();
+			ticker.start();
+
+			return () => ticker.dispose();
+		},
+		{ initial, name: prefix, kind: "countdown" },
+	);
 
 	return {
-		remaining: remainingStore,
-		active: activeStore,
-		expired,
-		start() {
-			if (ticker.disposed) return;
-			remainingStore.set(ms);
-			activeStore.set(true);
-			ticker.start();
-		},
-		pause() {
-			if (!ticker.active) return;
-			const delta = ticker.pause();
-			if (delta > 0) {
-				remainingStore.set(Math.max(0, remainingStore.get() - delta));
-			}
-			activeStore.set(false);
-		},
-		resume() {
-			if (ticker.active) return;
-			if (remainingStore.get() <= 0) return;
-			ticker.resume();
-			activeStore.set(true);
-		},
-		reset(newMs?: number) {
-			if (ticker.disposed) return;
-			ticker.pause();
-			activeStore.set(false);
-			remainingStore.set(newMs ?? ms);
-		},
-		dispose() {
-			ticker.dispose();
-			activeStore.set(false);
-		},
+		remaining: derived([internal], () => internal.get()?.remaining ?? ms, {
+			name: `${prefix}.remaining`,
+		}),
+		active: derived([internal], () => internal.get()?.active ?? false, {
+			name: `${prefix}.active`,
+			equals: Object.is,
+		}),
+		expired: derived([internal], () => internal.get()?.expired ?? false, {
+			name: `${prefix}.expired`,
+			equals: Object.is,
+		}),
 	};
 }
 
@@ -220,6 +228,12 @@ export interface StopwatchOptions {
 	name?: string;
 }
 
+interface StopwatchState {
+	elapsed: number;
+	active: boolean;
+	laps: readonly number[];
+}
+
 export interface StopwatchResult {
 	/** Milliseconds elapsed. */
 	elapsed: Store<number>;
@@ -227,42 +241,30 @@ export interface StopwatchResult {
 	active: Store<boolean>;
 	/** Recorded lap times. */
 	laps: Store<readonly number[]>;
-	/** Start the stopwatch. */
-	start(): void;
-	/** Pause the stopwatch. */
-	pause(): void;
-	/** Resume from paused state. */
-	resume(): void;
-	/** Record a lap (current elapsed added to laps). */
-	lap(): void;
-	/** Reset elapsed to 0, clear laps, stop if running. */
-	reset(): void;
-	/** Dispose — clears timers and prevents further operations. */
-	dispose(): void;
 }
 
 /**
- * Creates a reactive stopwatch.
+ * Creates a reactive stopwatch controlled via lifecycle signals.
+ *
+ * Auto-starts on first subscription. Control via `sub.signal(PAUSE/RESUME/RESET)`.
+ * RESET stops and clears elapsed/laps. RESUME starts/resumes ticking.
  *
  * @param opts - Optional configuration.
  *
- * @returns `StopwatchResult` — reactive elapsed/active/laps stores + control methods.
- *
- * @remarks **Tick interval:** Defaults to 100ms. Elapsed is updated each tick.
- * @remarks **Laps:** `lap()` records the current elapsed time without stopping.
+ * @returns `StopwatchResult` — reactive elapsed/active/laps stores.
  *
  * @example
  * ```ts
  * import { stopwatch } from 'callbag-recharge/utils/timer';
+ * import { subscribe, PAUSE, RESUME, RESET } from 'callbag-recharge';
  *
  * const sw = stopwatch();
- * sw.start();
- * // ... time passes ...
- * sw.lap();
- * sw.laps.get(); // [elapsed_at_lap]
- * sw.pause();
- * sw.elapsed.get(); // total elapsed ms
- * sw.dispose();
+ * const sub = subscribe(sw.elapsed, (v) => console.log(v));
+ * // Stopwatch auto-starts
+ * sub.signal(PAUSE);   // pause
+ * sub.signal(RESUME);  // resume
+ * sub.signal(RESET);   // stop + clear to 0
+ * sub.unsubscribe();   // disconnect
  * ```
  *
  * @category utils
@@ -271,58 +273,63 @@ export function stopwatch(opts?: StopwatchOptions): StopwatchResult {
 	const tickMs = Math.max(1, opts?.tickMs ?? 100);
 	const prefix = opts?.name ?? "stopwatch";
 
-	const elapsedStore = state<number>(0, { name: `${prefix}.elapsed` });
-	const activeStore = state<boolean>(false, { name: `${prefix}.active` });
-	const lapsStore = state<readonly number[]>([], { name: `${prefix}.laps` });
+	const initial: StopwatchState = { elapsed: 0, active: false, laps: [] };
 
-	const ticker = createTicker(tickMs, (delta) => {
-		elapsedStore.update((e) => e + delta);
-	});
+	const internal = producer<StopwatchState>(
+		({ emit, onSignal }) => {
+			let elapsed = 0;
+			let active = true;
+			let laps: number[] = [];
+
+			const ticker = createTicker(tickMs, (delta) => {
+				elapsed += delta;
+				emit({ elapsed, active, laps });
+			});
+
+			function emitState(): void {
+				emit({ elapsed, active, laps });
+			}
+
+			onSignal((s) => {
+				if (s === PAUSE) {
+					if (!ticker.active) return;
+					const delta = ticker.pause();
+					if (delta > 0) elapsed += delta;
+					active = false;
+					emitState();
+				} else if (s === RESUME) {
+					if (ticker.active) return;
+					ticker.resume();
+					active = true;
+					emitState();
+				} else if (s === RESET) {
+					ticker.stop();
+					elapsed = 0;
+					active = false;
+					laps = [];
+					emitState();
+				}
+			});
+
+			// Auto-start
+			emitState();
+			ticker.start();
+
+			return () => ticker.dispose();
+		},
+		{ initial, name: prefix, kind: "stopwatch" },
+	);
 
 	return {
-		elapsed: elapsedStore,
-		active: activeStore,
-		laps: lapsStore,
-		start() {
-			if (ticker.disposed) return;
-			elapsedStore.set(0);
-			lapsStore.set([]);
-			activeStore.set(true);
-			ticker.start();
-		},
-		pause() {
-			if (!ticker.active) return;
-			const delta = ticker.pause();
-			if (delta > 0) {
-				elapsedStore.update((e) => e + delta);
-			}
-			activeStore.set(false);
-		},
-		resume() {
-			if (ticker.active) return;
-			ticker.resume();
-			activeStore.set(true);
-		},
-		lap() {
-			if (!ticker.active) return;
-			const delta = ticker.pause();
-			if (delta > 0) {
-				elapsedStore.update((e) => e + delta);
-			}
-			const current = elapsedStore.get();
-			lapsStore.update((l) => [...l, current]);
-			ticker.resume();
-		},
-		reset() {
-			if (ticker.disposed) return;
-			ticker.pause();
-			activeStore.set(false);
-			elapsedStore.set(0);
-			lapsStore.set([]);
-		},
-		dispose() {
-			ticker.dispose();
-			activeStore.set(false);
-		},
+		elapsed: derived([internal], () => internal.get()?.elapsed ?? 0, {
+			name: `${prefix}.elapsed`,
+		}),
+		active: derived([internal], () => internal.get()?.active ?? false, {
+			name: `${prefix}.active`,
+			equals: Object.is,
+		}),
+		laps: derived([internal], () => internal.get()?.laps ?? [], {
+			name: `${prefix}.laps`,
+		}),
 	};
 }

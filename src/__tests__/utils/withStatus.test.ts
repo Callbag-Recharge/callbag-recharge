@@ -149,7 +149,7 @@ describe("withStatus", () => {
 		const unsub = subscribe(tracked, () => {});
 		expect(initCount).toBe(1);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(cleanupCount).toBe(1);
 	});
 

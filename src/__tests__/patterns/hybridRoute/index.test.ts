@@ -141,7 +141,7 @@ describe("hybridRoute", () => {
 		router.process(10);
 
 		expect(results).toEqual([1, 10 * 10]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("unsubscribes from previous handler on new process", () => {

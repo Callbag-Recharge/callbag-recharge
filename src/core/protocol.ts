@@ -14,7 +14,38 @@ export const RESOLVED = Symbol("RESOLVED");
 /** Talkback signal: "I'm the only dep subscriber — skip DIRTY in unbatched paths" */
 export const SINGLE_DEP = Symbol("SINGLE_DEP");
 
-export type Signal = typeof DIRTY | typeof RESOLVED;
+// ---------------------------------------------------------------------------
+// Lifecycle signals — flow upstream via talkback (§1.15)
+// ---------------------------------------------------------------------------
+
+/** Lifecycle signal: "clear transient state, prepare for re-trigger" */
+export const RESET = Symbol("RESET");
+
+/** Lifecycle signal: "temporarily suspend processing" */
+export const PAUSE = Symbol("PAUSE");
+
+/** Lifecycle signal: "resume processing after pause" */
+export const RESUME = Symbol("RESUME");
+
+/** Lifecycle signal: "permanently tear down the subgraph" (terminal) */
+export const TEARDOWN = Symbol("TEARDOWN");
+
+export type LifecycleSignal = typeof RESET | typeof PAUSE | typeof RESUME | typeof TEARDOWN;
+
+export type Signal = typeof DIRTY | typeof RESOLVED | LifecycleSignal;
+
+/** Returns true for lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN). */
+export function isLifecycleSignal(s: unknown): s is LifecycleSignal {
+	return s === RESET || s === PAUSE || s === RESUME || s === TEARDOWN;
+}
+
+/** Subscription handle returned by subscribe(). */
+export interface Subscription {
+	/** Disconnect from the store. */
+	unsubscribe(): void;
+	/** Send a lifecycle signal upstream via talkback. */
+	signal(s: LifecycleSignal): void;
+}
 
 /** Node status — tracks current lifecycle state (v4) */
 export type NodeStatus =

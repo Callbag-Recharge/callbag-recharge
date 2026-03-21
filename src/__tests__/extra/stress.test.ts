@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Subscription } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -72,11 +73,11 @@ describe("reentrancy", () => {
 	it("unsubscribe self inside subscribe callback → safe", () => {
 		const s = state(0);
 		const values: number[] = [];
-		let unsub: () => void;
+		let unsub: Subscription;
 
 		unsub = subscribe(s, (v) => {
 			values.push(v);
-			if (v === 2) unsub();
+			if (v === 2) unsub.unsubscribe();
 		});
 
 		s.set(1);
@@ -415,7 +416,7 @@ describe("rapid churn", () => {
 
 		for (let i = 0; i < 100; i++) {
 			const unsub = subscribe(s, () => {});
-			unsub();
+			unsub.unsubscribe();
 		}
 
 		// After all unsubscriptions, new subscribers should still work
@@ -552,7 +553,7 @@ describe("memory safety", () => {
 		);
 
 		const unsub = subscribe(result, () => {});
-		unsub();
+		unsub.unsubscribe();
 
 		// After unsub, new subscription should work (fresh state)
 		const values: number[] = [];

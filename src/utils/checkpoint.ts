@@ -107,7 +107,7 @@ export function checkpoint<A>(
 				let upstreamEnded: { err: unknown } | null = null;
 
 				// Subscribe to upstream immediately — buffer during async load
-				const unsub = subscribe(
+				const sub = subscribe(
 					input,
 					(v) => {
 						if (!loadResolved) {
@@ -184,7 +184,7 @@ export function checkpoint<A>(
 				return () => {
 					active = false;
 					buffer.length = 0;
-					unsub();
+					sub.unsubscribe();
 				};
 			},
 			{ name: baseName, kind: "checkpoint" },

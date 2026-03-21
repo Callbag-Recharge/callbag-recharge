@@ -1,4 +1,5 @@
 import { derived } from "../../core/derived";
+import type { Subscription } from "../../core/protocol";
 import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe as coreSubscribe } from "../../core/subscribe";
@@ -22,7 +23,7 @@ interface StoreApi<T> {
 	setState: (partial: SetStateAction<T>, replace?: boolean) => void;
 	getState: () => T;
 	getInitialState: () => T;
-	subscribe: (listener: (state: T, prevState: T) => void) => () => void;
+	subscribe: (listener: (state: T, prevState: T) => void) => Subscription;
 }
 
 interface CreateStoreResult<T> extends StoreApi<T> {

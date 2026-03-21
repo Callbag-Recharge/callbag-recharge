@@ -1,6 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
-import { END, START } from "../core/protocol";
+import type { LifecycleSignal } from "../core/protocol";
+import { END, RESET, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -27,7 +28,7 @@ export function exhaustMap<A, B>(
 ): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
 		const store = producer<B>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				let innerTalkback: ((type: number) => void) | null = null;
 				let innerActive = false;
 				let outerDone = false;
@@ -50,7 +51,21 @@ export function exhaustMap<A, B>(
 					});
 				}
 
-				const outerUnsub = subscribe(
+				let outerSub: ReturnType<typeof subscribe>;
+
+				onSignal((s: LifecycleSignal) => {
+					outerSub.signal(s);
+					if (s === RESET) {
+						if (innerTalkback) {
+							innerTalkback(END);
+							innerTalkback = null;
+						}
+						innerActive = false;
+						outerDone = false;
+					}
+				});
+
+				outerSub = subscribe(
 					outer,
 					(v) => {
 						if (!innerActive) subscribeInner(fn(v));
@@ -69,7 +84,7 @@ export function exhaustMap<A, B>(
 
 				return () => {
 					if (innerTalkback) innerTalkback(END);
-					outerUnsub();
+					outerSub.unsubscribe();
 				};
 			},
 			opts && "initial" in opts ? { initial: opts.initial as B } : undefined,

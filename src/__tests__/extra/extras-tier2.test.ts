@@ -51,7 +51,7 @@ describe("interval", () => {
 		});
 
 		vi.advanceTimersByTime(250);
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(500);
 
 		expect(values).toEqual([0, 1]);
@@ -116,7 +116,7 @@ describe("fromEvent", () => {
 		const unsub = subscribe(s, () => {});
 
 		expect(addSpy).toHaveBeenCalledTimes(1);
-		unsub();
+		unsub.unsubscribe();
 		expect(removeSpy).toHaveBeenCalledTimes(1);
 		expect(removeSpy.mock.calls[0][0]).toBe("click");
 	});
@@ -158,7 +158,7 @@ describe("fromObs", () => {
 
 		const s = fromObs(obs);
 		const unsub = subscribe(s, () => {});
-		unsub();
+		unsub.unsubscribe();
 
 		expect(unsubSpy).toHaveBeenCalledTimes(1);
 	});
@@ -193,7 +193,7 @@ describe("fromPromise", () => {
 			if (v !== undefined) values.push(v);
 		});
 
-		unsub();
+		unsub.unsubscribe();
 		await p;
 		await new Promise((r) => setTimeout(r, 0));
 		expect(values).toEqual([]);
@@ -283,7 +283,7 @@ describe("combine", () => {
 		const b = state(2);
 		const c = combine(a, b);
 		const unsub = subscribe(c, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// should not throw
 	});
 });
@@ -319,7 +319,7 @@ describe("merge", () => {
 		});
 
 		a.set(1);
-		unsub();
+		unsub.unsubscribe();
 		a.set(2);
 		b.set(3);
 
@@ -371,7 +371,7 @@ describe("concat", () => {
 		const a = producer<number>(() => cleanup);
 		const c = concat(a);
 		const unsub = subscribe(c, () => {});
-		unsub();
+		unsub.unsubscribe();
 		expect(cleanup).toHaveBeenCalled();
 	});
 });
@@ -437,7 +437,7 @@ describe("flat", () => {
 		const outer = state<typeof inner | undefined>(inner);
 		const f = pipe(outer, flat());
 		const unsub = subscribe(f, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// should not throw
 	});
 
@@ -489,7 +489,7 @@ describe("skip", () => {
 		const s = state(0);
 		const sk = pipe(s, skip(1));
 		const unsub = subscribe(sk, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// should not throw
 	});
 });
@@ -555,7 +555,7 @@ describe("take", () => {
 		const s = state(0);
 		const t = pipe(s, take(5));
 		const unsub = subscribe(t, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// should not throw
 	});
 });
@@ -582,7 +582,7 @@ describe("forEach", () => {
 		const unsub = forEach<number>((v) => values.push(v))(s);
 
 		s.set(1);
-		unsub();
+		unsub.unsubscribe();
 		s.set(2);
 
 		expect(values).toEqual([1]);
@@ -637,7 +637,7 @@ describe("switchMap teardown verification", () => {
 		inner2.set(21);
 		expect(values).toEqual([21]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		// After full unsub, nothing should propagate
 		values.length = 0;
@@ -666,7 +666,7 @@ describe("concatMap teardown verification", () => {
 		inner.set(2);
 		expect(values).toEqual([1, 2]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		// After unsub, nothing propagates
 		values.length = 0;
@@ -695,7 +695,7 @@ describe("exhaustMap teardown verification", () => {
 		inner.set(2);
 		expect(values).toEqual([1, 2]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		values.length = 0;
 		inner.set(3);

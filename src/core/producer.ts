@@ -20,7 +20,7 @@
  */
 
 import { Inspector } from "./inspector";
-import type { Signal } from "./protocol";
+import type { LifecycleSignal, Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
@@ -29,6 +29,8 @@ import {
 	deferStart,
 	END,
 	isBatching,
+	isLifecycleSignal,
+	RESET,
 	RESOLVED,
 	S_COMPLETED,
 	S_DIRTY,
@@ -41,6 +43,7 @@ import {
 	STATE,
 	STATUS_MASK,
 	STATUS_SHIFT,
+	TEARDOWN,
 } from "./protocol";
 import type { ProducerStore, SourceOptions, Store } from "./types";
 
@@ -49,6 +52,8 @@ export type ProducerFn<T> = (actions: {
 	signal: (s: Signal) => void;
 	complete: () => void;
 	error: (e: unknown) => void;
+	/** Register a handler for lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) received via talkback. */
+	onSignal: (handler: (s: LifecycleSignal) => void) => void;
 }) => (() => void) | undefined;
 
 export type ProducerOpts<T> = SourceOptions<T> & {
@@ -93,6 +98,7 @@ export class ProducerImpl<T> {
 	_getterFn: ((cached: T | undefined) => T) | undefined;
 	_initial: T | undefined;
 	_singleDepCount = 0;
+	_onLifecycleSignal: ((s: LifecycleSignal) => void) | undefined;
 
 	constructor(fn?: ProducerFn<T>, opts?: ProducerOpts<T>) {
 		this._value = opts?.initial;
@@ -214,11 +220,15 @@ export class ProducerImpl<T> {
 	_start(): void {
 		if (this._flags & P_STARTED || !this._fn) return;
 		this._flags |= P_STARTED;
+		this._onLifecycleSignal = undefined;
 		const result = this._fn({
 			emit: this.emit,
 			signal: (s: Signal) => this.signal(s),
 			complete: () => this.complete(),
 			error: (e: unknown) => this.error(e),
+			onSignal: (handler: (s: LifecycleSignal) => void) => {
+				this._onLifecycleSignal = handler;
+			},
 		} as any);
 		this._cleanup = typeof result === "function" ? result : undefined;
 	}
@@ -226,10 +236,43 @@ export class ProducerImpl<T> {
 	_stop(): void {
 		if (!(this._flags & P_STARTED)) return;
 		this._flags &= ~P_STARTED;
+		this._onLifecycleSignal = undefined;
 		if (this._cleanup) this._cleanup();
 		this._cleanup = undefined;
 		if (this._flags & P_RESET) this._value = this._initial;
 		if (!(this._flags & P_COMPLETED)) this._flags = (this._flags & ~_STATUS_MASK) | _S_DISCONNECTED;
+	}
+
+	/**
+	 * Handle lifecycle signals received via talkback (upstream direction).
+	 * RESET: reset value to initial, notify factory via onSignal handler.
+	 * TEARDOWN: complete the producer (cascades END downstream).
+	 * PAUSE/RESUME: delegate to factory via onSignal handler.
+	 */
+	_handleLifecycleSignal(s: LifecycleSignal): void {
+		if (this._flags & P_COMPLETED) return;
+
+		if (s === TEARDOWN) {
+			// Terminal — call factory handler first, then complete
+			this._onLifecycleSignal?.(s);
+			this.complete();
+			return;
+		}
+
+		if (s === RESET) {
+			// Reset value to initial
+			this._value = this._initial;
+			this._flags &= ~P_PENDING;
+		}
+
+		// Delegate to factory's onSignal handler (RESET, PAUSE, RESUME)
+		this._onLifecycleSignal?.(s);
+
+		if (s === RESET) {
+			// Emit initial value after reset so downstream graph sees the new state
+			// (triggers DIRTY+DATA cycle for graph consistency)
+			this.emit(this._initial as T);
+		}
 	}
 
 	source(type: number, payload?: any): void {
@@ -258,10 +301,15 @@ export class ProducerImpl<T> {
 			let isSingleDep = false;
 			sink(START, (t: number, d?: any) => {
 				if (t === DATA) sink(DATA, this._value);
-				if (t === STATE && d === SINGLE_DEP && !isSingleDep) {
-					isSingleDep = true;
-					this._singleDepCount++;
-					if (!(this._flags & P_MULTI)) this._flags |= P_SKIP_DIRTY;
+				if (t === STATE) {
+					if (d === SINGLE_DEP && !isSingleDep) {
+						isSingleDep = true;
+						this._singleDepCount++;
+						if (!(this._flags & P_MULTI)) this._flags |= P_SKIP_DIRTY;
+					} else if (isLifecycleSignal(d)) {
+						this._handleLifecycleSignal(d);
+					}
+					return;
 				}
 				if (t === END) {
 					if (isSingleDep) {

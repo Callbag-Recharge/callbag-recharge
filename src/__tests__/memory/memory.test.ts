@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { effect } from "../../core/effect";
+import { subscribe } from "../../core/subscribe";
 import { collection } from "../../memory/collection";
 import { computeScore, decay } from "../../memory/decay";
 import { memoryNode } from "../../memory/node";
@@ -389,5 +390,47 @@ describe("collection — Phase 1: Collection", () => {
 		expect(none).toHaveLength(0);
 
 		col.destroy();
+	});
+
+	// -------------------------------------------------------------------------
+	// lifecycle signals (5f-5)
+	// -------------------------------------------------------------------------
+
+	it("destroy cascades END to derived stores (nodes, size)", () => {
+		const col = collection<string>();
+		col.add("a");
+		col.add("b");
+
+		let nodesEnded = false;
+		let sizeEnded = false;
+		subscribe(col.nodes, () => {}, {
+			onEnd: () => {
+				nodesEnded = true;
+			},
+		});
+		subscribe(col.size, () => {}, {
+			onEnd: () => {
+				sizeEnded = true;
+			},
+		});
+
+		col.destroy();
+
+		expect(nodesEnded).toBe(true);
+		expect(sizeEnded).toBe(true);
+	});
+
+	it("tag-tracking effects auto-dispose on collection destroy", () => {
+		const col = collection<string>();
+		const n1 = col.add("hello", { tags: ["x"] });
+
+		// Effect should be alive — tag changes tracked
+		n1.tag("y");
+		expect(col.tagIndex.get("y").has(n1.id)).toBe(true);
+
+		col.destroy();
+
+		// After destroy, collection is cleaned up
+		expect(col.tagIndex.get("x").size).toBe(0);
 	});
 });

@@ -1,6 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
-import { END, START } from "../core/protocol";
+import { END, RESET, START } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
@@ -16,7 +16,7 @@ import { subscribe } from "./subscribe";
  */
 export function window<A>(notifier: Store<unknown>): StoreOperator<A, Store<A> | undefined> {
 	return (input: Store<A>) => {
-		const store = producer<Store<A>>(({ emit, error, complete }) => {
+		const store = producer<Store<A>>(({ emit, error, complete, onSignal }) => {
 			let currentWindow: WritableStore<A> | null = state(input.get());
 			let done = false;
 			let notifierTalkback: ((type: number) => void) | null = null;
@@ -62,13 +62,20 @@ export function window<A>(notifier: Store<unknown>): StoreOperator<A, Store<A> |
 					if (done) return;
 					if (data !== undefined) {
 						done = true;
-						inputUnsub();
+						inputUnsub.unsubscribe();
 						error(data);
 					} else {
 						done = true;
-						inputUnsub();
+						inputUnsub.unsubscribe();
 						complete();
 					}
+				}
+			});
+
+			onSignal((s) => {
+				inputUnsub.signal(s);
+				if (s === RESET) {
+					currentWindow = null;
 				}
 			});
 
@@ -77,7 +84,7 @@ export function window<A>(notifier: Store<unknown>): StoreOperator<A, Store<A> |
 				currentWindow = null;
 				if (notifierTalkback) notifierTalkback(END);
 				notifierTalkback = null;
-				inputUnsub();
+				inputUnsub.unsubscribe();
 			};
 		});
 

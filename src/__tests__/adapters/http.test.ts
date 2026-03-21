@@ -42,7 +42,7 @@ describe("fromHTTP", () => {
 		expect(http.status.get()).toBe("active");
 		expect(http.fetchCount.get()).toBe(1);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 
@@ -64,7 +64,7 @@ describe("fromHTTP", () => {
 		expect(http.status.get()).toBe("errored");
 		expect(http.error.get()).toBeInstanceOf(Error);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 
@@ -80,7 +80,7 @@ describe("fromHTTP", () => {
 		expect(http.status.get()).toBe("errored");
 		expect(http.error.get()).toBeInstanceOf(Error);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 
@@ -104,7 +104,7 @@ describe("fromHTTP", () => {
 
 		expect(values).toEqual(["hello world"]);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 
@@ -137,7 +137,7 @@ describe("fromHTTP", () => {
 			}),
 		);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 
@@ -149,7 +149,7 @@ describe("fromHTTP", () => {
 
 		// stop should not throw
 		http.stop();
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("refetch() triggers a new fetch", async () => {
@@ -177,7 +177,7 @@ describe("fromHTTP", () => {
 		await new Promise((r) => setTimeout(r, 50));
 		expect(values.length).toBeGreaterThanOrEqual(2);
 
-		unsub();
+		unsub.unsubscribe();
 		http.stop();
 	});
 });

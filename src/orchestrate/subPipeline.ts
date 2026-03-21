@@ -149,7 +149,7 @@ export function subPipeline<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
-					let statusUnsub: (() => void) | undefined;
+					let statusUnsub: { unsubscribe(): void } | undefined;
 					let pendingReject: ((reason: unknown) => void) | undefined;
 
 					const safeEmit = (v: T | null) => {
@@ -165,7 +165,7 @@ export function subPipeline<T>(
 					const cleanup = () => {
 						stopped = true;
 						if (statusUnsub) {
-							statusUnsub();
+							statusUnsub.unsubscribe();
 							statusUnsub = undefined;
 						}
 						// Reject pending Promise so it settles and frees closures
@@ -216,7 +216,7 @@ export function subPipeline<T>(
 								if (stopped || settled) return;
 								if (status === "completed") {
 									settled = true;
-									statusUnsub?.();
+									statusUnsub?.unsubscribe();
 									const result = outputStore.get() as T;
 									// Clear pendingReject BEFORE safeComplete — complete()
 									// synchronously triggers switchMap teardown → cleanup(),
@@ -227,7 +227,7 @@ export function subPipeline<T>(
 									resolve(result);
 								} else if (status === "errored") {
 									settled = true;
-									statusUnsub?.();
+									statusUnsub?.unsubscribe();
 									pendingReject = undefined;
 									reject(new Error("subPipeline: child pipeline errored"));
 								}

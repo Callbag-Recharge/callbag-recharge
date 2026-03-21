@@ -23,7 +23,7 @@ describe("fromTrigger", () => {
 		trigger.fire(1);
 		trigger.fire(2);
 		trigger.fire(3);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([1, 2, 3]);
 	});
@@ -36,7 +36,7 @@ describe("fromTrigger", () => {
 		trigger.fire("go");
 		trigger.fire("go");
 		trigger.fire("go");
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual(["go", "go", "go"]);
 	});
@@ -65,7 +65,7 @@ describe("fromTrigger", () => {
 		expect(values).toEqual([]); // no callback for current value
 		trigger.fire(100);
 		expect(values).toEqual([100]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("multiple subscribers receive the same values", () => {
@@ -77,8 +77,8 @@ describe("fromTrigger", () => {
 
 		trigger.fire(1);
 		trigger.fire(2);
-		u1();
-		u2();
+		u1.unsubscribe();
+		u2.unsubscribe();
 
 		expect(v1).toEqual([1, 2]);
 		expect(v2).toEqual([1, 2]);
@@ -89,12 +89,12 @@ describe("fromTrigger", () => {
 		const v1: number[] = [];
 		const u1 = subscribe(trigger, (v) => v1.push(v!));
 		trigger.fire(1);
-		u1();
+		u1.unsubscribe();
 
 		const v2: number[] = [];
 		const u2 = subscribe(trigger, (v) => v2.push(v!));
 		trigger.fire(2);
-		u2();
+		u2.unsubscribe();
 
 		expect(v1).toEqual([1]);
 		expect(v2).toEqual([2]);
@@ -107,7 +107,7 @@ describe("fromTrigger", () => {
 		const v1: number[] = [];
 		const u1 = subscribe(trigger, (v) => v1.push(v!));
 		trigger.fire(1);
-		u1();
+		u1.unsubscribe();
 		expect(v1).toEqual([1]);
 
 		// Fire while disconnected — no subscribers
@@ -123,7 +123,7 @@ describe("fromTrigger", () => {
 		trigger.fire(99);
 		expect(v2).toEqual([99]);
 		expect(trigger.get()).toBe(99);
-		u2();
+		u2.unsubscribe();
 	});
 
 	it("get() stays consistent with _lastValue across lifecycle", () => {
@@ -133,14 +133,14 @@ describe("fromTrigger", () => {
 		const u1 = subscribe(trigger, () => {});
 		trigger.fire("a");
 		expect(trigger.get()).toBe("a");
-		u1(); // disconnect
+		u1.unsubscribe(); // disconnect
 
 		trigger.fire("b"); // fire while disconnected
 		expect(trigger.get()).toBe("b");
 
 		const u2 = subscribe(trigger, () => {}); // reconnect
 		expect(trigger.get()).toBe("b"); // still consistent
-		u2();
+		u2.unsubscribe();
 	});
 });
 
@@ -162,8 +162,8 @@ describe("route", () => {
 		n.set(4);
 		n.set(5);
 
-		u1();
-		u2();
+		u1.unsubscribe();
+		u2.unsubscribe();
 
 		expect(evenVals).toEqual([2, 4]);
 		expect(oddVals).toEqual([3, 5]);
@@ -225,12 +225,12 @@ describe("route", () => {
 		const v1: number[] = [];
 		const u1 = subscribe(evens, (v) => v1.push(v));
 		n.set(2);
-		u1();
+		u1.unsubscribe();
 
 		const v2: number[] = [];
 		const u2 = subscribe(evens, (v) => v2.push(v));
 		n.set(4);
-		u2();
+		u2.unsubscribe();
 
 		expect(v1).toEqual([2]);
 		expect(v2).toEqual([4]);
@@ -261,7 +261,7 @@ describe("timeout", () => {
 		vi.advanceTimersByTime(50);
 		input.set(3);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(values).toEqual([1, 2, 3]);
 	});
 
@@ -333,7 +333,7 @@ describe("withBreaker", () => {
 
 		input.set(1);
 		input.set(2);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([1, 2]);
 	});
@@ -351,7 +351,7 @@ describe("withBreaker", () => {
 
 		input.set(1);
 		input.set(2);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([]);
 	});
@@ -402,7 +402,7 @@ describe("withBreaker", () => {
 		input.set(1);
 
 		expect(guarded.breakerState.get()).toBe("open");
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 
@@ -431,7 +431,7 @@ describe("retry", () => {
 
 		expect(attempts).toBe(3);
 		expect(values).toContain(42);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("errors after exhausting retries", () => {
@@ -469,7 +469,7 @@ describe("retry", () => {
 		const meta = (retried as any).retryMeta.get();
 
 		expect(meta.attempt).toBe(2); // 2 retries before success
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("respects while predicate", () => {
@@ -529,7 +529,7 @@ describe("retry", () => {
 		expect(attempts).toBe(3); // third attempt succeeds
 		expect(values).toContain(42);
 
-		unsub();
+		unsub.unsubscribe();
 		vi.useRealTimers();
 	});
 
@@ -561,7 +561,7 @@ describe("track", () => {
 
 		const unsub = subscribe(tracked, () => {});
 		expect(tracked.meta.get().status).toBe("idle");
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("transitions to active on first value", () => {
@@ -572,7 +572,7 @@ describe("track", () => {
 		input.set(1);
 		expect(tracked.meta.get().status).toBe("active");
 		expect(tracked.meta.get().count).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("counts values", () => {
@@ -584,7 +584,7 @@ describe("track", () => {
 		input.set(2);
 		input.set(3);
 		expect(tracked.meta.get().count).toBe(3);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("transitions to completed on upstream complete", () => {
@@ -631,7 +631,7 @@ describe("track", () => {
 		const unsub = subscribe(tracked, (v) => values.push(v));
 		input.set(1);
 		input.set(2);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([1, 2]);
 	});
@@ -649,7 +649,7 @@ describe("track", () => {
 		input.set(1);
 		input.set(2);
 
-		unsub();
+		unsub.unsubscribe();
 		dispose();
 
 		expect(statuses).toContain("active");
@@ -689,7 +689,7 @@ describe("gate", () => {
 		expect(values).toEqual([]);
 		expect(gated.pending.get()).toEqual([1, 2]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("approve() forwards next pending value", () => {
@@ -706,7 +706,7 @@ describe("gate", () => {
 		expect(values).toEqual([1]);
 		expect(gated.pending.get()).toEqual([2]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("approve(n) forwards multiple pending values", () => {
@@ -724,7 +724,7 @@ describe("gate", () => {
 		expect(values).toEqual([1, 2]);
 		expect(gated.pending.get()).toEqual([3]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("reject() discards pending values", () => {
@@ -741,7 +741,7 @@ describe("gate", () => {
 		expect(values).toEqual([]);
 		expect(gated.pending.get()).toEqual([2]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("modify() transforms and forwards", () => {
@@ -757,7 +757,7 @@ describe("gate", () => {
 		expect(values).toEqual([50]);
 		expect(gated.pending.get()).toEqual([]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("open() flushes pending and auto-approves", () => {
@@ -778,7 +778,7 @@ describe("gate", () => {
 		input.set(3);
 		expect(values).toEqual([1, 2, 3]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("close() re-enables gating", () => {
@@ -796,7 +796,7 @@ describe("gate", () => {
 		expect(values).toEqual([1]); // gated again
 		expect(gated.pending.get()).toEqual([2]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("startOpen option auto-approves from the start", () => {
@@ -812,7 +812,7 @@ describe("gate", () => {
 		expect(values).toEqual([1, 2]);
 		expect(gated.isOpen.get()).toBe(true);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("maxPending drops oldest values", () => {
@@ -827,7 +827,7 @@ describe("gate", () => {
 
 		expect(gated.pending.get()).toEqual([2, 3]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream errors", () => {
@@ -875,7 +875,7 @@ describe("gate", () => {
 		input.set(2);
 		gated.approve();
 
-		unsub();
+		unsub.unsubscribe();
 		dispose();
 
 		expect(pendingLengths).toContain(1);
@@ -889,11 +889,11 @@ describe("gate", () => {
 		const unsub1 = subscribe(gated, () => {});
 		input.set(1);
 		expect(gated.pending.get()).toEqual([1]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const unsub2 = subscribe(gated, () => {});
 		expect(gated.pending.get()).toEqual([]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -952,7 +952,7 @@ describe("gate — maxPending validation (P6)", () => {
 		input.set(1);
 		input.set(2);
 		expect(gated.pending.get()).toEqual([2]); // oldest dropped
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 
@@ -964,7 +964,7 @@ describe("gate — isOpen reconnect reset (P1)", () => {
 		const u1 = subscribe(gated, () => {});
 		gated.open();
 		expect(gated.isOpen.get()).toBe(true);
-		u1();
+		u1.unsubscribe();
 
 		// Reconnect — should reset to closed
 		const values: number[] = [];
@@ -974,7 +974,7 @@ describe("gate — isOpen reconnect reset (P1)", () => {
 		input.set(1);
 		expect(values).toEqual([]); // gated again
 		expect(gated.pending.get()).toEqual([1]);
-		u2();
+		u2.unsubscribe();
 	});
 
 	it("resets isOpen to startOpen=true after close() + teardown + reconnect", () => {
@@ -984,7 +984,7 @@ describe("gate — isOpen reconnect reset (P1)", () => {
 		const u1 = subscribe(gated, () => {});
 		gated.close();
 		expect(gated.isOpen.get()).toBe(false);
-		u1();
+		u1.unsubscribe();
 
 		// Reconnect — should reset to open
 		const values: number[] = [];
@@ -993,7 +993,7 @@ describe("gate — isOpen reconnect reset (P1)", () => {
 
 		input.set(1);
 		expect(values).toEqual([1]); // auto-approved
-		u2();
+		u2.unsubscribe();
 	});
 });
 
@@ -1050,7 +1050,7 @@ describe("retry — stopped guard on teardown (P4)", () => {
 		expect(attempts).toBe(1);
 
 		// Teardown during delay — should not throw
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(1000);
 		expect(attempts).toBe(1); // no reconnect after teardown
 
@@ -1083,8 +1083,8 @@ describe("Phase 1 integration", () => {
 		expect(highTracked.meta.get().count).toBe(2);
 		expect(lowTracked.meta.get().count).toBe(1);
 
-		u1();
-		u2();
+		u1.unsubscribe();
+		u2.unsubscribe();
 	});
 
 	it("gate → timeout composition", () => {

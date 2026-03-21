@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -16,7 +17,7 @@ import { subscribe } from "./subscribe";
 export function bufferCount<A>(count: number, startEvery?: number): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {
 		const store = producer<A[]>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				if (startEvery !== undefined && startEvery > 0) {
 					// Sliding window: multiple overlapping buffers
 					let buffers: A[][] = [];
@@ -70,9 +71,17 @@ export function bufferCount<A>(count: number, startEvery?: number): StoreOperato
 						},
 					);
 
+					onSignal((s) => {
+						unsub.signal(s);
+						if (s === RESET) {
+							buffers = [];
+							emitCount = 0;
+						}
+					});
+
 					return () => {
 						buffers = [];
-						unsub();
+						unsub.unsubscribe();
 					};
 				}
 
@@ -108,9 +117,16 @@ export function bufferCount<A>(count: number, startEvery?: number): StoreOperato
 					},
 				);
 
+				onSignal((s) => {
+					unsub.signal(s);
+					if (s === RESET) {
+						currentBuffer = [];
+					}
+				});
+
 				return () => {
 					currentBuffer = [];
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: [] as A[] },

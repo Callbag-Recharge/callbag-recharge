@@ -15,16 +15,20 @@
 
 import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
+import type { LifecycleSignal } from "./protocol";
 import {
 	beginDeferredStart,
 	DATA,
 	DIRTY,
 	END,
 	endDeferredStart,
+	isLifecycleSignal,
+	RESET,
 	RESOLVED,
 	SINGLE_DEP,
 	START,
 	STATE,
+	TEARDOWN,
 } from "./protocol";
 import type { Store } from "./types";
 
@@ -65,7 +69,7 @@ export function effect(
 	opts?: { name?: string },
 ): () => void {
 	let cleanup: (() => void) | undefined;
-	const talkbacks: Array<(type: number) => void> = [];
+	const talkbacks: Array<(type: number, data?: any) => void> = [];
 	let disposed = false;
 	const dirtyDeps = new Bitmask(deps.length);
 	let anyDataReceived = false;
@@ -76,6 +80,37 @@ export function effect(
 		cleanup = fn();
 	}
 
+	let generation = 0;
+
+	function handleLifecycleSignal(s: LifecycleSignal): void {
+		if (disposed) return;
+
+		if (s === TEARDOWN) {
+			// Forward TEARDOWN upstream
+			for (const tb of talkbacks) tb(STATE, TEARDOWN);
+			// Clear talkbacks after TEARDOWN loop — skip separate END sends
+			// since TEARDOWN already signals terminal intent upstream
+			talkbacks.length = 0;
+			disposed = true;
+			if (cleanup) cleanup();
+			cleanup = undefined;
+			return;
+		}
+
+		if (s === RESET) {
+			// Increment generation to discard pre-RESET DATA signals
+			// that may arrive from deps still in their DIRTY cycle
+			generation++;
+			// Reset dirty tracking, run cleanup + re-execute
+			dirtyDeps.reset();
+			anyDataReceived = false;
+			run();
+		}
+
+		// Forward all lifecycle signals upstream
+		for (const tb of talkbacks) tb(STATE, s);
+	}
+
 	beginDeferredStart();
 
 	run();
@@ -83,6 +118,7 @@ export function effect(
 	for (let i = 0; i < deps.length; i++) {
 		if (disposed) break;
 		const depIndex = i;
+		let sinkGen = generation;
 		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) {
 				talkbacks.push(data);
@@ -91,6 +127,14 @@ export function effect(
 			}
 			if (disposed) return;
 			if (type === STATE) {
+				if (isLifecycleSignal(data)) {
+					handleLifecycleSignal(data);
+					// After RESET, update sink generation to accept new signals
+					sinkGen = generation;
+					return;
+				}
+				// Discard pre-RESET signals from stale generation
+				if (sinkGen !== generation) return;
 				if (data === DIRTY) {
 					if (dirtyDeps.empty()) anyDataReceived = false;
 					dirtyDeps.set(depIndex);
@@ -105,6 +149,8 @@ export function effect(
 				}
 			}
 			if (type === DATA) {
+				// Discard pre-RESET DATA from stale generation
+				if (sinkGen !== generation) return;
 				if (dirtyDeps.test(depIndex)) {
 					dirtyDeps.clear(depIndex);
 					anyDataReceived = true;
@@ -142,6 +188,9 @@ export function effect(
 		for (const tb of talkbacks) tb(END);
 		talkbacks.length = 0;
 	};
+
+	// Attach signal method to dispose for external lifecycle control
+	(dispose as any).signal = (s: LifecycleSignal) => handleLifecycleSignal(s);
 
 	Inspector.register(dispose, { kind: "effect", ...opts, deps });
 	for (const dep of deps) Inspector.registerEdge(dep, dispose);

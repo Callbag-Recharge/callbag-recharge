@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -15,7 +16,7 @@ import { subscribe } from "./subscribe";
 export function toArray<A>(): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {
 		const store = producer<A[]>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				let items: A[] = [];
 
 				const unsub = subscribe(
@@ -39,9 +40,16 @@ export function toArray<A>(): StoreOperator<A, A[]> {
 					},
 				);
 
+				onSignal((s) => {
+					unsub.signal(s);
+					if (s === RESET) {
+						items = [];
+					}
+				});
+
 				return () => {
 					items = [];
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: [] as A[] },

@@ -3,38 +3,36 @@
  *
  * Used as the base for:
  * - External subscribe (extra/subscribe re-exports this)
- * - Derived's dep connections (STANDALONE mode)
- * - Effect's dep connections
+ * - Internal wiring in tier 2 operators, orchestrate, etc.
  *
- * v4: Handles callbag START handshake, filters STATE for user callbacks,
- * provides prev-value tracking. Returns unsub function.
+ * v7: Returns Subscription object { unsubscribe(), signal() } instead of
+ * bare () => void. signal() sends lifecycle signals upstream via talkback.
+ * Breaking change — all callsites must update.
  */
 
-import { beginDeferredStart, END, endDeferredStart, START } from "./protocol";
+import type { LifecycleSignal, Subscription } from "./protocol";
+import { beginDeferredStart, END, endDeferredStart, START, STATE } from "./protocol";
 import type { Store } from "./types";
 
 /**
- * Subscribes to a store’s DATA emissions with previous-value tracking. Returns an unsubscribe function.
- * Does not invoke the callback for the current value at subscribe time (Rx-style); only subsequent changes.
+ * Subscribes to a store's DATA emissions with previous-value tracking.
+ * Returns a Subscription with `unsubscribe()` and `signal()` for upstream lifecycle control.
  *
  * @param store - The `Store<T>` to listen to.
  * @param cb - Called with `(nextValue, previousValue)` on each DATA after subscribe.
  * @param opts - Optional `onEnd` when the stream completes or errors.
  *
- * @returns `() => void` — call to unsubscribe (sends END on talkback).
- *
- * @remarks **Deferred start:** Works with `beginDeferredStart` / `endDeferredStart` batching used internally.
+ * @returns `Subscription` — `unsubscribe()` to disconnect, `signal(s)` to send lifecycle signals upstream.
  *
  * @example
  * ```ts
- * import { state, subscribe } from 'callbag-recharge';
+ * import { state, subscribe, RESET } from 'callbag-recharge';
  *
  * const n = state(0);
- * const stop = subscribe(n, (v, prev) => {
- *   // prev is undefined on first emission after subscribe
- * });
+ * const sub = subscribe(n, (v, prev) => console.log(v));
  * n.set(1);
- * stop();
+ * sub.signal(RESET);    // send RESET upstream
+ * sub.unsubscribe();    // disconnect
  * ```
  *
  * @seeAlso [effect](./effect), [forEach](/api/forEach) — simpler value-only subscription
@@ -43,8 +41,8 @@ export function subscribe<T>(
 	store: Store<T>,
 	cb: (value: T, prev: T | undefined) => void,
 	opts?: { onEnd?: (error?: unknown) => void },
-): () => void {
-	let talkback: ((type: number) => void) | null = null;
+): Subscription {
+	let talkback: ((type: number, data?: any) => void) | null = null;
 
 	beginDeferredStart();
 
@@ -80,5 +78,13 @@ export function subscribe<T>(
 
 	endDeferredStart();
 
-	return () => talkback?.(END);
+	return {
+		unsubscribe() {
+			talkback?.(END);
+			talkback = null;
+		},
+		signal(s: LifecycleSignal) {
+			talkback?.(STATE, s);
+		},
+	};
 }

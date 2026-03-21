@@ -168,7 +168,7 @@ describe("pipeline", () => {
 
 		expect(values).toEqual([10, 20]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -244,8 +244,8 @@ describe("pipeline", () => {
 		expect(positiveVals).toEqual([5, 10]);
 		expect(negativeVals).toEqual([-3]);
 
-		u1();
-		u2();
+		u1.unsubscribe();
+		u2.unsubscribe();
 		wf.destroy();
 	});
 
@@ -326,7 +326,7 @@ describe("pipeline", () => {
 		gated.approve(2); // approve both
 		expect(values).toEqual(["task-1", "task-2"]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -366,7 +366,7 @@ describe("approval controls after destroy", () => {
 		gated.approve();
 
 		// Tear down
-		unsub();
+		unsub.unsubscribe();
 
 		// Controls should throw after teardown
 		expect(() => gated.approve()).toThrow("torn down");

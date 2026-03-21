@@ -1,6 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
-import { END, START } from "../core/protocol";
+import { END, RESET, START } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -20,7 +20,7 @@ import { subscribe } from "./subscribe";
 export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {
 		const store = producer<A[]>(
-			({ emit, complete, error }) => {
+			({ emit, complete, error, onSignal }) => {
 				let currentBuffer: A[] = [];
 				let done = false;
 
@@ -81,7 +81,14 @@ export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 							flushAndComplete();
 						}
 						// Clean up input
-						inputUnsub();
+						inputUnsub.unsubscribe();
+					}
+				});
+
+				onSignal((s) => {
+					inputUnsub.signal(s);
+					if (s === RESET) {
+						currentBuffer = [];
 					}
 				});
 
@@ -90,7 +97,7 @@ export function buffer<A>(notifier: Store<unknown>): StoreOperator<A, A[]> {
 					if (notifierTalkback) notifierTalkback(END);
 					notifierTalkback = null;
 					currentBuffer = [];
-					inputUnsub();
+					inputUnsub.unsubscribe();
 				};
 			},
 			{ initial: [] as A[] },

@@ -209,7 +209,7 @@ describe("createStore", () => {
 		store.getState().increment();
 		expect(listener).toHaveBeenCalledTimes(1);
 
-		unsub();
+		unsub.unsubscribe();
 		store.getState().increment();
 		expect(listener).toHaveBeenCalledTimes(1); // no additional call
 	});

@@ -27,7 +27,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		const nonNull = results.filter((r) => r !== null);
 		expect(nonNull).toContain(20); // 5 * 2 + 10
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -52,7 +52,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		const nonNull = results.filter((r) => r !== null);
 		expect(nonNull.some((r) => typeof r === "string" && r.includes("step2"))).toBe(true);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -87,7 +87,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		// Should be success
 		expect(subStep.status.get()).toBe("success");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -126,7 +126,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		const nonNull = results.filter((r) => r !== null);
 		expect(nonNull[nonNull.length - 1]).toBe(2);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -155,7 +155,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		expect(subStep.status.get()).toBe("error");
 		expect(subStep.error.get()).toBeInstanceOf(Error);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -181,7 +181,7 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		const nonNull = results.filter((r) => r !== null);
 		expect(nonNull.some((r) => r === "hello-42")).toBe(true);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -205,6 +205,6 @@ describe("subPipeline (nested pipeline invocation)", () => {
 
 		// Destroy parent while child is running — should not throw
 		wf.destroy();
-		unsub();
+		unsub.unsubscribe();
 	});
 });

@@ -208,7 +208,7 @@ describe("reactiveLog", () => {
 			{ type: "append", seq: 1, value: "a" },
 			{ type: "append", seq: 2, value: "b" },
 		]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("events emits on clear", () => {
@@ -220,7 +220,7 @@ describe("reactiveLog", () => {
 		log.append("a");
 		log.clear();
 		expect(events[events.length - 1]).toEqual({ type: "clear" });
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	// --- Lifecycle ---

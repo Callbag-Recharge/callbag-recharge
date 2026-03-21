@@ -72,7 +72,7 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(2); // skipped
 		s.set(3); // passed
 		expect(values1).toEqual([3]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — operator re-inits, counter should reset
 		const values2: number[] = [];
@@ -81,7 +81,7 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(5); // skipped
 		s.set(6); // passed
 		expect(values2).toEqual([6]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("pairwise: prev buffer resets on reconnect", () => {
@@ -92,7 +92,7 @@ describe("Tier 1 operators — reconnect", () => {
 		const unsub1 = subscribe(pw, (v) => values1.push(v as [number, number]));
 		s.set(1); // [0, 1]? No — pairwise needs 2 DATA emissions, not initial value
 		s.set(2);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — prev should reset
 		const values2: [number, number][] = [];
@@ -103,7 +103,7 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(20);
 		// First DATA after reconnect buffers, second creates pair
 		expect(values2.length).toBeGreaterThanOrEqual(1);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("scan: accumulator resets to seed on reconnect", () => {
@@ -118,14 +118,14 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(1); // 0 + 1 = 1
 		s.set(2); // 1 + 2 = 3
 		expect(values1).toEqual([1, 3]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — accumulator resets to seed (0)
 		const values2: number[] = [];
 		const unsub2 = subscribe(sc, (v) => values2.push(v));
 		s.set(10); // 0 + 10 = 10 (reset!)
 		expect(values2).toEqual([10]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("distinctUntilChanged: cached value resets on reconnect", () => {
@@ -137,7 +137,7 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(2);
 		s.set(2); // suppressed
 		expect(values1).toEqual([2]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — cached value resets. Now input.get() returns 2.
 		const values2: number[] = [];
@@ -145,7 +145,7 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(2); // Was 2 at reconnect, so this is a duplicate
 		s.set(3);
 		expect(values2).toEqual([3]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("map: stateless, reconnect works", () => {
@@ -159,13 +159,13 @@ describe("Tier 1 operators — reconnect", () => {
 		const unsub1 = subscribe(m, (v) => values1.push(v));
 		s.set(5);
 		expect(values1).toEqual([10]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const values2: number[] = [];
 		const unsub2 = subscribe(m, (v) => values2.push(v));
 		s.set(10);
 		expect(values2).toEqual([20]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("filter: stateless, reconnect works", () => {
@@ -180,14 +180,14 @@ describe("Tier 1 operators — reconnect", () => {
 		s.set(3); // filtered
 		s.set(10); // passed
 		expect(values1).toEqual([10]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const values2: number[] = [];
 		const unsub2 = subscribe(f, (v) => values2.push(v as number));
 		s.set(2); // filtered
 		s.set(20); // passed
 		expect(values2).toEqual([20]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("merge: all sources re-subscribed on reconnect", () => {
@@ -200,14 +200,14 @@ describe("Tier 1 operators — reconnect", () => {
 		a.set(1);
 		b.set(2);
 		expect(values1).toEqual([1, 2]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const values2: number[] = [];
 		const unsub2 = subscribe(m, (v) => values2.push(v as number));
 		a.set(10);
 		b.set(20);
 		expect(values2).toEqual([10, 20]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("combine: all sources re-subscribed on reconnect", () => {
@@ -219,13 +219,13 @@ describe("Tier 1 operators — reconnect", () => {
 		const unsub1 = subscribe(c, (v) => values1.push(v as [number, number]));
 		a.set(10);
 		expect(values1).toEqual([[10, 2]]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const values2: [number, number][] = [];
 		const unsub2 = subscribe(c, (v) => values2.push(v as [number, number]));
 		b.set(20);
 		expect(values2).toEqual([[10, 20]]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("partition: both branches re-subscribe on reconnect", () => {
@@ -245,8 +245,8 @@ describe("Tier 1 operators — reconnect", () => {
 		expect(evenValues1).toEqual([2]);
 		expect(oddValues1).toEqual([3]);
 
-		unsub1e();
-		unsub1o();
+		unsub1e.unsubscribe();
+		unsub1o.unsubscribe();
 
 		// Reconnect
 		const evenValues2: number[] = [];
@@ -259,8 +259,8 @@ describe("Tier 1 operators — reconnect", () => {
 		expect(evenValues2).toEqual([4]);
 		expect(oddValues2).toEqual([5]);
 
-		unsub2e();
-		unsub2o();
+		unsub2e.unsubscribe();
+		unsub2o.unsubscribe();
 	});
 });
 
@@ -278,7 +278,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(1);
 		vi.advanceTimersByTime(100);
 		expect(values1).toEqual([1]);
-		unsub1(); // cleanup clears timer
+		unsub1.unsubscribe(); // cleanup clears timer
 
 		// Reconnect — timer state should be fresh
 		const values2: number[] = [];
@@ -288,7 +288,7 @@ describe("Tier 2 operators — reconnect", () => {
 		expect(values2).toEqual([]);
 		vi.advanceTimersByTime(50); // now
 		expect(values2).toEqual([10]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("throttle: timer state cleared on reconnect", () => {
@@ -300,14 +300,14 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(1); // passes (leading edge)
 		s.set(2); // throttled
 		expect(values1).toEqual([1]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — throttle window should be fresh
 		const values2: number[] = [];
 		const unsub2 = subscribe(t, (v) => values2.push(v as number));
 		s.set(10); // should pass (fresh window)
 		expect(values2).toEqual([10]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("delay: no pending timers on reconnect", () => {
@@ -317,7 +317,7 @@ describe("Tier 2 operators — reconnect", () => {
 		const values1: number[] = [];
 		const unsub1 = subscribe(d, (v) => values1.push(v as number));
 		s.set(1);
-		unsub1(); // cleanup clears pending timers
+		unsub1.unsubscribe(); // cleanup clears pending timers
 
 		vi.advanceTimersByTime(200);
 		expect(values1).toEqual([]); // timer was cleared
@@ -328,7 +328,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(10);
 		vi.advanceTimersByTime(100);
 		expect(values2).toEqual([10]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("bufferTime: buffer empty, timer restarted on reconnect", () => {
@@ -341,7 +341,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(2);
 		vi.advanceTimersByTime(100);
 		expect(values1).toEqual([[1, 2]]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect
 		const values2: number[][] = [];
@@ -349,7 +349,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(10);
 		vi.advanceTimersByTime(100);
 		expect(values2).toEqual([[10]]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("timeout: timer restarted on reconnect", () => {
@@ -360,7 +360,7 @@ describe("Tier 2 operators — reconnect", () => {
 		const unsub1 = subscribe(t, (v) => values1.push(v as number));
 		s.set(1);
 		expect(values1).toEqual([1]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — timeout timer restarts from scratch
 		const values2: number[] = [];
@@ -384,7 +384,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(5);
 		notifier.set(1);
 		expect(values1).toEqual([5]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — latest value should start fresh from s.get()
 		const values2: number[] = [];
@@ -394,7 +394,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(10);
 		notifier.set(3);
 		expect(values2).toEqual([5, 10]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("switchMap: no active inner on reconnect", () => {
@@ -412,7 +412,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(1);
 		inner1.set(101);
 		expect(values1).toEqual([100, 101]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — no active inner until outer emits
 		const values2: number[] = [];
@@ -422,7 +422,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(1); // switches back to inner1
 		inner1.set(102);
 		expect(values2).toContain(102);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("concatMap: queue empty on reconnect", () => {
@@ -435,7 +435,7 @@ describe("Tier 2 operators — reconnect", () => {
 		const values1: number[] = [];
 		const unsub1 = subscribe(sm, (v) => values1.push(v as number));
 		expect(values1.length).toBeGreaterThanOrEqual(0);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect
 		const values2: number[] = [];
@@ -443,7 +443,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(5);
 		// Should get values from fresh subscription
 		expect(values2.length).toBeGreaterThanOrEqual(0);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("exhaustMap: not locked on reconnect", () => {
@@ -460,7 +460,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(1);
 		// Inner is active (p not completed)
 		s.set(2); // ignored because inner is active
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — should not be locked
 		const values2: number[] = [];
@@ -469,7 +469,7 @@ describe("Tier 2 operators — reconnect", () => {
 		s.set(3);
 		p.emit(42);
 		expect(values2).toContain(42);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("retry: retry count reset on reconnect", () => {
@@ -508,7 +508,7 @@ describe("Tier 2 operators — reconnect", () => {
 		p.emit(1);
 		p.error("boom"); // should switch to fallback
 		expect(values1).toContain(1);
-		unsub1();
+		unsub1.unsubscribe();
 	});
 });
 
@@ -532,7 +532,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		expect(initCount).toBe(1);
 		expect(values1).toEqual([10]);
 
-		unsub1();
+		unsub1.unsubscribe();
 		expect(cleanupCount).toBe(1);
 
 		// Reconnect
@@ -541,7 +541,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		expect(initCount).toBe(2);
 		expect(values2).toEqual([20]);
 
-		unsub2();
+		unsub2.unsubscribe();
 		expect(cleanupCount).toBe(2);
 	});
 
@@ -557,7 +557,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		expect(d.get()).toBe(2);
 		computeCount = 0;
 
-		unsub1(); // disconnects upstream
+		unsub1.unsubscribe(); // disconnects upstream
 
 		// After disconnect, get() recomputes on demand
 		s.set(5);
@@ -572,7 +572,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		s.set(10);
 		expect(values).toEqual([20]);
 
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("state: reconnect is transparent (state persists)", () => {
@@ -582,7 +582,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		const unsub1 = subscribe(s, (v) => values1.push(v));
 		s.set(1);
 		expect(values1).toEqual([1]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// State persists across disconnect/reconnect
 		expect(s.get()).toBe(1);
@@ -592,7 +592,7 @@ describe("Core primitives — reconnect/lifecycle", () => {
 		s.set(2);
 		expect(values2).toEqual([2]);
 		expect(s.get()).toBe(2);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("operator: init re-runs on reconnect", () => {
@@ -613,11 +613,11 @@ describe("Core primitives — reconnect/lifecycle", () => {
 
 		const unsub1 = subscribe(op, () => {});
 		expect(initRuns).toBe(1);
-		unsub1();
+		unsub1.unsubscribe();
 
 		const unsub2 = subscribe(op, () => {});
 		expect(initRuns).toBe(2);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("effect: cleanup called, dispose required (no automatic reconnect)", () => {

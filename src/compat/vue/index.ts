@@ -34,12 +34,12 @@ import type { Store, WritableStore } from "../../core/types";
 export function useSubscribe<T>(store: Store<T>): Readonly<Ref<T>> {
 	const ref = shallowRef(store.get()) as Ref<T>;
 
-	const unsub = subscribe(store, (value) => {
+	const sub = subscribe(store, (value) => {
 		ref.value = value;
 	});
 
 	if (getCurrentScope()) {
-		onScopeDispose(unsub);
+		onScopeDispose(() => sub.unsubscribe());
 	} else if (typeof console !== "undefined") {
 		console.warn(
 			"[callbag-recharge] useSubscribe called outside a Vue scope — subscription will not be auto-disposed.",
@@ -69,12 +69,12 @@ export function useSubscribe<T>(store: Store<T>): Readonly<Ref<T>> {
 export function useStore<T>(store: WritableStore<T>): Ref<T> {
 	const inner = shallowRef(store.get()) as Ref<T>;
 
-	const unsub = subscribe(store, (value) => {
+	const sub = subscribe(store, (value) => {
 		inner.value = value;
 	});
 
 	if (getCurrentScope()) {
-		onScopeDispose(unsub);
+		onScopeDispose(() => sub.unsubscribe());
 	} else if (typeof console !== "undefined") {
 		console.warn(
 			"[callbag-recharge] useStore called outside a Vue scope — subscription will not be auto-disposed.",

@@ -37,7 +37,7 @@ describe("Producer output slot", () => {
 		expect(values2).toEqual([42]);
 
 		// Remove second: MULTI → SINGLE
-		unsub2();
+		unsub2.unsubscribe();
 		expect(impl._output).not.toBeInstanceOf(Set);
 		expect(impl._output).not.toBeNull();
 
@@ -47,7 +47,7 @@ describe("Producer output slot", () => {
 		expect(values2).toEqual([42]); // no longer subscribed
 
 		// Remove last: SINGLE → null
-		unsub1();
+		unsub1.unsubscribe();
 		expect(impl._output).toBeNull();
 	});
 
@@ -59,7 +59,7 @@ describe("Producer output slot", () => {
 		// Should be a function, not a Set
 		expect(typeof impl._output === "function" || impl._output !== null).toBe(true);
 		expect(impl._output).not.toBeInstanceOf(Set);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("_status lifecycle: DISCONNECTED → SETTLED → DIRTY → SETTLED → COMPLETED", () => {
@@ -100,7 +100,7 @@ describe("Producer output slot", () => {
 		p.emit(1);
 		expect(impl._status).toBe("SETTLED");
 
-		unsub();
+		unsub.unsubscribe();
 		expect(impl._status).toBe("DISCONNECTED");
 	});
 });
@@ -132,10 +132,10 @@ describe("Operator output slot", () => {
 		expect(values1).toEqual([10]);
 		expect(values2).toEqual([10]);
 
-		unsub2();
+		unsub2.unsubscribe();
 		expect(impl._output).not.toBeInstanceOf(Set);
 
-		unsub1();
+		unsub1.unsubscribe();
 		expect(impl._output).toBeNull();
 	});
 
@@ -157,7 +157,7 @@ describe("Operator output slot", () => {
 		a.set(1);
 		expect(impl._status).toBe("SETTLED");
 
-		unsub();
+		unsub.unsubscribe();
 		expect(impl._status).toBe("DISCONNECTED");
 	});
 });
@@ -193,7 +193,7 @@ describe("Derived output slot", () => {
 		expect(values2).toEqual([10]);
 
 		// MULTI → SINGLE
-		unsub2();
+		unsub2.unsubscribe();
 		expect(impl._output).not.toBeInstanceOf(Set);
 
 		a.set(8);
@@ -201,7 +201,7 @@ describe("Derived output slot", () => {
 		expect(values2).toEqual([10]); // no longer subscribed
 
 		// SINGLE → DISCONNECTED (no STANDALONE mode)
-		unsub1();
+		unsub1.unsubscribe();
 		expect(impl._output).toBeNull();
 		expect(impl._flags & 2).toBeFalsy(); // D_CONNECTED cleared
 
@@ -231,7 +231,7 @@ describe("Derived output slot", () => {
 		expect(impl._status).toBe("SETTLED");
 		expect(b.get()).toBe(10);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(impl._status).toBe("DISCONNECTED");
 	});
 
@@ -261,7 +261,7 @@ describe("Derived output slot", () => {
 
 		a.set(5);
 		expect(values).toEqual([10]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("P0: single-dep derived has no bitmask overhead", () => {
@@ -314,7 +314,7 @@ describe("Derived output slot", () => {
 		// Then a.set(10) triggers one more
 		expect(c.get()).toBe(30); // 10 + 20
 		expect(bValues).toEqual([20]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("chain assembled once: verify reconnect recomputes", () => {
@@ -333,10 +333,10 @@ describe("Derived output slot", () => {
 		expect(computeCount).toBe(1);
 
 		// Unsub disconnects; resub reconnects and recomputes
-		unsub1();
+		unsub1.unsubscribe();
 		const unsub2 = subscribe(b, () => {});
 		expect(computeCount).toBe(2); // reconnect recomputes
-		unsub2();
+		unsub2.unsubscribe();
 
 		// get() pull-computes (disconnected)
 		a.set(5);
@@ -370,7 +370,7 @@ describe("Derived output slot", () => {
 		// Derived should still recompute
 		expect(values.length).toBe(1);
 		expect(b.get()).toBe(100);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("equals guard → RESOLVED → subtree skip", () => {

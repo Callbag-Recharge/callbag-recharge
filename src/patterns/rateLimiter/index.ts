@@ -106,7 +106,7 @@ export function rateLimiter<T>(source: Store<T>, opts: RateLimiterOptions): Rate
 
 	const intervalId = setInterval(resetWindow, opts.windowMs);
 
-	const unsub = subscribe(
+	const sub = subscribe(
 		source,
 		(value) => {
 			if (errored || disposed) return;
@@ -160,7 +160,7 @@ export function rateLimiter<T>(source: Store<T>, opts: RateLimiterOptions): Rate
 		disposed = true;
 		clearInterval(intervalId);
 		queue.length = 0;
-		unsub();
+		sub.unsubscribe();
 	}
 
 	return {

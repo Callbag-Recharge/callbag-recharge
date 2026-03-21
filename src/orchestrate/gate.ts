@@ -150,7 +150,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 				pendingStore.set([]);
 				isOpenStore.set(startOpen);
 
-				const unsub = subscribe(
+				const sub = subscribe(
 					input,
 					(v) => {
 						if (isOpenStore.get()) {
@@ -181,7 +181,7 @@ export function gate<A>(opts?: GateOptions): (input: Store<A>) => GatedStore<A> 
 					_torn = true;
 					queue = [];
 					pendingStore.set([]);
-					unsub();
+					sub.unsubscribe();
 				};
 			},
 			{ initial: input.get() },

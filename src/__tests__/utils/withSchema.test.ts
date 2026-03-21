@@ -30,7 +30,7 @@ describe("withSchema", () => {
 		const unsub = subscribe(validated, (v) => values.push(v));
 		raw.set(2);
 		raw.set(3);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([2, 3]);
 	});
@@ -46,8 +46,8 @@ describe("withSchema", () => {
 
 		raw.set("bad");
 		raw.set(42);
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 
 		expect(values).toEqual([42]);
 		expect(errors.length).toBeGreaterThanOrEqual(1);
@@ -65,8 +65,8 @@ describe("withSchema", () => {
 
 		raw.set("bad"); // error set
 		raw.set(42); // error cleared
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 
 		// Should have received error then undefined
 		const lastError = errors[errors.length - 1];
@@ -88,7 +88,7 @@ describe("withSchema", () => {
 		validated.set(-1); // invalid — rejected, raw unchanged
 		expect(raw.get()).toBe(5);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(values).toEqual([5]);
 	});
 
@@ -100,7 +100,7 @@ describe("withSchema", () => {
 		const unsub = subscribe(validated.error, (e) => errors.push(e));
 
 		validated.set(-1);
-		unsub();
+		unsub.unsubscribe();
 
 		expect(errors.length).toBeGreaterThanOrEqual(1);
 		expect(errors[0]!.message).toBe("must be positive");
@@ -136,7 +136,7 @@ describe("withSchema", () => {
 		// 1 parse from set() validation, subscribe callback skips re-validation
 		expect(parseCount).toBe(1);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	// --- Construction validation ---
@@ -162,7 +162,7 @@ describe("withSchema", () => {
 		const unsub = subscribe(validated, () => {});
 		raw.set("bad");
 		expect(validated.get()).toBe(42); // falls back to last valid
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	// --- Reconnect: error reset ---
@@ -175,12 +175,12 @@ describe("withSchema", () => {
 		const unsub1 = subscribe(validated, () => {});
 		raw.set("bad");
 		expect(validated.error.get()).toBeInstanceOf(Error);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect: error should reset
 		const unsub2 = subscribe(validated, () => {});
 		expect(validated.error.get()).toBeUndefined();
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	// --- Upstream completion ---
@@ -220,7 +220,7 @@ describe("withSchema", () => {
 		raw.set({ name: "updated" });
 		raw.set("invalid");
 		raw.set({ name: "valid" });
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([{ name: "updated" }, { name: "valid" }]);
 	});
@@ -245,7 +245,7 @@ describe("withSchema", () => {
 		raw.set("100");
 		raw.set("abc"); // rejected
 		raw.set("0");
-		unsub();
+		unsub.unsubscribe();
 
 		expect(values).toEqual([100, 0]);
 	});

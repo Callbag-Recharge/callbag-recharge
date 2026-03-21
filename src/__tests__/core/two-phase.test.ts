@@ -338,7 +338,7 @@ describe("Diamond topology — core (glitch-free)", () => {
 		s.set(10);
 		expect(fireCount).toBe(2);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("derived with equals suppresses unchanged values", () => {

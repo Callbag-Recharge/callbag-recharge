@@ -89,7 +89,7 @@ export function withSchema<T>(
 			// Reset error companion on resubscription (matches withStatus pattern)
 			errorStore.set(undefined);
 
-			const unsub = subscribe(
+			const sub = subscribe(
 				store,
 				(value) => {
 					if (skipNext) {
@@ -119,7 +119,7 @@ export function withSchema<T>(
 			);
 
 			return () => {
-				unsub();
+				sub.unsubscribe();
 			};
 		},
 		{ initial: lastValid, resubscribable: true, name: baseName, kind: "withSchema" },

@@ -38,7 +38,7 @@ export function wrap<T>(
  * sources don't produce STATE signals.
  */
 function wrapSource<T>(rawSource: Callbag): Store<T> {
-	const store = producer<T>(({ emit, complete, error }) => {
+	const store = producer<T>(({ emit, complete, error, onSignal }) => {
 		let talkback: any;
 		rawSource(START, (type: number, data: any) => {
 			if (type === START) talkback = data;
@@ -47,6 +47,10 @@ function wrapSource<T>(rawSource: Callbag): Store<T> {
 				if (data !== undefined) error(data);
 				else complete();
 			}
+		});
+		// Forward lifecycle signals to raw callbag talkback (if it supports STATE)
+		onSignal(() => {
+			// Raw callbags don't understand lifecycle signals — no forwarding needed
 		});
 		return () => {
 			talkback?.(END);

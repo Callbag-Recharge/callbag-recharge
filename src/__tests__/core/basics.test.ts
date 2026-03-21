@@ -44,7 +44,7 @@ describe("callbag-basics compatibility", () => {
 		vi.advanceTimersByTime(300);
 
 		expect(received).toEqual(expected);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	test("it works with iterables (synchronous)", () => {
@@ -257,7 +257,7 @@ describe("forEach", () => {
 
 		expect(received).toEqual([1, 2, 3]);
 
-		unsub();
+		unsub.unsubscribe();
 		s.set(4);
 		expect(received).toEqual([1, 2, 3]);
 	});
@@ -288,7 +288,7 @@ describe("pipe integration", () => {
 		vi.advanceTimersByTime(200);
 
 		expect(received).toEqual([20, 30, 40]);
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 

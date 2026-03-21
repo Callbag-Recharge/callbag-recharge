@@ -13,6 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
+import { effect } from "../core/effect";
+import { teardown } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
@@ -130,6 +132,9 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 	// Step index for fast forStep() lookups
 	const _stepIndex = new Map<string, number[]>();
 
+	// Sentinel store: when torn down, all connectPipeline effects auto-dispose via the graph
+	const _alive = state(true, { name: `${baseName}:alive` });
+
 	// Persist error store — surfaces adapter failures
 	const persistErrorStore = state<unknown>(null, { name: `${baseName}:persistError` });
 
@@ -184,7 +189,7 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 	) as Store<ExecutionEntry | undefined>;
 
 	function connectPipeline(stepMeta: Record<string, Store<any>>, stepNames: string[]): () => void {
-		const unsubs: (() => void)[] = [];
+		const subs: { unsubscribe(): void }[] = [];
 
 		for (const name of stepNames) {
 			const meta = stepMeta[name];
@@ -193,7 +198,7 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 			let prevStatus: string | undefined;
 			let prevCount = 0;
 
-			const unsub = subscribe(meta, (m: any) => {
+			const sub = subscribe(meta, (m: any) => {
 				const now = Date.now();
 				const status = m.status as string | undefined;
 				const count = (m.count as number) ?? 0;
@@ -228,12 +233,21 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 				prevStatus = status;
 				prevCount = count;
 			});
-			unsubs.push(unsub);
+			subs.push(sub);
 		}
 
+		const disconnect = () => {
+			for (const sub of subs) sub.unsubscribe();
+			subs.length = 0;
+		};
+
+		// Wire cleanup into graph: when _alive is torn down (END), this effect
+		// auto-disposes, running disconnect(). No flat list needed.
+		const disposeGuard = effect([_alive], () => disconnect);
+
 		return () => {
-			for (const unsub of unsubs) unsub();
-			unsubs.length = 0;
+			disconnect();
+			disposeGuard();
 		};
 	}
 
@@ -261,6 +275,9 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 		destroy() {
 			log.destroy();
 			_stepIndex.clear();
+			teardown(persistErrorStore);
+			// Cascades END to all connectPipeline guard effects, auto-disposing them
+			teardown(_alive);
 		},
 		connectPipeline,
 	};

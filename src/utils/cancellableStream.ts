@@ -16,6 +16,7 @@
 
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { Subscription } from "../core/protocol";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 
@@ -93,14 +94,14 @@ export function cancellableStream<T>(
 		_skipInspect: true,
 	});
 
-	let innerUnsub: (() => void) | null = null;
+	let innerSub: Subscription | null = null;
 	let cancelled = false;
 
 	function cancel(): void {
 		cancelled = true;
-		if (innerUnsub) {
-			innerUnsub();
-			innerUnsub = null;
+		if (innerSub) {
+			innerSub.unsubscribe();
+			innerSub = null;
 		}
 		activeStore.emit(false);
 	}
@@ -112,9 +113,9 @@ export function cancellableStream<T>(
 		// fromAbortable handles AbortController + async iteration + error handling.
 		// Unsubscribing (via cancel or next start) triggers fromAbortable's cleanup → abort.
 		const inner = fromAbortable(factory, { name, initial: opts?.initial });
-		innerUnsub = subscribe(inner, (v) => output.emit(v as T), {
+		innerSub = subscribe(inner, (v) => output.emit(v as T), {
 			onEnd: (err) => {
-				innerUnsub = null;
+				innerSub = null;
 				// Distinguish user-initiated cancel from natural completion/error.
 				// On cancel, fromAbortable swallows the abort and sends clean END.
 				if (cancelled) return;

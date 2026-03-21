@@ -153,7 +153,7 @@ describe("toolCallState", () => {
 		tool.reset();
 
 		expect(statuses).toEqual(["pending", "executing", "completed", "idle"]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("supports sync execute function", async () => {

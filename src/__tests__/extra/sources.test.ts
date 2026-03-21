@@ -166,7 +166,7 @@ describe("fromPromise", () => {
 		const s = fromPromise(p);
 		const values: number[] = [];
 		const unsub = subscribe(s, (v) => values.push(v as number));
-		unsub();
+		unsub.unsubscribe();
 
 		await new Promise((r) => setTimeout(r, 100));
 		expect(values).toEqual([]);
@@ -261,7 +261,7 @@ describe("fromObs", () => {
 
 		const s = fromObs(obs);
 		const unsub = subscribe(s, () => {});
-		unsub();
+		unsub.unsubscribe();
 		expect(unsubSpy).toHaveBeenCalledTimes(1);
 	});
 });
@@ -312,8 +312,8 @@ describe("fromEvent", () => {
 		// Still just one listener (producer shares upstream)
 		expect(listenerCount("click")).toBe(1);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 		expect(listenerCount("click")).toBe(0);
 	});
 
@@ -333,13 +333,13 @@ describe("fromEvent", () => {
 
 		const unsub = subscribe(s, () => {});
 		expect(listenerCount("click")).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 		expect(listenerCount("click")).toBe(0);
 
 		// Reconnect
 		const unsub2 = subscribe(s, () => {});
 		expect(listenerCount("click")).toBe(1);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -365,14 +365,14 @@ describe("interval", () => {
 		const unsub = subscribe(s, (v) => vals1.push(v as number));
 
 		vi.advanceTimersByTime(300);
-		unsub();
+		unsub.unsubscribe();
 		expect(vals1).toEqual([0, 1, 2]);
 
 		// Reconnect — counter should restart from 0
 		const vals2: number[] = [];
 		const unsub2 = subscribe(s, (v) => vals2.push(v as number));
 		vi.advanceTimersByTime(200);
-		unsub2();
+		unsub2.unsubscribe();
 
 		expect(vals2).toEqual([0, 1]);
 	});
@@ -392,8 +392,8 @@ describe("interval", () => {
 		expect(vals1).toEqual([0, 1]);
 		expect(vals2).toEqual([1]);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -565,7 +565,7 @@ describe("buffer", () => {
 		const b = pipe(p, buffer(notifierProd));
 		const unsub = subscribe(b, () => {});
 
-		unsub();
+		unsub.unsubscribe();
 		expect(inputCleaned).toBe(true);
 	});
 });

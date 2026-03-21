@@ -14,8 +14,10 @@
 //   });
 // ---------------------------------------------------------------------------
 
+import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
+import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { switchMap } from "../extra/switchMap";
@@ -184,7 +186,7 @@ export function join<T>(
 	const factory = (...depStores: Store<any>[]): Store<T[] | null> => {
 		const source$ = combine(...depStores);
 
-		return pipe(
+		const switched = pipe(
 			source$,
 			switchMap((raw: any[]) => {
 				// Undefined guard: wait for ALL deps to have real array values
@@ -258,6 +260,32 @@ export function join<T>(
 					};
 				});
 			}),
+		) as Store<T[] | null>;
+
+		// Lifecycle signal interceptor — RESET/TEARDOWN cascade through the graph
+		// instead of requiring flat task list iteration.
+		return operator<T[] | null>(
+			[switched] as Store<unknown>[],
+			({ emit, signal, complete, error: actionsError }) => {
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						if (data === RESET) {
+							ts.reset();
+							return;
+						}
+						if (data === TEARDOWN) {
+							ts.destroy();
+							return;
+						}
+						signal(data);
+					} else if (type === DATA) {
+						emit(data as T[] | null);
+					} else if (type === END) {
+						data !== undefined ? actionsError(data) : complete();
+					}
+				};
+			},
+			{ kind: "join", name: opts?.name },
 		) as Store<T[] | null>;
 	};
 

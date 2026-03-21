@@ -15,6 +15,7 @@
 
 import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
+import type { LifecycleSignal } from "./protocol";
 import {
 	beginDeferredStart,
 	DATA,
@@ -22,6 +23,8 @@ import {
 	decodeStatus,
 	END,
 	endDeferredStart,
+	isLifecycleSignal,
+	RESET,
 	RESOLVED,
 	S_COMPLETED,
 	S_DIRTY,
@@ -34,6 +37,7 @@ import {
 	STATE,
 	STATUS_MASK,
 	STATUS_SHIFT,
+	TEARDOWN,
 } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
@@ -57,7 +61,7 @@ const _STATUS_MASK = STATUS_MASK;
 
 export class DerivedImpl<T> {
 	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
-	_upstreamTalkbacks: Array<(type: number) => void> = [];
+	_upstreamTalkbacks: Array<(type: number, data?: any) => void> = [];
 	_cachedValue: T | undefined;
 	_flags: number;
 	_dirtyDeps!: Bitmask;
@@ -334,6 +338,31 @@ export class DerivedImpl<T> {
 	}
 
 	/**
+	 * Handle lifecycle signals received via talkback (upstream direction).
+	 * Forwards to all upstream dep talkbacks. RESET clears cache + dirty bits.
+	 * TEARDOWN cascades via _handleEnd.
+	 */
+	_handleLifecycleSignal(s: LifecycleSignal): void {
+		if (this._flags & D_COMPLETED) return;
+
+		if (s === TEARDOWN) {
+			// Forward upstream first, then tear down
+			for (const tb of this._upstreamTalkbacks) tb(STATE, TEARDOWN);
+			this._handleEnd(undefined);
+			return;
+		}
+
+		if (s === RESET) {
+			// Clear cache and dirty tracking
+			this._flags &= ~(D_HAS_CACHED | D_ANY_DATA);
+			this._dirtyDeps.reset();
+		}
+
+		// Forward all lifecycle signals upstream
+		for (const tb of this._upstreamTalkbacks) tb(STATE, s);
+	}
+
+	/**
 	 * v6: Pull-compute when disconnected (always fresh). When connected,
 	 * returns push-updated cache (fast path).
 	 */
@@ -384,8 +413,12 @@ export class DerivedImpl<T> {
 				(this._output as Set<any>).add(sink);
 			}
 
-			sink(START, (t: number) => {
+			sink(START, (t: number, d?: any) => {
 				if (t === DATA) sink(DATA, this._cachedValue);
+				if (t === STATE && isLifecycleSignal(d)) {
+					this._handleLifecycleSignal(d);
+					return;
+				}
 				if (t === END) {
 					if (this._output === null) return;
 					if (this._flags & D_MULTI) {

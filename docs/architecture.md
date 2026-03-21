@@ -134,16 +134,22 @@ Both tiers use the same wiring pattern: a pure `.ts` file (library only) + a `.v
 const START = 0;   // Callbag handshake
 const DATA  = 1;   // Real values only — never sentinels
 const END   = 2;   // Completion (no payload) or error (payload = error)
-const STATE = 3;   // Control signals: DIRTY, RESOLVED. Future: PAUSE, RESUME.
+const STATE = 3;   // Control signals: DIRTY, RESOLVED, lifecycle signals.
 
 const DIRTY    = Symbol("DIRTY");     // "My value is about to change."
 const RESOLVED = Symbol("RESOLVED"); // "I was dirty, value didn't change."
+
+// Lifecycle signals — flow UPSTREAM via talkback (sink → source direction)
+const RESET    = Symbol("RESET");    // Reset to initial state
+const PAUSE    = Symbol("PAUSE");    // Pause activity (timers, polling)
+const RESUME   = Symbol("RESUME");   // Resume after pause
+const TEARDOWN = Symbol("TEARDOWN"); // Terminal — complete + cleanup
 ```
 
 **Direction — the graph is a DAG:**
 ```
 sources → transforms → sinks   (DOWNSTREAM: DATA, DIRTY, RESOLVED, END)
-sources ← transforms ← sinks   (UPSTREAM: talkback(END) = unsubscribe only)
+sources ← transforms ← sinks   (UPSTREAM: talkback(END), lifecycle signals via talkback(STATE, signal))
 ```
 
 **Two-phase push:**
@@ -379,10 +385,11 @@ if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 
 ## 9. Signal Handling Reference
 
-### Direction (unchanged)
+### Direction
 
-- **DIRTY, RESOLVED, DATA, END** → downstream
-- **talkback(END)** → upstream (unsubscribe only)
+- **DIRTY, RESOLVED, DATA, END** → downstream (source → sink)
+- **talkback(END)** → upstream (unsubscribe)
+- **talkback(STATE, lifecycleSignal)** → upstream (RESET, PAUSE, RESUME, TEARDOWN)
 
 ### What each node does with each signal
 
@@ -398,9 +405,38 @@ if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 | RESOLVED sent | `signal(RESOLVED)` when equals guard | `signal(RESOLVED)` when suppressing or all-RESOLVED bitmask | N/A |
 | DATA sent | `emit(value)` | emit computed value downstream | N/A |
 
+### Lifecycle signals (upstream direction)
+
+Lifecycle signals flow **upstream** via `talkback(STATE, signal)`. Each node handles the signal locally, then forwards upstream to its deps. This is the inverse of DIRTY/RESOLVED which flow downstream.
+
+| Signal | producer | state | operator | derived | effect |
+|--------|----------|-------|----------|---------|--------|
+| RESET | `_value = _initial`, emit initial, call `onSignal` | Reset to initial value, emit | Increment generation (invalidate old actions), re-init handler, notify handler, forward upstream | Clear cache flags, forward upstream | Increment generation, reset dirty tracking, re-run fn(), forward upstream |
+| PAUSE | Call `onSignal` handler | No-op | Notify handler, forward upstream | Forward upstream | Forward upstream |
+| RESUME | Call `onSignal` handler | No-op | Notify handler, forward upstream | Forward upstream | Forward upstream |
+| TEARDOWN | Call `onSignal`, then `complete()` | N/A | Notify handler, forward upstream, complete inline | Forward upstream, `_handleEnd` | Forward upstream, dispose |
+
+**Single-owner semantics:** Lifecycle signals sent via `sub.signal()` affect the entire upstream graph from that subscription point. Multiple subscribers sending conflicting signals (e.g., one pauses, another resumes) is undefined behavior. Design pipelines with a single control owner per graph segment.
+
+**Tier 2 boundary crossing:** DIRTY/RESOLVED don't cross tier 2 boundaries (producer-based operators). Lifecycle signals DO cross them via `onSignal` handlers registered in the producer factory. Every tier 2 extra (switchMap, debounce, etc.) registers an `onSignal` handler that forwards signals to the outer subscription and performs operator-specific cleanup on RESET.
+
+**Subscription interface:**
+```ts
+const sub = subscribe(store, (v) => console.log(v));
+sub.signal(PAUSE);    // sends PAUSE upstream through the graph
+sub.signal(RESUME);   // sends RESUME upstream
+sub.signal(RESET);    // resets all upstream state to initial
+sub.signal(TEARDOWN); // terminates the graph (cascades END downstream)
+sub.unsubscribe();    // standard unsubscribe
+```
+
+**Operator generation counter:** On RESET, operator increments `_generation` and re-creates actions. Old actions (bound to previous generation) become no-ops, preventing stale closures from emitting after reset.
+
 ### Tier 2 extras (cycle boundaries)
 
 Tier 2 nodes (debounce, switchMap, etc.) use `subscribe()` internally, which is a callbag sink that receives only DATA (type 1). Tier 2 nodes do not receive DIRTY/RESOLVED from upstream. Each `emit()` starts a fresh DIRTY+DATA cycle via `autoDirty: true`. Tier 2 always produces DATA — upstream nodes always get a tap event when tier 2 fires.
+
+Tier 2 nodes register `onSignal` handlers in their producer factory to forward lifecycle signals upstream and perform operator-specific cleanup (e.g., cancel inner subscriptions on RESET, clear timers on PAUSE).
 
 ### DATA without prior DIRTY (raw callbag compat)
 
@@ -445,6 +481,16 @@ Order: idempotency guard → set terminal status → store error (derived: `_cac
 - **producer**: `_start()` re-runs. If `resetOnTeardown`, `_value` resets.
 - **effect**: no reconnect — dispose and create new.
 - **Completed nodes**: reject new subscribers (immediate START + END) unless `resubscribable`.
+
+### Lifecycle signal control
+
+Lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) provide graph-native control without imperative method calls (§1.15). They propagate upstream via `talkback(STATE, signal)`:
+
+- **RESET**: Resets state to initial values, re-initializes operator handlers (generation counter invalidates stale closures), re-runs effects. Producer emits initial value after reset.
+- **PAUSE/RESUME**: Forwarded upstream. Tier 2 operators with timers/polling handle locally (e.g., timer pauses ticking, HTTP adapter pauses polling).
+- **TEARDOWN**: Terminal signal. Each node handles cleanup then completes (cascades END downstream). Replaces imperative `destroy()` calls on individual nodes.
+
+Orchestrate's `pipeline.reset()` and `pipeline.destroy()` send RESET/TEARDOWN via step subscriptions. The `task()` operator intercepts these signals and delegates to `taskState` (ts.reset()/ts.destroy()) — no flat task list iteration needed.
 
 ---
 

@@ -31,7 +31,7 @@ describe("fromCron", () => {
 		vi.advanceTimersByTime(60_000);
 		expect(values.length).toBe(1);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("emits on matching minutes with */5", () => {
@@ -49,7 +49,7 @@ describe("fromCron", () => {
 		expect(values.length).toBe(2);
 		expect(values[1].getMinutes()).toBe(5);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("does not double-fire within the same minute", () => {
@@ -66,7 +66,7 @@ describe("fromCron", () => {
 		for (let i = 0; i < 30; i++) vi.advanceTimersByTime(1000);
 		expect(values.length).toBe(1); // still just 1
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns last fire time", () => {
@@ -79,7 +79,7 @@ describe("fromCron", () => {
 		expect(cron.get()).toBeInstanceOf(Date);
 		expect(cron.get()!.getMinutes()).toBe(0);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("cleanup on unsubscribe — no more fires", () => {
@@ -88,7 +88,7 @@ describe("fromCron", () => {
 		const values: Date[] = [];
 		const unsub = subscribe(cron, (v) => values.push(v));
 
-		unsub();
+		unsub.unsubscribe();
 
 		// Advance past 09:00
 		vi.advanceTimersByTime(120_000);
@@ -110,7 +110,7 @@ describe("fromCron", () => {
 		for (let i = 0; i < 24 * 60; i++) vi.advanceTimersByTime(60_000);
 		expect(values.length).toBe(1);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("rejects invalid cron expressions", () => {

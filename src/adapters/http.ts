@@ -13,7 +13,8 @@
 // ---------------------------------------------------------------------------
 
 import { producer } from "../core/producer";
-import { batch } from "../core/protocol";
+import type { LifecycleSignal } from "../core/protocol";
+import { batch, PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 import type { WithStatusStatus } from "../utils/withStatus";
@@ -159,12 +160,12 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 	}
 
 	function schedulePoll() {
-		if (!active || pollInterval <= 0) return;
+		if (!active || paused || pollInterval <= 0) return;
 		pollTimer = setTimeout(() => {
 			pollTimer = null;
 			doFetch()
 				.then(() => {
-					if (active) schedulePoll();
+					if (active && !paused) schedulePoll();
 				})
 				.catch(() => {
 					// Already handled internally
@@ -173,25 +174,56 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 	}
 
 	let _refetch: (() => void) | null = null;
+	let paused = false;
 
 	const store = producer<T>(
-		({ emit, error, complete }) => {
+		({ emit, error, complete, onSignal }) => {
 			_emit = emit;
 			_error = error;
 			_complete = complete;
 			active = true;
+			paused = false;
 
 			_refetch = () => {
 				doFetch();
 			};
 
+			onSignal((s: LifecycleSignal) => {
+				if (s === PAUSE) {
+					paused = true;
+					if (pollTimer !== null) {
+						clearTimeout(pollTimer);
+						pollTimer = null;
+					}
+				} else if (s === RESUME) {
+					paused = false;
+					schedulePoll();
+				} else if (s === RESET) {
+					// Cancel in-flight request and reset fetch count
+					currentAbort?.abort();
+					currentAbort = null;
+					if (pollTimer !== null) {
+						clearTimeout(pollTimer);
+						pollTimer = null;
+					}
+					fetchCountStore.set(0);
+					paused = false;
+					// Re-fetch from scratch
+					doFetch().then(() => {
+						if (active && !paused) schedulePoll();
+					});
+				}
+				// TEARDOWN is handled by ProducerImpl._handleLifecycleSignal → complete()
+			});
+
 			// Initial fetch
 			doFetch().then(() => {
-				if (active) schedulePoll();
+				if (active && !paused) schedulePoll();
 			});
 
 			return () => {
 				active = false;
+				paused = false;
 				_emit = null;
 				_error = null;
 				_complete = null;

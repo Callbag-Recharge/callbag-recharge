@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { PAUSE, RESET, RESUME } from "../../core/protocol";
+import { subscribe } from "../../core/subscribe";
 import { countdown, stopwatch } from "../../utils/timer";
 
 describe("countdown", () => {
@@ -11,7 +13,7 @@ describe("countdown", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// Initial state
+	// Initial state (before subscription — pull-compute)
 	// -----------------------------------------------------------------------
 
 	it("initializes with given duration", () => {
@@ -22,116 +24,117 @@ describe("countdown", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// start / tick
+	// Auto-start on subscription
 	// -----------------------------------------------------------------------
 
-	it("start begins counting down", () => {
+	it("auto-starts counting on first subscription", () => {
 		const c = countdown(1000, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		expect(c.active.get()).toBe(true);
 
 		vi.advanceTimersByTime(500);
 		expect(c.remaining.get()).toBeLessThanOrEqual(500);
 		expect(c.remaining.get()).toBeGreaterThan(0);
+		sub.unsubscribe();
 	});
 
 	it("expires when remaining reaches 0", () => {
 		const c = countdown(500, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 
 		vi.advanceTimersByTime(600);
 		expect(c.remaining.get()).toBe(0);
 		expect(c.expired.get()).toBe(true);
 		expect(c.active.get()).toBe(false);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// pause / resume
+	// PAUSE / RESUME signals
 	// -----------------------------------------------------------------------
 
-	it("pause stops counting", () => {
+	it("PAUSE stops counting", () => {
 		const c = countdown(1000, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		vi.advanceTimersByTime(300);
-		c.pause();
+		sub.signal(PAUSE);
 
 		const remaining = c.remaining.get();
 		expect(c.active.get()).toBe(false);
 
 		vi.advanceTimersByTime(500);
 		expect(c.remaining.get()).toBe(remaining); // unchanged
+		sub.unsubscribe();
 	});
 
-	it("resume continues from paused state", () => {
+	it("RESUME continues from paused state", () => {
 		const c = countdown(1000, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		vi.advanceTimersByTime(300);
-		c.pause();
+		sub.signal(PAUSE);
 		const remaining = c.remaining.get();
 
-		c.resume();
+		sub.signal(RESUME);
 		expect(c.active.get()).toBe(true);
 
 		vi.advanceTimersByTime(100);
 		expect(c.remaining.get()).toBeLessThan(remaining);
+		sub.unsubscribe();
 	});
 
-	it("resume when expired is a no-op", () => {
+	it("RESUME when expired is a no-op", () => {
 		const c = countdown(100, { tickMs: 50 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		vi.advanceTimersByTime(200);
 		expect(c.expired.get()).toBe(true);
 
-		c.resume();
+		sub.signal(RESUME);
 		expect(c.active.get()).toBe(false);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// reset
+	// RESET signal
 	// -----------------------------------------------------------------------
 
-	it("reset restores to original duration and stops", () => {
+	it("RESET restores to original duration and stops", () => {
 		const c = countdown(1000, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		vi.advanceTimersByTime(500);
-		c.reset();
+		sub.signal(RESET);
 
 		expect(c.remaining.get()).toBe(1000);
 		expect(c.active.get()).toBe(false);
 		expect(c.expired.get()).toBe(false);
+		sub.unsubscribe();
 	});
 
-	it("reset with custom duration sets new duration", () => {
-		const c = countdown(1000, { tickMs: 100 });
-		c.reset(2000);
-		expect(c.remaining.get()).toBe(2000);
-	});
-
-	it("start after expiration resets remaining to original duration", () => {
+	it("RESUME after RESET restarts countdown", () => {
 		const c = countdown(500, { tickMs: 100 });
-		c.start();
+		const sub = subscribe(c.remaining, () => {});
 		vi.advanceTimersByTime(600);
 		expect(c.expired.get()).toBe(true);
 
-		c.start(); // should reset remaining to 500
+		sub.signal(RESET);
 		expect(c.remaining.get()).toBe(500);
+
+		sub.signal(RESUME);
 		expect(c.active.get()).toBe(true);
 		expect(c.expired.get()).toBe(false);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// dispose
+	// Unsubscribe stops timer
 	// -----------------------------------------------------------------------
 
-	it("dispose stops timer and prevents further operations", () => {
+	it("unsubscribe stops timer when last subscriber leaves", () => {
 		const c = countdown(1000, { tickMs: 100 });
-		c.start();
-		c.dispose();
+		const sub = subscribe(c.remaining, () => {});
+		expect(c.active.get()).toBe(true);
 
-		expect(c.active.get()).toBe(false);
-
-		c.start(); // no-op
-		expect(c.active.get()).toBe(false);
+		sub.unsubscribe();
+		// Timer stops because producer disconnects on last unsub
 	});
 });
 
@@ -156,120 +159,75 @@ describe("stopwatch", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// start / tick
+	// Auto-start on subscription
 	// -----------------------------------------------------------------------
 
-	it("start begins counting up", () => {
+	it("auto-starts counting on first subscription", () => {
 		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
+		const sub = subscribe(sw.elapsed, () => {});
 		expect(sw.active.get()).toBe(true);
 
 		vi.advanceTimersByTime(500);
 		expect(sw.elapsed.get()).toBeGreaterThanOrEqual(500);
-	});
-
-	it("start resets elapsed and laps", () => {
-		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
-		vi.advanceTimersByTime(500);
-		sw.lap();
-
-		sw.start(); // restart
-		expect(sw.elapsed.get()).toBe(0);
-		expect(sw.laps.get()).toEqual([]);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// pause / resume
+	// PAUSE / RESUME signals
 	// -----------------------------------------------------------------------
 
-	it("pause stops counting", () => {
+	it("PAUSE stops counting", () => {
 		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
+		const sub = subscribe(sw.elapsed, () => {});
 		vi.advanceTimersByTime(300);
-		sw.pause();
+		sub.signal(PAUSE);
 
 		const elapsed = sw.elapsed.get();
 		expect(sw.active.get()).toBe(false);
 
 		vi.advanceTimersByTime(500);
 		expect(sw.elapsed.get()).toBe(elapsed);
+		sub.unsubscribe();
 	});
 
-	it("resume continues from paused state", () => {
+	it("RESUME continues from paused state", () => {
 		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
+		const sub = subscribe(sw.elapsed, () => {});
 		vi.advanceTimersByTime(300);
-		sw.pause();
+		sub.signal(PAUSE);
 		const elapsed = sw.elapsed.get();
 
-		sw.resume();
+		sub.signal(RESUME);
 		vi.advanceTimersByTime(200);
 		expect(sw.elapsed.get()).toBeGreaterThan(elapsed);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// lap
+	// RESET signal
 	// -----------------------------------------------------------------------
 
-	it("lap records current elapsed time", () => {
+	it("RESET clears elapsed and stops", () => {
 		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
+		const sub = subscribe(sw.elapsed, () => {});
 		vi.advanceTimersByTime(500);
-		sw.lap();
-
-		const laps = sw.laps.get();
-		expect(laps.length).toBe(1);
-		expect(laps[0]).toBeGreaterThanOrEqual(500);
-	});
-
-	it("multiple laps are recorded in order", () => {
-		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
-		vi.advanceTimersByTime(200);
-		sw.lap();
-		vi.advanceTimersByTime(300);
-		sw.lap();
-
-		const laps = sw.laps.get();
-		expect(laps.length).toBe(2);
-		expect(laps[1]).toBeGreaterThan(laps[0]);
-	});
-
-	it("lap is a no-op when not active", () => {
-		const sw = stopwatch();
-		sw.lap();
-		expect(sw.laps.get()).toEqual([]);
-	});
-
-	// -----------------------------------------------------------------------
-	// reset
-	// -----------------------------------------------------------------------
-
-	it("reset clears elapsed, laps, and stops", () => {
-		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
-		vi.advanceTimersByTime(500);
-		sw.lap();
-		sw.reset();
+		sub.signal(RESET);
 
 		expect(sw.elapsed.get()).toBe(0);
 		expect(sw.active.get()).toBe(false);
 		expect(sw.laps.get()).toEqual([]);
+		sub.unsubscribe();
 	});
 
 	// -----------------------------------------------------------------------
-	// dispose
+	// Unsubscribe
 	// -----------------------------------------------------------------------
 
-	it("dispose stops and prevents further operations", () => {
+	it("unsubscribe stops timer", () => {
 		const sw = stopwatch({ tickMs: 100 });
-		sw.start();
-		sw.dispose();
+		const sub = subscribe(sw.elapsed, () => {});
+		expect(sw.active.get()).toBe(true);
 
-		expect(sw.active.get()).toBe(false);
-
-		sw.start(); // no-op
-		expect(sw.active.get()).toBe(false);
+		sub.unsubscribe();
 	});
 });

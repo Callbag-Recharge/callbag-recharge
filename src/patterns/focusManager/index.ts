@@ -9,6 +9,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../../core/derived";
+import { teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
 
@@ -78,12 +79,13 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 	const wrap = opts?.wrap ?? true;
 	const prefix = opts?.name ?? "focusManager";
 
-	// Ordered list of focusable IDs
-	const _ids: string[] = [...ids];
+	// Ordered list of focusable IDs — reactive store so register/unregister
+	// flow through the graph instead of mutating a flat array.
+	const _idsStore = state<string[]>([...ids], { name: `${prefix}.ids` });
 
 	const initialId = opts?.initial ?? null;
 	const activeStore = state<string | null>(
-		initialId !== null && _ids.includes(initialId) ? initialId : null,
+		initialId !== null && ids.includes(initialId) ? initialId : null,
 		{ name: `${prefix}.active` },
 	);
 
@@ -98,7 +100,7 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 
 	function focus(id: string): void {
 		if (disposed) return;
-		if (!_ids.includes(id)) return;
+		if (!_idsStore.get().includes(id)) return;
 		activeStore.set(id);
 	}
 
@@ -109,6 +111,7 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 
 	function next(): void {
 		if (disposed) return;
+		const _ids = _idsStore.get();
 		if (_ids.length === 0) return;
 
 		const current = activeStore.get();
@@ -132,6 +135,7 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 
 	function prev(): void {
 		if (disposed) return;
+		const _ids = _idsStore.get();
 		if (_ids.length === 0) return;
 
 		const current = activeStore.get();
@@ -155,15 +159,17 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 
 	function register(id: string): void {
 		if (disposed) return;
+		const _ids = _idsStore.get();
 		if (_ids.includes(id)) return;
-		_ids.push(id);
+		_idsStore.set([..._ids, id]);
 	}
 
 	function unregister(id: string): void {
 		if (disposed) return;
+		const _ids = _idsStore.get();
 		const idx = _ids.indexOf(id);
 		if (idx === -1) return;
-		_ids.splice(idx, 1);
+		_idsStore.set(_ids.filter((x) => x !== id));
 		// Blur if the unregistered element was focused
 		if (activeStore.get() === id) {
 			activeStore.set(null);
@@ -185,9 +191,14 @@ export function focusManager(ids: string[] = [], opts?: FocusManagerOptions): Fo
 	function dispose(): void {
 		if (disposed) return;
 		disposed = true;
-		_focusedCache.clear();
-		_ids.length = 0;
+		// Reset state before teardown so get() returns clean values
 		activeStore.set(null);
+		_idsStore.set([]);
+		// Teardown stores — cascades END to hasFocus and all cached
+		// isFocused derived stores through the graph.
+		teardown(activeStore);
+		teardown(_idsStore);
+		_focusedCache.clear();
 	}
 
 	return {

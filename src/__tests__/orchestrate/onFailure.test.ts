@@ -27,7 +27,7 @@ describe("onFailure (dead letter step)", () => {
 		const last = results.filter((r) => r !== null).pop();
 		expect(last).toEqual({ handled: true, message: "fetch failed" });
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -53,8 +53,8 @@ describe("onFailure (dead letter step)", () => {
 		// DLQ should not have fired with a real value (only null from undefined skip)
 		expect(dlqResults.every((r) => r === null)).toBe(true);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 		wf.destroy();
 	});
 
@@ -77,7 +77,7 @@ describe("onFailure (dead letter step)", () => {
 		// Check that the pipeline detected the onFailure taskState for aggregate status
 		expect(wf.status.get()).toBeDefined();
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -110,7 +110,7 @@ describe("onFailure (dead letter step)", () => {
 		const last = results.filter((r) => r !== null).pop();
 		expect(last).toBe("fail #3");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -139,7 +139,7 @@ describe("onFailure (dead letter step)", () => {
 		const nonNull = results.filter((r) => r !== null);
 		expect(nonNull.length).toBeGreaterThanOrEqual(2);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -165,7 +165,59 @@ describe("onFailure (dead letter step)", () => {
 		expect(dlqStep.error.get()).toBeInstanceOf(Error);
 		expect((dlqStep.error.get() as Error).message).toBe("handler failed");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
+	});
+
+	// -------------------------------------------------------------------------
+	// lifecycle signals (5f-7)
+	// -------------------------------------------------------------------------
+	describe("lifecycle signals", () => {
+		it("RESET resets taskState via signal interceptor", async () => {
+			const dlqStep = onFailure("fetch", async (_signal, error) => {
+				return { handled: true, error: String(error) };
+			});
+
+			const wf = pipeline({
+				trigger: step(fromTrigger<string>()),
+				fetch: task(["trigger"], async (_signal) => {
+					throw new Error("fail");
+				}),
+				dlq: dlqStep,
+			});
+
+			const unsub = subscribe(wf.steps.dlq, () => {});
+
+			(wf.steps.trigger as any).fire("go");
+			await new Promise((r) => setTimeout(r, 100));
+
+			expect(dlqStep.runCount.get()).toBeGreaterThanOrEqual(1);
+
+			// RESET cascades through graph
+			wf.reset();
+
+			unsub.unsubscribe();
+			wf.destroy();
+		});
+
+		it("TEARDOWN via pipeline.destroy() cleans up onFailure step", async () => {
+			const dlqStep = onFailure("fetch", async (_signal, _error) => {
+				return { handled: true };
+			});
+
+			const wf = pipeline({
+				trigger: step(fromTrigger<string>()),
+				fetch: task(["trigger"], async (_signal) => {
+					throw new Error("fail");
+				}),
+				dlq: dlqStep,
+			});
+
+			const unsub = subscribe(wf.steps.dlq, () => {});
+
+			// destroy sends TEARDOWN through the graph
+			wf.destroy();
+			unsub.unsubscribe();
+		});
 	});
 });

@@ -64,7 +64,7 @@ describe("tap", () => {
 		);
 		const unsub = subscribe(t, () => {});
 		s.set(1);
-		unsub();
+		unsub.unsubscribe();
 		s.set(2);
 		expect(tapped).toEqual([1]);
 	});
@@ -134,7 +134,7 @@ describe("delay", () => {
 		});
 
 		s.set(1);
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(200);
 		expect(values).toEqual([]);
 	});
@@ -148,7 +148,7 @@ describe("delay", () => {
 		s.set(5);
 		vi.advanceTimersByTime(100);
 		expect(d.get()).toBe(5);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// After unsub, currentValue should be reset
 		expect(d.get()).toBeUndefined();
@@ -211,7 +211,7 @@ describe("buffer", () => {
 		const unsub = subscribe(b, () => {});
 		s.set(1);
 		s.set(2);
-		unsub();
+		unsub.unsubscribe();
 		// no leak — buffer is cleared
 	});
 
@@ -296,7 +296,7 @@ describe("bufferTime", () => {
 		const b = pipe(s, bufferTime(100));
 		const unsub = subscribe(b, () => {});
 		s.set(1);
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(200);
 		// timer cleared, no leak
 	});
@@ -363,7 +363,7 @@ describe("sample", () => {
 		const notifier = state(false);
 		const sampled = pipe(s, sample(notifier));
 		const unsub = subscribe(sampled, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// must not throw
 	});
 
@@ -440,7 +440,7 @@ describe("timeout", () => {
 		const s = state(0);
 		const t = pipe(s, timeout(100));
 		const unsub = subscribe(t, () => {});
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(200);
 		// timer cleared
 	});
@@ -626,7 +626,7 @@ describe("remember", () => {
 		s.emit(10);
 		expect(r.get()).toBe(10);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(r.get()).toBeUndefined();
 	});
 
@@ -649,7 +649,7 @@ describe("remember", () => {
 		const unsub1 = subscribe(r, () => {});
 		s.emit(42);
 		expect(r.get()).toBe(42);
-		unsub1(); // cache cleared
+		unsub1.unsubscribe(); // cache cleared
 		expect(r.get()).toBeUndefined();
 
 		// Re-subscribe — start() reads input.get() which retains producer's last value
@@ -668,7 +668,7 @@ describe("remember", () => {
 		subscribe(r, () => {});
 
 		s.set(10);
-		unsub1(); // one sink leaves
+		unsub1.unsubscribe(); // one sink leaves
 		expect(r.get()).toBe(10); // cache still active for remaining sink
 	});
 });
@@ -694,7 +694,7 @@ describe("retry", () => {
 		const s = state(1);
 		const r = pipe(s, retry(3));
 		const unsub = subscribe(r, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// must not throw
 	});
 
@@ -932,7 +932,7 @@ describe("rescue", () => {
 			rescue(() => state(0)),
 		);
 		const unsub = subscribe(r, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// must not throw
 	});
 

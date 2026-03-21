@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -17,7 +18,7 @@ export function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 		let latestInput: A = input.get();
 
 		const store = producer<A>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				latestInput = input.get();
 
 				const inputUnsub = subscribe(
@@ -52,9 +53,17 @@ export function sample<A>(notifier: Store<unknown>): StoreOperator<A, A> {
 					},
 				);
 
+				onSignal((s) => {
+					inputUnsub.signal(s);
+					notifierUnsub.signal(s);
+					if (s === RESET) {
+						latestInput = undefined as A;
+					}
+				});
+
 				return () => {
-					inputUnsub();
-					notifierUnsub();
+					inputUnsub.unsubscribe();
+					notifierUnsub.unsubscribe();
 				};
 			},
 			{

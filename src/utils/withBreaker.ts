@@ -83,7 +83,7 @@ export function withBreaker<A>(
 
 		const store = producer<A>(
 			({ emit, error, complete }) => {
-				const unsub = subscribe(
+				const sub = subscribe(
 					input,
 					(v) => {
 						if (breaker.canExecute()) {
@@ -93,7 +93,7 @@ export function withBreaker<A>(
 						} else {
 							breakerState.set(breaker.state);
 							if (onOpen === "error") {
-								unsub();
+								sub.unsubscribe();
 								error(new CircuitOpenError());
 							}
 							// "skip" mode: silently drop
@@ -113,7 +113,7 @@ export function withBreaker<A>(
 				);
 
 				return () => {
-					unsub();
+					sub.unsubscribe();
 				};
 			},
 			{ initial: input.get() },

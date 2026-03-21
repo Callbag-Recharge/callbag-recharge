@@ -42,7 +42,7 @@ describe("branch in pipeline — basic routing", () => {
 		// Only positive values pass through
 		expect(passValues).toEqual([5, 10]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -66,7 +66,7 @@ describe("branch in pipeline — basic routing", () => {
 		// Only negative values go to fail branch
 		expect(failValues).toEqual([-3]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 });

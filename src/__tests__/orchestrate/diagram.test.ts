@@ -75,7 +75,7 @@ describe("toMermaid (pipeline diagram)", () => {
 		expect(result).toContain("classDef idle");
 		expect(result).toContain("classDef completed");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -172,7 +172,7 @@ describe("toD2 (pipeline diagram)", () => {
 		const nodeLines = result.split("\n").filter((l) => l.includes("shape:"));
 		expect(nodeLines.some((l) => /\[(idle|active|completed)\]/.test(l))).toBe(true);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 

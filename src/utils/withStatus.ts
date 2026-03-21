@@ -79,7 +79,7 @@ export function withStatus<T>(store: Store<T>, opts?: WithStatusOptions): WithSt
 			statusStore.set(initialStatus);
 			errorStore.set(undefined);
 
-			const unsub = subscribe(
+			const sub = subscribe(
 				store,
 				(value) => {
 					if (statusStore.get() === "errored") {
@@ -110,7 +110,7 @@ export function withStatus<T>(store: Store<T>, opts?: WithStatusOptions): WithSt
 			);
 
 			return () => {
-				unsub();
+				sub.unsubscribe();
 			};
 		},
 		{ initial: store.get(), resubscribable: true },

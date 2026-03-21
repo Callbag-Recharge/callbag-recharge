@@ -305,6 +305,6 @@ describe("Backpressure / pull", () => {
 		expect(computeFn).toHaveBeenCalledTimes(4); // push recompute
 		expect(d.get()).toBe(11); // cached, no extra compute
 		expect(computeFn).toHaveBeenCalledTimes(4);
-		unsub();
+		unsub.unsubscribe();
 	});
 });

@@ -330,7 +330,7 @@ describe("wrap() — source wrapping (tier 2)", () => {
 		raw.push(3);
 
 		expect(values).toEqual([1, 2, 3]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns the last emitted value", () => {
@@ -343,7 +343,7 @@ describe("wrap() — source wrapping (tier 2)", () => {
 
 		raw.push(99);
 		expect(store.get()).toBe(99);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("supports multicast — multiple subscribers", () => {
@@ -359,12 +359,12 @@ describe("wrap() — source wrapping (tier 2)", () => {
 		expect(v1).toEqual([10]);
 		expect(v2).toEqual([10]);
 
-		unsub1();
+		unsub1.unsubscribe();
 		raw.push(20);
 		expect(v1).toEqual([10]); // unsubscribed
 		expect(v2).toEqual([10, 20]);
 
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("forwards completion to subscribers", () => {
@@ -429,7 +429,7 @@ describe("wrap() — source wrapping (tier 2)", () => {
 
 		const unsub = subscribe(store, () => {});
 		expect(cleaned).toBe(false);
-		unsub();
+		unsub.unsubscribe();
 		expect(cleaned).toBe(true);
 	});
 });
@@ -453,7 +453,7 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 		s.set(7);
 
 		expect(values).toEqual([30, 70]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns the initial transformed value before any changes", () => {
@@ -477,7 +477,7 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 		const unsub = subscribe(wrapped, () => {});
 		s.set(3);
 		expect(wrapped.get()).toBe(30);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards STATE signals (DIRTY/RESOLVED) — STATE bypass", () => {
@@ -518,12 +518,12 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 		expect(v1).toEqual([105]);
 		expect(v2).toEqual([105]);
 
-		unsub1();
+		unsub1.unsubscribe();
 		s.set(10);
 		expect(v1).toEqual([105]); // unsubscribed
 		expect(v2).toEqual([105, 110]);
 
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("diamond resolution: wrapped operator in one branch", () => {
@@ -655,14 +655,14 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 		s.set(1);
 		s.set(2);
 		expect(values1).toEqual([3, 6]);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — fresh pipeline
 		const values2: number[] = [];
 		const unsub2 = subscribe(wrapped, (v) => values2.push(v));
 		s.set(3);
 		expect(values2).toEqual([9]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("chained raw callbag operators through wrap", () => {
@@ -680,6 +680,6 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 
 		s.set(10);
 		expect(values).toEqual([110, 120]); // (10*2) + 100 = 120
-		unsub();
+		unsub.unsubscribe();
 	});
 });

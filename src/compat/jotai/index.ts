@@ -110,7 +110,10 @@ function createPrimitiveAtom<T>(initial: T): WritableAtom<T> {
 		get: () => s.get(),
 		set: (value: T) => s.set(value),
 		update: (fn: (current: T) => T) => s.update(fn),
-		subscribe: (cb: (value: T) => void) => coreSubscribe(s, (v) => cb(v)),
+		subscribe: (cb: (value: T) => void) => {
+			const sub = coreSubscribe(s, (v) => cb(v));
+			return () => sub.unsubscribe();
+		},
 		_store: s,
 		_kind: "primitive",
 	};
@@ -135,7 +138,10 @@ function createDerivedAtom<T>(
 
 	const result: ReadableAtom<T> = {
 		get: () => store.get(),
-		subscribe: (cb: (value: T) => void) => coreSubscribe(store, (v) => cb(v)),
+		subscribe: (cb: (value: T) => void) => {
+			const sub = coreSubscribe(store, (v) => cb(v));
+			return () => sub.unsubscribe();
+		},
 		_store: store,
 		_kind: write ? "writable-derived" : "derived",
 	};

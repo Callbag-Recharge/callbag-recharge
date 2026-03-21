@@ -203,7 +203,7 @@ describe("derived.from()", () => {
 		s.set(1);
 		s.set(2);
 		expect(values).toEqual([1, 2]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	test("diamond pattern with from()", () => {
@@ -254,7 +254,7 @@ describe("lazy STANDALONE", () => {
 		expect(started).toBe(true);
 		// Producer emitted 1 during start → d recomputes to 1+1=2
 		expect(d.get()).toBe(2);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	test("derived connects on first source() subscription", () => {
@@ -270,7 +270,7 @@ describe("lazy STANDALONE", () => {
 
 		s.set(3);
 		expect(values).toEqual([4, 6]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	test("get() after state change returns fresh value", () => {
@@ -342,7 +342,7 @@ describe("lazy STANDALONE", () => {
 		expect(values).toEqual([4]);
 
 		// Remove subscriber — disconnects from upstream
-		unsub();
+		unsub.unsubscribe();
 
 		// get() still returns fresh value via pull-compute
 		s.set(3);

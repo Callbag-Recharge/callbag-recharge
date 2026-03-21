@@ -102,7 +102,7 @@ describe("fromWebSocket", () => {
 
 		expect(values).toEqual(["hello", "world"]);
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -121,8 +121,8 @@ describe("fromWebSocket", () => {
 		expect(states).toContain("open");
 		expect(states).toContain("closed");
 
-		unsub();
-		stateUnsub();
+		unsub.unsubscribe();
+		stateUnsub.unsubscribe();
 	});
 
 	it("tracks lifecycle status via withStatus", async () => {
@@ -138,7 +138,7 @@ describe("fromWebSocket", () => {
 		lastCreatedWs!.simulateMessage("hello");
 		expect(ws.status.get()).toBe("active");
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -156,7 +156,7 @@ describe("fromWebSocket", () => {
 
 		expect(values).toEqual([{ key: "value" }]);
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -169,7 +169,7 @@ describe("fromWebSocket", () => {
 		ws.send("outgoing");
 		expect(lastCreatedWs!.sent).toEqual(["outgoing"]);
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -183,7 +183,7 @@ describe("fromWebSocket", () => {
 
 		await vi.waitFor(() => expect(ws.connectionState.get()).toBe("closed"));
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns undefined before any message", () => {
@@ -205,7 +205,7 @@ describe("fromWebSocket", () => {
 
 		expect(lastCreatedWs!.sent).toEqual(["queued-1", "queued-2"]);
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -229,7 +229,7 @@ describe("fromWebSocket", () => {
 		expect(warnSpy).toHaveBeenCalledOnce();
 
 		warnSpy.mockRestore();
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -249,7 +249,7 @@ describe("fromWebSocket", () => {
 		expect(ws.status.get()).toBe("errored");
 		expect(ws.error.get()).toBeInstanceOf(SyntaxError);
 
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -272,7 +272,7 @@ describe("fromWebSocket", () => {
 		expect(warnSpy).not.toHaveBeenCalled();
 
 		warnSpy.mockRestore();
-		unsub();
+		unsub.unsubscribe();
 		ws.close();
 	});
 
@@ -291,7 +291,7 @@ describe("fromWebSocket", () => {
 		expect(ws.status.get()).toBe("errored");
 		expect(ws.error.get()).toBeInstanceOf(Error);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 
@@ -312,7 +312,7 @@ describe("toWebSocket", () => {
 		source.set("world");
 		expect(mockWs.sent).toEqual(["hello", "world"]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("serializes objects as JSON", async () => {
@@ -325,7 +325,7 @@ describe("toWebSocket", () => {
 		source.set({ key: "value" });
 		expect(mockWs.sent).toEqual(['{"key":"value"}']);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("custom serializer", async () => {
@@ -340,7 +340,7 @@ describe("toWebSocket", () => {
 		source.set(42);
 		expect(mockWs.sent).toEqual(["num:42"]);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("sends to WebSocketStore", async () => {
@@ -355,8 +355,8 @@ describe("toWebSocket", () => {
 		source.set("outbound");
 		expect(lastCreatedWs!.sent).toEqual(["outbound"]);
 
-		unsub();
-		subUnsub();
+		unsub.unsubscribe();
+		subUnsub.unsubscribe();
 		ws.close();
 	});
 

@@ -1,5 +1,5 @@
 import { producer } from "../core/producer";
-import type { Signal } from "../core/protocol";
+import type { LifecycleSignal, Signal } from "../core/protocol";
 import { beginDeferredStart, DATA, END, endDeferredStart, START, STATE } from "../core/protocol";
 import type { Store } from "../core/types";
 
@@ -18,9 +18,9 @@ import type { Store } from "../core/types";
  */
 export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 	return producer<T | undefined>(
-		({ emit, signal, complete, error }) => {
+		({ emit, signal, complete, error, onSignal }) => {
 			let index = 0;
-			let currentTalkback: ((type: number) => void) | null = null;
+			let currentTalkback: ((type: number, data?: any) => void) | null = null;
 
 			function subscribeNext() {
 				if (index >= sources.length) {
@@ -34,7 +34,7 @@ export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 
 				source.source(START, (type: number, data: unknown) => {
 					if (type === START) {
-						currentTalkback = data as (t: number) => void;
+						currentTalkback = data as (t: number, d?: any) => void;
 						return;
 					}
 					if (type === STATE) {
@@ -57,6 +57,10 @@ export function concat<T>(...sources: Store<T>[]): Store<T | undefined> {
 			}
 
 			subscribeNext();
+
+			onSignal((s: LifecycleSignal) => {
+				if (currentTalkback) currentTalkback(STATE, s);
+			});
 
 			return () => {
 				if (currentTalkback) currentTalkback(END);

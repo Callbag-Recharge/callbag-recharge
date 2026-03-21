@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
@@ -16,7 +17,7 @@ import { subscribe } from "./subscribe";
 export function groupBy<A, K>(keyFn: (value: A) => K): StoreOperator<A, Map<K, Store<A>>> {
 	return (input: Store<A>) => {
 		const store = producer<Map<K, Store<A>>>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				const groups = new Map<K, WritableStore<A>>();
 				let currentMap = new Map<K, Store<A>>();
 
@@ -57,10 +58,18 @@ export function groupBy<A, K>(keyFn: (value: A) => K): StoreOperator<A, Map<K, S
 					},
 				);
 
+				onSignal((s) => {
+					unsub.signal(s);
+					if (s === RESET) {
+						groups.clear();
+						currentMap = new Map();
+					}
+				});
+
 				return () => {
 					groups.clear();
 					currentMap = new Map();
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: new Map<K, Store<A>>() },

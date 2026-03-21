@@ -121,7 +121,7 @@ export function tokenTracker<A>(
 				// Reset meta on connection
 				tokens.set({ ...EMPTY_META });
 
-				const unsub = subscribe(
+				const sub = subscribe(
 					input,
 					(v) => {
 						try {
@@ -166,7 +166,7 @@ export function tokenTracker<A>(
 				);
 
 				return () => {
-					unsub();
+					sub.unsubscribe();
 				};
 			},
 			{ initial: input.get() },

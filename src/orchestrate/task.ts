@@ -17,8 +17,10 @@
 //   });
 // ---------------------------------------------------------------------------
 
+import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
+import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { switchMap } from "../extra/switchMap";
@@ -155,7 +157,7 @@ export function task<T>(
 			source$ = combine(...depStores);
 		}
 
-		return pipe(
+		const switched = pipe(
 			source$,
 			switchMap((raw: any) => {
 				// Unpack values from combine tuple or single value
@@ -305,6 +307,35 @@ export function task<T>(
 					};
 				});
 			}),
+		) as Store<T | null>;
+
+		// Wrap with lifecycle signal interceptor — when RESET/TEARDOWN arrives
+		// via talkback, delegate to taskState so pipeline doesn't need a flat task list.
+		// OperatorImpl._handleLifecycleSignal dispatches signal to handler via STATE.
+		return operator<T | null>(
+			[switched] as Store<unknown>[],
+			({ emit, signal, complete, error: actionsError }) => {
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						if (data === RESET) {
+							ts.reset();
+							// Don't forward RESET downstream — operator already handled it
+							return;
+						}
+						if (data === TEARDOWN) {
+							ts.destroy();
+							// Don't forward — operator will call complete() after this
+							return;
+						}
+						signal(data);
+					} else if (type === DATA) {
+						emit(data as T | null);
+					} else if (type === END) {
+						data !== undefined ? actionsError(data) : complete();
+					}
+				};
+			},
+			{ kind: "task", name: opts?.name },
 		) as Store<T | null>;
 	};
 

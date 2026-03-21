@@ -49,7 +49,7 @@ describe("task in pipeline — single dep", () => {
 
 		expect(values).toContain(10);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -71,7 +71,7 @@ describe("task in pipeline — single dep", () => {
 
 		expect(values).toContain("result:hello");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -98,7 +98,7 @@ describe("task in pipeline — single dep", () => {
 		const nonNull = values.filter((v) => v !== null);
 		expect(nonNull[nonNull.length - 1]).toBe(20);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 });
@@ -141,7 +141,7 @@ describe("task in pipeline — diamond join", () => {
 		expect(meaningful.length).toBeGreaterThanOrEqual(1);
 		expect(meaningful[meaningful.length - 1]).toBe("merged:a-result+b-result");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -356,7 +356,7 @@ describe("task — pipeline runStatus auto-detection", () => {
 		expect(statuses).toContain("active");
 		expect(wf.status.get()).toBe("completed");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 

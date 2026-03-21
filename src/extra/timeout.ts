@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -25,14 +26,14 @@ export class TimeoutError extends Error {
 export function timeout<A>(ms: number): StoreOperator<A, A> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				let timer: ReturnType<typeof setTimeout> | null = null;
 
 				function resetTimer() {
 					if (timer !== null) clearTimeout(timer);
 					timer = setTimeout(() => {
 						timer = null;
-						unsub();
+						unsub.unsubscribe();
 						error(new TimeoutError(ms));
 					}, ms);
 				}
@@ -60,12 +61,22 @@ export function timeout<A>(ms: number): StoreOperator<A, A> {
 
 				resetTimer();
 
+				onSignal((s) => {
+					unsub.signal(s);
+					if (s === RESET) {
+						if (timer !== null) {
+							clearTimeout(timer);
+							timer = null;
+						}
+					}
+				});
+
 				return () => {
 					if (timer !== null) {
 						clearTimeout(timer);
 						timer = null;
 					}
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: input.get() },

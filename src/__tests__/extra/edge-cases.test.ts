@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DIRTY } from "../../core/protocol";
+import { DIRTY, type Subscription } from "../../core/protocol";
 import { bufferTime } from "../../extra/bufferTime";
 import { combine } from "../../extra/combine";
 import { concat } from "../../extra/concat";
@@ -257,12 +257,12 @@ describe("reentrancy", () => {
 
 	it("subscriber unsubscribing itself during emission doesn't crash", () => {
 		const s = state(1);
-		let unsub: (() => void) | null = null;
+		let unsub: Subscription | null = null;
 		const values: number[] = [];
 
 		unsub = subscribe(s, (v) => {
 			values.push(v);
-			if (v === 2) unsub?.();
+			if (v === 2) unsub?.unsubscribe();
 		});
 
 		const other: number[] = [];
@@ -444,7 +444,7 @@ describe("scan: accumulator across reconnect", () => {
 		s.set(3); // acc = 2 + 3 = 5
 		expect(values1).toEqual([2, 5]);
 
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Second subscriber — acc resets to seed (0)
 		const values2: number[] = [];
@@ -464,7 +464,7 @@ describe("scan: accumulator across reconnect", () => {
 
 		const unsub = subscribe(sc, () => {});
 		s.set(5); // acc = 0 + 5 = 5
-		unsub();
+		unsub.unsubscribe();
 
 		// Pull-based get() after disconnect — acc was reset to seed on reconnect init,
 		// but getter uses the acc in the outer closure.
@@ -505,7 +505,7 @@ describe("scan: accumulator across reconnect", () => {
 		s.set(5); // push: acc = 0 (reset) + 5 = 5
 		expect(values).toEqual([5]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		// After disconnect, getterSeeded was set to false during the push-mode init.
 		// acc was reset to 0 (seed) on connect, then 0 + 5 = 5 during push.
@@ -783,7 +783,7 @@ describe("skip: reconnect resets counter", () => {
 		s.set(3); // emitted (emissionCount=3 > 2)
 		expect(values1).toEqual([3]);
 
-		unsub();
+		unsub.unsubscribe();
 
 		// Reconnect — operator._init re-runs, emissionCount resets to 0
 		const values2: number[] = [];

@@ -1,6 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
-import { END, START } from "../core/protocol";
+import type { LifecycleSignal } from "../core/protocol";
+import { END, RESET, START, STATE } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 
 /**
@@ -17,8 +18,8 @@ import type { Store, StoreOperator } from "../core/types";
 export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit, complete }) => {
-				let activeTalkback: ((type: number) => void) | null = null;
+			({ emit, complete, onSignal }) => {
+				let activeTalkback: ((type: number, data?: any) => void) | null = null;
 				let initialized = false;
 
 				function connectSource(source: Store<A>) {
@@ -31,7 +32,7 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 					if (initialized && initial !== undefined) emit(initial as A);
 					initialized = true;
 					source.source(START, (type: number, data: unknown) => {
-						if (type === START) activeTalkback = data as (type: number) => void;
+						if (type === START) activeTalkback = data as (type: number, data?: any) => void;
 						if (type === 1) emit(data as A);
 						if (type === END) {
 							activeTalkback = null;
@@ -45,6 +46,14 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 				}
 
 				connectSource(input);
+
+				onSignal((s: LifecycleSignal) => {
+					if (activeTalkback) activeTalkback(STATE, s);
+					if (s === RESET) {
+						// Reset to original source
+						connectSource(input);
+					}
+				});
 
 				return () => {
 					if (activeTalkback) activeTalkback(END);

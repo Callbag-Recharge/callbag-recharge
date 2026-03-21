@@ -45,7 +45,7 @@ describe("tokenTracker", () => {
 		});
 
 		expect(values).toHaveLength(2);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("computes totalTokens from prompt + completion when not provided", () => {
@@ -59,7 +59,7 @@ describe("tokenTracker", () => {
 		input.set("b");
 
 		expect(tracked.tokens.get().totalTokens).toBe(10);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("uses provided totalTokens when given", () => {
@@ -73,7 +73,7 @@ describe("tokenTracker", () => {
 		input.set("b");
 
 		expect(tracked.tokens.get().totalTokens).toBe(100);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("resets on reconnect", () => {
@@ -86,7 +86,7 @@ describe("tokenTracker", () => {
 		const unsub1 = subscribe(tracked, () => {});
 		input.set("b");
 		expect(tracked.tokens.get().count).toBe(1);
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Reconnect — should reset
 		const unsub2 = subscribe(tracked, () => {});
@@ -101,7 +101,7 @@ describe("tokenTracker", () => {
 		input.set("c");
 		expect(tracked.tokens.get().count).toBe(1);
 		expect(tracked.tokens.get().totalTokens).toBe(10);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("forwards values unchanged", () => {
@@ -117,7 +117,7 @@ describe("tokenTracker", () => {
 		input.set(200);
 
 		expect(values).toEqual([100, 200]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream errors", () => {
@@ -175,7 +175,7 @@ describe("tokenTracker", () => {
 		expect(tracked.tokens.get().count).toBe(2);
 		// Tokens from failed extraction are not added
 		expect(tracked.tokens.get().promptTokens).toBe(5);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns last value", () => {
@@ -191,7 +191,7 @@ describe("tokenTracker", () => {
 		const unsub = subscribe(tracked, () => {});
 		input.set(20);
 		expect(tracked.get()).toBe(20);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("tokens store is reactive via effect", () => {
@@ -212,8 +212,8 @@ describe("tokenTracker", () => {
 		expect(snapshots[1].count).toBe(2);
 		expect(snapshots[1].cost).toBeCloseTo(0.002);
 
-		unsub();
-		unsubTokens();
+		unsub.unsubscribe();
+		unsubTokens.unsubscribe();
 	});
 
 	it("registers with Inspector", () => {
@@ -244,7 +244,7 @@ describe("tokenTracker", () => {
 		expect(t.totalTokens).toBe(0);
 		expect(t.cost).toBe(0);
 		expect(t.count).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("countTokens throw does not add tokens from previous emission", () => {
@@ -267,7 +267,7 @@ describe("tokenTracker", () => {
 
 		expect(before).toBe(10);
 		expect(after).toBe(10); // unchanged — throw did not add tokens
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("multiple subscribers share the same token accumulation", () => {
@@ -284,8 +284,8 @@ describe("tokenTracker", () => {
 		expect(tracked.tokens.get().promptTokens).toBe(5);
 		expect(tracked.tokens.get().count).toBe(1);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 	});
 
 	it("handles empty TokenUsage object (all fields default to 0)", () => {
@@ -304,6 +304,6 @@ describe("tokenTracker", () => {
 		expect(t.totalTokens).toBe(0);
 		expect(t.cost).toBe(0);
 		expect(t.count).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 	});
 });

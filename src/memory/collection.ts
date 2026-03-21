@@ -74,8 +74,9 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 	}
 
 	function _trackTags(node: MemoryNodeInterface<T>): void {
-		// Effect runs eagerly on creation — handles both initial and subsequent tag changes.
-		// No separate _tagIndex.add() needed; update() does add on first call.
+		// Effect depends only on node.meta — fires when this node's tags change.
+		// Not connected to _version (which would cause O(N) spurious re-runs
+		// on every collection structural change).
 		const dispose = effect([node.meta], () => {
 			const currentTags = Array.from(node.meta.get().tags);
 			_tagIndex.update(node.id, currentTags);
@@ -175,13 +176,16 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 			if (destroyed) return;
 			destroyed = true;
 			_evictionPolicy?.clear();
+			// Dispose tag-tracking effects — local cleanup alongside node teardown.
 			for (const dispose of _tagEffects.values()) dispose();
 			_tagEffects.clear();
 			_tagIndex.destroy();
+			// Teardown _version — cascades END to _nodesStore, _sizeStore,
+			// and any external subscribers of collection's reactive stores.
+			teardown(_version);
 			batch(() => {
 				for (const node of _nodes.values()) node.destroy();
 				_nodes.clear();
-				teardown(_version);
 			});
 		},
 	};

@@ -170,7 +170,7 @@ describe("fromMCP", () => {
 			await tool.call({ query: "test" });
 			expect(statuses).toContain("active");
 			expect(statuses).toContain("completed");
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("independent tool instances don't interfere", async () => {

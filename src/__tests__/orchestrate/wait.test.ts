@@ -28,7 +28,7 @@ describe("wait (intentional pause step)", () => {
 			await new Promise((r) => setTimeout(r, 60));
 			expect(results.some((r) => r === "done: hello")).toBe(true);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -53,7 +53,7 @@ describe("wait (intentional pause step)", () => {
 			// Only "second" should have arrived (first was cancelled)
 			expect(results).toEqual(["second"]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -74,7 +74,7 @@ describe("wait (intentional pause step)", () => {
 
 			expect(results[0]).toBe(obj); // Same reference
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 	});
@@ -104,7 +104,7 @@ describe("wait (intentional pause step)", () => {
 
 			expect(results).toEqual(["waiting"]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -125,7 +125,7 @@ describe("wait (intentional pause step)", () => {
 
 			expect(results).toEqual(["instant"]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 
@@ -153,7 +153,7 @@ describe("wait (intentional pause step)", () => {
 
 			expect(results).toEqual(["second"]);
 
-			unsub();
+			unsub.unsubscribe();
 			wf.destroy();
 		});
 	});

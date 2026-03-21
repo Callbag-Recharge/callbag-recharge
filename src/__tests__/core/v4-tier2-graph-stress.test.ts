@@ -524,7 +524,7 @@ describe("dynamic subscriber churn with tier 2", () => {
 		a.set(2);
 
 		// Unsubscribe mid-debounce, resubscribe
-		unsub1();
+		unsub1.unsubscribe();
 		const vals2: number[] = [];
 		const unsub2 = subscribe(debounced, (v) => vals2.push(v));
 
@@ -537,7 +537,7 @@ describe("dynamic subscriber churn with tier 2", () => {
 		vi.advanceTimersByTime(100);
 
 		expect(vals2).toContain(3);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("switchMap inner subscription survives output slot transitions", () => {
@@ -563,7 +563,7 @@ describe("dynamic subscriber churn with tier 2", () => {
 		expect(vals2).toContain(11);
 
 		// Remove one subscriber — other should still work
-		unsub1();
+		unsub1.unsubscribe();
 		dataA.set(12);
 		expect(vals2).toContain(12);
 
@@ -574,7 +574,7 @@ describe("dynamic subscriber churn with tier 2", () => {
 		dataB.set(21);
 		expect(vals2).toContain(21);
 
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("effect on tier 2 node: dispose stops timer-based emissions", () => {

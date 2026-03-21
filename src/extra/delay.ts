@@ -1,5 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -17,9 +19,19 @@ import { subscribe } from "./subscribe";
 export function delay<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
 		const store = producer<A>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				const timers = new Set<ReturnType<typeof setTimeout>>();
-				const unsub = subscribe(
+				let outerSub: ReturnType<typeof subscribe>;
+
+				onSignal((s: LifecycleSignal) => {
+					outerSub.signal(s);
+					if (s === RESET) {
+						for (const id of timers) clearTimeout(id);
+						timers.clear();
+					}
+				});
+
+				outerSub = subscribe(
 					input,
 					(v) => {
 						const id = setTimeout(() => {
@@ -54,7 +66,7 @@ export function delay<A>(ms: number): StoreOperator<A, A | undefined> {
 				return () => {
 					for (const id of timers) clearTimeout(id);
 					timers.clear();
-					unsub();
+					outerSub.unsubscribe();
 				};
 			},
 			{ resetOnTeardown: true },

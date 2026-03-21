@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -17,7 +18,7 @@ import { subscribe } from "./subscribe";
 export function bufferTime<A>(ms: number): StoreOperator<A, A[]> {
 	return (input: Store<A>) => {
 		const store = producer<A[]>(
-			({ emit, error, complete }) => {
+			({ emit, error, complete, onSignal }) => {
 				let currentBuffer: A[] = [];
 
 				const unsub = subscribe(
@@ -53,10 +54,18 @@ export function bufferTime<A>(ms: number): StoreOperator<A, A[]> {
 					}
 				}, ms);
 
+				onSignal((s) => {
+					unsub.signal(s);
+					if (s === RESET) {
+						currentBuffer = [];
+						clearInterval(timer);
+					}
+				});
+
 				return () => {
 					clearInterval(timer);
 					currentBuffer = [];
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: [] as A[] },

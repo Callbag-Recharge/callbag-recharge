@@ -23,7 +23,7 @@ describe("forEach (fan-out step)", () => {
 		const last = results[results.length - 1];
 		expect(last).toEqual([2, 4, 6]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -41,7 +41,7 @@ describe("forEach (fan-out step)", () => {
 
 		expect(results.some((r) => Array.isArray(r) && r.length === 0)).toBe(true);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -68,7 +68,7 @@ describe("forEach (fan-out step)", () => {
 		// Pipeline detected the taskState — status should be completed
 		expect(wf.status.get()).toBe("completed");
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -101,7 +101,7 @@ describe("forEach (fan-out step)", () => {
 		const last = results[results.length - 1];
 		expect(last).toEqual([1, 2, 3, 4, 5]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -127,7 +127,7 @@ describe("forEach (fan-out step)", () => {
 		const last = results[results.length - 1];
 		expect(last).toEqual([10, -1, 30]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -153,7 +153,7 @@ describe("forEach (fan-out step)", () => {
 		const last = results[results.length - 1];
 		expect(last).toEqual([1, 2, -2]); // index 2 → -2
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -176,7 +176,7 @@ describe("forEach (fan-out step)", () => {
 		// taskState should capture the error
 		expect(forEachDef.error.get()).toBeDefined();
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -202,7 +202,7 @@ describe("forEach (fan-out step)", () => {
 		const last = results[results.length - 1];
 		expect(last).toEqual([3, 4]);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 
@@ -228,7 +228,7 @@ describe("forEach (fan-out step)", () => {
 		await new Promise((r) => setTimeout(r, 50));
 		expect(forEachDef.runCount.get()).toBe(3);
 
-		unsub();
+		unsub.unsubscribe();
 		wf.destroy();
 	});
 });

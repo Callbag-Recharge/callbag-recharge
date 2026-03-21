@@ -12,6 +12,7 @@
 // ---------------------------------------------------------------------------
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Subscription } from "../../core/protocol";
 import { combine } from "../../extra/combine";
 import { debounce } from "../../extra/debounce";
 import { distinctUntilChanged } from "../../extra/distinctUntilChanged";
@@ -195,7 +196,7 @@ describe("output slot transitions under stress", () => {
 			const unsub = subscribe(b, () => {});
 			a.set(i);
 			expect(b.get()).toBe(i * 2);
-			unsub();
+			unsub.unsubscribe();
 			// After unsub, STANDALONE should resume
 			expect(b.get()).toBe(i * 2);
 		}
@@ -224,17 +225,17 @@ describe("output slot transitions under stress", () => {
 		expect(vals2).toEqual([11]);
 		expect(vals3).toEqual([11]);
 
-		unsub2(); // MULTI → still MULTI (2 left)
+		unsub2.unsubscribe(); // MULTI → still MULTI (2 left)
 		a.set(20);
 		expect(vals1).toEqual([11, 21]);
 		expect(vals2).toEqual([11]); // stopped
 		expect(vals3).toEqual([11, 21]);
 
-		unsub3(); // → SINGLE
+		unsub3.unsubscribe(); // → SINGLE
 		a.set(30);
 		expect(vals1).toEqual([11, 21, 31]);
 
-		unsub1(); // → STANDALONE
+		unsub1.unsubscribe(); // → STANDALONE
 		a.set(40);
 		expect(b.get()).toBe(41); // STANDALONE still reactive
 	});
@@ -244,12 +245,12 @@ describe("output slot transitions under stress", () => {
 		const b = derived([a], () => a.get() * 2);
 
 		const lateValues: number[] = [];
-		let lateUnsub: (() => void) | null = null;
+		let lateSub: { unsubscribe(): void } | null = null;
 
 		// First subscriber triggers a late subscription during callback
 		const unsub1 = subscribe(b, (v) => {
-			if (v === 2 && !lateUnsub) {
-				lateUnsub = subscribe(b, (lv) => lateValues.push(lv));
+			if (v === 2 && !lateSub) {
+				lateSub = subscribe(b, (lv) => lateValues.push(lv));
 			}
 		});
 
@@ -257,8 +258,8 @@ describe("output slot transitions under stress", () => {
 		a.set(5); // b=10, both should see this
 
 		expect(lateValues).toContain(10);
-		unsub1();
-		lateUnsub?.();
+		unsub1.unsubscribe();
+		lateSub?.unsubscribe();
 	});
 
 	it("unsubscribe during propagation: removed subscriber stops receiving", () => {
@@ -267,12 +268,12 @@ describe("output slot transitions under stress", () => {
 
 		const vals1: number[] = [];
 		const vals2: number[] = [];
-		let unsub2: (() => void) | null = null;
+		let unsub2: Subscription | null = null;
 
 		// unsub1 will remove unsub2 during callback
 		const unsub1 = subscribe(b, (v) => {
 			vals1.push(v);
-			if (v === 2) unsub2?.();
+			if (v === 2) unsub2?.unsubscribe();
 		});
 		unsub2 = subscribe(b, (v) => vals2.push(v));
 
@@ -283,7 +284,7 @@ describe("output slot transitions under stress", () => {
 		// vals2 may or may not see the value 2 depending on iteration order,
 		// but must NOT see 6
 		expect(vals2.includes(6)).toBe(false);
-		unsub1();
+		unsub1.unsubscribe();
 	});
 });
 
@@ -524,12 +525,12 @@ describe("dynamic graph topology changes", () => {
 		expect(bVals).toEqual([3]); // only saw set(2)
 
 		// Remove B subscriber — C should still work
-		bUnsub();
+		bUnsub.unsubscribe();
 		a.set(3);
 		expect(cVals).toEqual([4, 6, 8]);
 		expect(b.get()).toBe(4); // still current
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("derived wrapping operator: disconnect-on-last-unsub resets operator state", () => {
@@ -556,7 +557,7 @@ describe("dynamic graph topology changes", () => {
 		a.set(1);
 		a.set(2);
 		expect(vals1).toEqual([10, 20]); // count=1→10, count=2→20
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Derived disconnects — operator re-inits with fresh state.
 		// Count resets to 0 on reconnect.
@@ -565,7 +566,7 @@ describe("dynamic graph topology changes", () => {
 		a.set(3);
 		a.set(4);
 		expect(vals2).toEqual([10, 20]); // count=1→10, count=2→20 (reset!)
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("effect disposal during batch: no stale computation after dispose", () => {
@@ -865,7 +866,7 @@ describe("status model consistency", () => {
 		expect(b._status).toBe("SETTLED");
 		expect(c._status).toBe("SETTLED");
 		expect(c.get()).toBe(15);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("RESOLVED status: state equals guard blocks emit entirely, no DIRTY reaches derived", () => {
@@ -880,7 +881,7 @@ describe("status model consistency", () => {
 
 		a.set(1); // same value → state blocks emit entirely
 		expect(b._status).toBe("SETTLED"); // no DIRTY was ever sent
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("status after error is ERRORED", () => {
@@ -1086,7 +1087,7 @@ describe("correctness traps", () => {
 		// After connection, b recomputes to 10 before c recomputes
 		expect(bValueDuringC).toBe(10);
 		expect(c.get()).toBe(15);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("many-to-one: 10 states feeding one derived — single compute per batch", () => {
@@ -1178,7 +1179,7 @@ describe("output slot transitions in diamond topologies", () => {
 		expect(c.get()).toBe(15);
 		expect(bVals).toEqual([10]);
 
-		bUnsub();
+		bUnsub.unsubscribe();
 
 		a.set(10);
 		expect(cCount).toBe(2); // still once per change
@@ -1274,7 +1275,7 @@ describe("output slot transitions in diamond topologies", () => {
 		expect(vals).toEqual([3, 4]); // still works
 
 		// Remove subscribe → back to STANDALONE
-		unsub();
+		unsub.unsubscribe();
 		a.set(4);
 		expect(b.get()).toBe(5); // STANDALONE still reactive
 	});

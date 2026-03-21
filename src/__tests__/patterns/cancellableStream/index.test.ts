@@ -39,7 +39,7 @@ describe("cancellableStream", () => {
 		expect(values).toContain("a");
 		expect(values).toContain("b");
 		expect(values).toContain("c");
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("tracks active state", async () => {
@@ -132,7 +132,7 @@ describe("fromAbortable", () => {
 
 		expect(values).toContain("x");
 		expect(values).toContain("y");
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("aborts on unsubscribe", async () => {
@@ -146,7 +146,7 @@ describe("fromAbortable", () => {
 
 		const unsub = subscribe(store, () => {});
 		await new Promise((r) => setTimeout(r, 20));
-		unsub();
+		unsub.unsubscribe();
 
 		expect(aborted).toHaveBeenCalled();
 	});

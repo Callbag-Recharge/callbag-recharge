@@ -131,7 +131,7 @@ describe("checkpoint + async adapter integration", () => {
 		expect(values).toContain(42);
 		expect(store.get("test-step")).toBe(42);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("recovers saved value on re-subscribe", async () => {
@@ -156,7 +156,7 @@ describe("checkpoint + async adapter integration", () => {
 		await new Promise((r) => setTimeout(r, 10));
 		source.set(99);
 		await new Promise((r) => setTimeout(r, 10));
-		unsub1();
+		unsub1.unsubscribe();
 
 		// Second subscription: should recover 99
 		const durable2 = pipe(source, checkpoint("recover-test", asyncAdapter));
@@ -165,6 +165,6 @@ describe("checkpoint + async adapter integration", () => {
 		await new Promise((r) => setTimeout(r, 10));
 
 		expect(values).toContain(99);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 });

@@ -1,5 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -30,12 +32,25 @@ import { subscribe } from "./subscribe";
  */
 export function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
-		const store = producer<A>(({ emit, error, complete }) => {
+		const store = producer<A>(({ emit, error, complete, onSignal }) => {
 			let timer: ReturnType<typeof setTimeout> | null = null;
 			let pendingValue: A | undefined;
 			let hasPending = false;
+			let outerSub: ReturnType<typeof subscribe>;
 
-			const unsub = subscribe(
+			onSignal((s: LifecycleSignal) => {
+				outerSub.signal(s);
+				if (s === RESET) {
+					if (timer !== null) {
+						clearTimeout(timer);
+						timer = null;
+					}
+					hasPending = false;
+					pendingValue = undefined;
+				}
+			});
+
+			outerSub = subscribe(
 				input,
 				(v) => {
 					if (timer !== null) clearTimeout(timer);
@@ -71,7 +86,7 @@ export function debounce<A>(ms: number): StoreOperator<A, A | undefined> {
 
 			return () => {
 				if (timer !== null) clearTimeout(timer);
-				unsub();
+				outerSub.unsubscribe();
 			};
 		});
 

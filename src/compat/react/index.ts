@@ -38,13 +38,13 @@ export function useSubscribe<T>(store: Store<T>): T {
 		(onStoreChange) => {
 			let disposed = false;
 
-			const unsub = subscribe(store, () => {
+			const sub = subscribe(store, () => {
 				if (!disposed) onStoreChange();
 			});
 
 			return () => {
 				disposed = true;
-				unsub();
+				sub.unsubscribe();
 			};
 		},
 		() => store.get(),

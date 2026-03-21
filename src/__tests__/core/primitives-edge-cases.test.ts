@@ -87,10 +87,10 @@ describe("producer edge cases", () => {
 		const unsub1 = subscribe(p, () => {});
 		const unsub2 = subscribe(p, () => {});
 
-		unsub1();
+		unsub1.unsubscribe();
 		expect(cleanupCount).toBe(0); // still has one sink
 
-		unsub2();
+		unsub2.unsubscribe();
 		expect(cleanupCount).toBe(1);
 	});
 
@@ -134,7 +134,7 @@ describe("producer edge cases", () => {
 		const unsub = subscribe(p, () => {});
 		expect(p.get()).toBe(42);
 
-		unsub();
+		unsub.unsubscribe();
 		expect(p.get()).toBe(0); // reset to initial
 	});
 
@@ -802,7 +802,7 @@ describe("operator edge cases", () => {
 		subscribe(op, (v) => values2.push(v));
 
 		s.set(1);
-		unsub1();
+		unsub1.unsubscribe();
 		s.set(2);
 
 		expect(values1).toEqual([1]);
@@ -828,11 +828,11 @@ describe("operator edge cases", () => {
 		const unsub1 = subscribe(op, () => {});
 		expect(initCount).toBe(1);
 
-		unsub1(); // disconnect
+		unsub1.unsubscribe(); // disconnect
 		const unsub2 = subscribe(op, () => {});
 		expect(initCount).toBe(2); // init re-runs
 
-		unsub2();
+		unsub2.unsubscribe();
 	});
 
 	it("late subscriber to errored operator gets END(error)", () => {

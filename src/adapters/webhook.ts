@@ -16,6 +16,8 @@
 
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 import type { WithStatusStatus } from "../utils/withStatus";
@@ -117,12 +119,28 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 	const requestCountStore = state<number>(0, { name: `${baseName}:count` });
 
 	let _emit: ((value: WebhookRequest<T>) => void) | null = null;
+	let webhookPaused = false;
 
 	const store = producer<WebhookRequest<T>>(
-		({ emit }) => {
+		({ emit, onSignal }) => {
 			_emit = emit;
+			webhookPaused = false;
+
+			onSignal((s: LifecycleSignal) => {
+				if (s === PAUSE) {
+					webhookPaused = true;
+				} else if (s === RESUME) {
+					webhookPaused = false;
+				} else if (s === RESET) {
+					webhookPaused = false;
+					requestCountStore.set(0);
+				}
+				// TEARDOWN is handled by ProducerImpl._handleLifecycleSignal → complete()
+			});
+
 			return () => {
 				_emit = null;
+				webhookPaused = false;
 			};
 		},
 		{ name: baseName, kind: "webhook" },
@@ -145,6 +163,12 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 		if (method !== "POST" || reqPath !== path) {
 			res.writeHead(404, { "Content-Type": "application/json" });
 			res.end(JSON.stringify({ error: "Not found" }));
+			return;
+		}
+
+		if (webhookPaused) {
+			res.writeHead(503, { "Content-Type": "application/json" });
+			res.end(JSON.stringify({ error: "Service paused" }));
 			return;
 		}
 

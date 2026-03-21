@@ -290,7 +290,7 @@ describe("Subscribe", () => {
 		const values: number[] = [];
 		const unsub = subscribe(count, (v) => values.push(v));
 		count.set(1);
-		unsub();
+		unsub.unsubscribe();
 		count.set(2);
 		expect(values).toEqual([1]);
 	});

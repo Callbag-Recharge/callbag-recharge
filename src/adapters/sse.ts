@@ -109,11 +109,11 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 	const pingTimers = new Map<any, ReturnType<typeof setInterval>>();
 
 	// Subscribe to source and broadcast to all clients
-	let sourceUnsub: (() => void) | null = null;
+	let sourceSub: { unsubscribe(): void } | null = null;
 
 	function ensureSubscription() {
-		if (sourceUnsub) return;
-		sourceUnsub = coreSub(source, (value) => {
+		if (sourceSub) return;
+		sourceSub = coreSub(source, (value) => {
 			const data = serialize(value);
 			const message = `event: ${eventName}\ndata: ${data}\n\n`;
 			for (const res of clients) {
@@ -136,9 +136,9 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 		}
 		connectionCountStore.set(clients.size);
 		// Unsubscribe from source when no clients remain
-		if (clients.size === 0 && sourceUnsub) {
-			sourceUnsub();
-			sourceUnsub = null;
+		if (clients.size === 0 && sourceSub) {
+			sourceSub.unsubscribe();
+			sourceSub = null;
 		}
 	}
 
@@ -248,8 +248,8 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 		connectionCountStore.set(0);
 
 		// Unsubscribe from source
-		sourceUnsub?.();
-		sourceUnsub = null;
+		sourceSub?.unsubscribe();
+		sourceSub = null;
 
 		// Close server
 		server?.close();

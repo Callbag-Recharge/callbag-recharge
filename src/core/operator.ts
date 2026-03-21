@@ -10,12 +10,14 @@
  */
 
 import { Inspector } from "./inspector";
-import type { Signal } from "./protocol";
+import type { LifecycleSignal, Signal } from "./protocol";
 import {
 	DATA,
 	DIRTY,
 	decodeStatus,
 	END,
+	isLifecycleSignal,
+	RESET,
 	RESOLVED,
 	S_COMPLETED,
 	S_DIRTY,
@@ -28,6 +30,7 @@ import {
 	STATE,
 	STATUS_MASK,
 	STATUS_SHIFT,
+	TEARDOWN,
 } from "./protocol";
 import type { Actions, SourceOptions, Store } from "./types";
 
@@ -51,7 +54,7 @@ const _STATUS_MASK = STATUS_MASK;
 export class OperatorImpl<B> {
 	_value: B | undefined;
 	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
-	_upstreamTalkbacks: Array<((type: number) => void) | null> = [];
+	_upstreamTalkbacks: Array<((type: number, data?: any) => void) | null> = [];
 	_handler: ((depIndex: number, type: number, data: any) => void) | null = null;
 	_flags: number;
 	_deps: Store<unknown>[];
@@ -59,6 +62,7 @@ export class OperatorImpl<B> {
 	_getterFn: ((cached: B | undefined) => B) | undefined;
 	_initial: B | undefined;
 	_errorData: unknown;
+	_generation = 0;
 
 	get _status() {
 		return decodeStatus(this._flags);
@@ -97,33 +101,29 @@ export class OperatorImpl<B> {
 		}
 	}
 
-	_connectUpstream(): void {
-		this._upstreamTalkbacks.length = this._deps.length;
-		this._upstreamTalkbacks.fill(null);
+	/** Create actions bound to a specific generation — stale generations become no-ops. */
+	_createActions(gen: number): Actions<B> {
 		const localTalkbacks = this._upstreamTalkbacks;
-
-		let completed = false;
-
-		const actions: Actions<B> = {
+		return {
 			seed: (value: B) => {
-				if (completed) return;
+				if (gen !== this._generation) return;
 				this._value = value;
 			},
 			emit: (value: B) => {
-				if (completed) return;
+				if (gen !== this._generation) return;
 				this._value = value;
 				this._flags = (this._flags & ~_STATUS_MASK) | _S_SETTLED;
 				this._dispatch(DATA, value);
 			},
 			signal: (s: Signal) => {
-				if (completed) return;
+				if (gen !== this._generation) return;
 				if (s === DIRTY) this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 				else if (s === RESOLVED) this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
 				this._dispatch(STATE, s);
 			},
 			complete: () => {
-				if (completed) return;
-				completed = true;
+				if (gen !== this._generation) return;
+				this._generation++; // invalidate this generation
 				this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_COMPLETED;
 				this._handler = null;
 				for (const tb of localTalkbacks) tb?.(END);
@@ -148,8 +148,8 @@ export class OperatorImpl<B> {
 				}
 			},
 			error: (e: unknown) => {
-				if (completed) return;
-				completed = true;
+				if (gen !== this._generation) return;
+				this._generation++; // invalidate this generation
 				this._errorData = e;
 				this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_ERRORED;
 				this._handler = null;
@@ -184,11 +184,19 @@ export class OperatorImpl<B> {
 				}
 			},
 		};
+	}
 
+	_connectUpstream(): void {
+		this._upstreamTalkbacks.length = this._deps.length;
+		this._upstreamTalkbacks.fill(null);
+		const localTalkbacks = this._upstreamTalkbacks;
+
+		const gen = ++this._generation;
+		const actions = this._createActions(gen);
 		this._handler = this._init(actions);
 
 		for (let i = 0; i < this._deps.length; i++) {
-			if (completed) break;
+			if (gen !== this._generation) break;
 			const depIndex = i;
 			this._deps[depIndex].source(START, (type: number, data: any) => {
 				if (type === START) {
@@ -199,6 +207,63 @@ export class OperatorImpl<B> {
 				this._handler?.(depIndex, type, data);
 			});
 		}
+	}
+
+	/**
+	 * Handle lifecycle signals received via talkback (upstream direction).
+	 * RESET: re-init handler with fresh state, forward upstream.
+	 * TEARDOWN: forward upstream, then complete.
+	 * PAUSE/RESUME: forward upstream.
+	 */
+	_handleLifecycleSignal(s: LifecycleSignal): void {
+		if (this._flags & O_COMPLETED) return;
+
+		if (s === TEARDOWN) {
+			// Notify handler so it can do custom teardown work (e.g., task() calls ts.destroy())
+			this._handler?.(0, STATE, TEARDOWN);
+			// Forward upstream
+			for (const tb of this._upstreamTalkbacks) tb?.(STATE, TEARDOWN);
+			// Complete this operator inline (not through gen-guarded wrapper,
+			// since handler notification above may have incremented generation)
+			this._generation++;
+			this._flags = ((this._flags | O_COMPLETED) & ~_STATUS_MASK) | _S_COMPLETED;
+			this._handler = null;
+			for (const tb of this._upstreamTalkbacks) tb?.(END);
+			this._upstreamTalkbacks.fill(null);
+			if (this._flags & O_RESET) this._value = this._initial;
+			const output = this._output;
+			const wasMulti = this._flags & O_MULTI;
+			this._output = null;
+			this._flags &= ~O_MULTI;
+			if (output) {
+				if (wasMulti) {
+					for (const sink of output as Set<any>) {
+						try {
+							sink(END);
+						} catch (_) {
+							/* ensure all sinks receive END */
+						}
+					}
+				} else {
+					(output as (type: number, data?: any) => void)(END);
+				}
+			}
+			return;
+		}
+
+		if (s === RESET) {
+			// Re-init handler with fresh closure state (new generation invalidates old actions)
+			const gen = ++this._generation;
+			const actions = this._createActions(gen);
+			this._handler = this._init(actions);
+			if (this._flags & O_RESET) this._value = this._initial;
+			// Notify the new handler so it can do custom lifecycle work
+			// (e.g., task() interceptor calls ts.reset())
+			this._handler?.(0, STATE, s);
+		}
+
+		// Forward all lifecycle signals upstream to deps
+		for (const tb of this._upstreamTalkbacks) tb?.(STATE, s);
 	}
 
 	_disconnectUpstream(): void {
@@ -243,8 +308,12 @@ export class OperatorImpl<B> {
 			} else {
 				(this._output as Set<any>).add(sink);
 			}
-			sink(START, (t: number) => {
+			sink(START, (t: number, d?: any) => {
 				if (t === DATA) sink(DATA, this._value);
+				if (t === STATE && isLifecycleSignal(d)) {
+					this._handleLifecycleSignal(d);
+					return;
+				}
 				if (t === END) {
 					if (this._output === null) return;
 					if (this._flags & O_MULTI) {

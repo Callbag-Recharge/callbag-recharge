@@ -106,9 +106,10 @@ export function create<T extends object>(initializer: StateCreator<T>): StoreApi
 		getState: () => source!.get() as T,
 		getInitialState: () => savedInitial,
 		subscribe: (listener) => {
-			return coreSubscribe(source as Store<T>, (value, prev) => {
+			const sub = coreSubscribe(source as Store<T>, (value, prev) => {
 				listener(value, prev as T);
 			});
+			return () => sub.unsubscribe();
 		},
 		destroy: () => teardown(source!),
 	};

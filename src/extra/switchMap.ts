@@ -1,5 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -42,13 +44,13 @@ export function switchMap<A, B>(
 ): StoreOperator<A, B | undefined> {
 	return (outer: Store<A>) => {
 		const store = producer<B>(
-			({ emit, error, complete }) => {
-				let innerUnsub: (() => void) | null = null;
+			({ emit, error, complete, onSignal }) => {
+				let innerUnsub: { unsubscribe(): void } | null = null;
 				let outerDone = false;
 
 				function subscribeInner(innerStore: Store<B>) {
 					if (innerUnsub) {
-						innerUnsub();
+						innerUnsub.unsubscribe();
 						innerUnsub = null;
 					}
 					// Subscribe first so synchronous factory emissions are detected.
@@ -81,7 +83,20 @@ export function switchMap<A, B>(
 					if (innerEnded) innerUnsub = null;
 				}
 
-				const outerUnsub = subscribe(outer, (v) => subscribeInner(fn(v)), {
+				let outerSub: ReturnType<typeof subscribe>;
+
+				onSignal((s: LifecycleSignal) => {
+					outerSub.signal(s);
+					if (s === RESET) {
+						if (innerUnsub) {
+							innerUnsub.unsubscribe();
+							innerUnsub = null;
+						}
+						outerDone = false;
+					}
+				});
+
+				outerSub = subscribe(outer, (v) => subscribeInner(fn(v)), {
 					onEnd: (err) => {
 						if (err !== undefined) {
 							error(err);
@@ -93,8 +108,8 @@ export function switchMap<A, B>(
 				});
 
 				return () => {
-					if (innerUnsub) innerUnsub();
-					outerUnsub();
+					if (innerUnsub) innerUnsub.unsubscribe();
+					outerSub.unsubscribe();
 				};
 			},
 			opts && "initial" in opts ? { initial: opts.initial as B } : undefined,

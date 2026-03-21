@@ -33,7 +33,7 @@ describe("fromAsyncIter", () => {
 		});
 		// Allow microtasks to flush
 		await new Promise((r) => setTimeout(r, 50));
-		unsub();
+		unsub.unsubscribe();
 		expect(values).toEqual([1, 2, 3]);
 	});
 
@@ -85,14 +85,14 @@ describe("fromAsyncIter", () => {
 			if (v !== undefined) values.push(v);
 		});
 		await new Promise((r) => setTimeout(r, 50));
-		unsub();
+		unsub.unsubscribe();
 
 		// Second subscription (factory re-invoked)
 		unsub = subscribe(source, (v) => {
 			if (v !== undefined) values.push(v);
 		});
 		await new Promise((r) => setTimeout(r, 50));
-		unsub();
+		unsub.unsubscribe();
 
 		expect(callCount).toBe(2);
 		expect(values).toEqual([1, 2]);
@@ -118,7 +118,7 @@ describe("fromAsyncIter", () => {
 			if (v !== undefined) values.push(v);
 		});
 		await new Promise((r) => setTimeout(r, 35));
-		unsub();
+		unsub.unsubscribe();
 		await new Promise((r) => setTimeout(r, 20));
 		expect(values.length).toBeGreaterThan(0);
 		expect(values.length).toBeLessThan(10);
@@ -159,7 +159,7 @@ describe("withLatestFrom", () => {
 
 		a.set(3); // a triggers, picks up b=20
 		expect(values).toEqual([12, 23]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("get() returns current computed value", () => {
@@ -232,7 +232,7 @@ describe("withLatestFrom", () => {
 
 		a.set(3);
 		expect(values).toEqual(["2:20", "3:30"]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("does not emit when only secondary deps change", () => {
@@ -256,7 +256,7 @@ describe("withLatestFrom", () => {
 		a.set(2); // primary changed — should emit with latest b=30
 		expect(values).toEqual([32]);
 		expect(effectCount).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("works with multiple other stores", () => {
@@ -277,7 +277,7 @@ describe("withLatestFrom", () => {
 		c.set(200);
 		a.set(3);
 		expect(values).toEqual([112, 223]);
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 
@@ -303,7 +303,7 @@ describe("bufferCount", () => {
 			[1, 2, 3],
 			[4, 5, 6],
 		]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("flushes partial buffer on completion", () => {
@@ -362,7 +362,7 @@ describe("bufferCount", () => {
 			[2, 3, 4],
 			[3, 4, 5],
 		]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("sliding window flushes partial on completion", () => {
@@ -400,7 +400,7 @@ describe("bufferCount", () => {
 
 		a.set(2);
 		expect(buffered.get()).toEqual([1, 2]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("reconnect resets buffer state", () => {
@@ -411,7 +411,7 @@ describe("bufferCount", () => {
 		const unsub1 = subscribe(buffered, (v) => values1.push(v as number[]));
 		a.set(1);
 		a.set(2);
-		unsub1(); // partial buffer discarded
+		unsub1.unsubscribe(); // partial buffer discarded
 
 		const values2: number[][] = [];
 		const unsub2 = subscribe(buffered, (v) => values2.push(v as number[]));
@@ -419,7 +419,7 @@ describe("bufferCount", () => {
 		a.set(4);
 		a.set(5); // flush
 		expect(values2).toEqual([[3, 4, 5]]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -450,7 +450,7 @@ describe("groupBy", () => {
 		a.set({ type: "a", value: 3 }); // existing group "a" — no new map emission
 		expect(maps.length).toBe(2);
 		expect(maps[1].get("a")!.get()).toEqual({ type: "a", value: 3 });
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream completion", () => {
@@ -667,7 +667,7 @@ describe("race", () => {
 
 		a.set(3); // a continues
 		expect(values).toEqual([1, 3]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("completes when winner completes", () => {
@@ -743,7 +743,7 @@ describe("race", () => {
 		});
 		b.set(99);
 		expect(values.filter((v) => v === 99)).toEqual([]);
-		unsub();
+		unsub.unsubscribe();
 	});
 });
 
@@ -782,7 +782,7 @@ describe("audit", () => {
 		a.set(5);
 		vi.advanceTimersByTime(100);
 		expect(values).toEqual([3, 5]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("flushes pending value on upstream completion", () => {
@@ -837,7 +837,7 @@ describe("audit", () => {
 		});
 
 		a.set(1);
-		unsub(); // teardown before timer fires
+		unsub.unsubscribe(); // teardown before timer fires
 		vi.advanceTimersByTime(200);
 		expect(values).toEqual([]); // nothing emitted after teardown
 	});
@@ -851,7 +851,7 @@ describe("audit", () => {
 			if (v !== undefined) values1.push(v);
 		});
 		a.set(1);
-		unsub1();
+		unsub1.unsubscribe();
 		vi.advanceTimersByTime(200);
 		expect(values1).toEqual([]);
 
@@ -863,7 +863,7 @@ describe("audit", () => {
 		a.set(2);
 		vi.advanceTimersByTime(100);
 		expect(values2).toEqual([2]);
-		unsub2();
+		unsub2.unsubscribe();
 	});
 });
 
@@ -892,7 +892,7 @@ describe("window (notifier)", () => {
 		expect(windows.length).toBe(2);
 		a.set(3);
 		expect(windows[1].get()).toBe(3);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream completion", () => {
@@ -949,7 +949,7 @@ describe("windowCount", () => {
 		a.set(4); // count reached, new window
 		expect(windows.length).toBe(3);
 		expect(windows[2].get()).toBe(undefined); // new window, no value yet
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("forwards upstream completion", () => {
@@ -999,7 +999,7 @@ describe("windowTime", () => {
 
 		vi.advanceTimersByTime(100);
 		expect(windows.length).toBe(3);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("clears interval on teardown", () => {
@@ -1011,7 +1011,7 @@ describe("windowTime", () => {
 			if (w) windows.push(w as Store<number>);
 		});
 
-		unsub();
+		unsub.unsubscribe();
 		vi.advanceTimersByTime(500);
 		// Should not create new windows after teardown
 		expect(windows.length).toBe(1);
@@ -1060,7 +1060,7 @@ describe("race — code review regressions", () => {
 		// lazySource changes should NOT propagate (it lost the race)
 		lazySource.set(99);
 		expect(values.filter((v) => v === 99)).toEqual([]);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("uses deferStart so all sources have equal chance", () => {
@@ -1107,7 +1107,7 @@ describe("fromAsyncIter — code review regressions", () => {
 		const source = fromAsyncIter(iter);
 		const unsub = subscribe(source, () => {});
 		await new Promise((r) => setTimeout(r, 30));
-		unsub(); // triggers teardown which calls return()
+		unsub.unsubscribe(); // triggers teardown which calls return()
 		await new Promise((r) => setTimeout(r, 30));
 
 		// Verify return() was called and no crash occurred
@@ -1138,6 +1138,6 @@ describe("groupBy — code review regressions", () => {
 		a.set(42); // triggers keyFn to throw
 		expect(receivedError).toBeInstanceOf(Error);
 		expect((receivedError as Error).message).toBe("bad key");
-		unsub();
+		unsub.unsubscribe();
 	});
 });

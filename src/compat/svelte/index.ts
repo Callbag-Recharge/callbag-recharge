@@ -45,7 +45,7 @@ export function useSubscribe<T>(store: Store<T>): SvelteReadable<T> {
 			// Subscribe first, then seed — avoids double-emission if a producer
 			// fires synchronously during endDeferredStart, and ensures the unsub
 			// handle exists before `run` executes.
-			const unsub = subscribe(store, (value) => {
+			const sub = subscribe(store, (value) => {
 				run(value);
 			});
 			// Svelte store contract: call `run` immediately with the current value
@@ -54,7 +54,7 @@ export function useSubscribe<T>(store: Store<T>): SvelteReadable<T> {
 			} catch (_) {
 				// Store may be in errored state — mirror core/subscribe resilience
 			}
-			return unsub;
+			return () => sub.unsubscribe();
 		},
 	};
 }

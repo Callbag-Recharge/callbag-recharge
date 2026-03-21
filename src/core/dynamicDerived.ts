@@ -13,6 +13,7 @@
 
 import { Bitmask } from "./bitmask";
 import { Inspector } from "./inspector";
+import type { LifecycleSignal } from "./protocol";
 import {
 	beginDeferredStart,
 	DATA,
@@ -20,6 +21,8 @@ import {
 	decodeStatus,
 	END,
 	endDeferredStart,
+	isLifecycleSignal,
+	RESET,
 	RESOLVED,
 	S_COMPLETED,
 	S_DIRTY,
@@ -32,6 +35,7 @@ import {
 	STATE,
 	STATUS_MASK,
 	STATUS_SHIFT,
+	TEARDOWN,
 } from "./protocol";
 import type { Store, StoreOptions } from "./types";
 
@@ -59,7 +63,7 @@ export type TrackingFn<T> = (get: <U>(store: Store<U>) => U) => T;
 
 export class DynamicDerivedImpl<T> {
 	_output: ((type: number, data?: any) => void) | Set<any> | null = null;
-	_upstreamTalkbacks: Array<(type: number) => void> = [];
+	_upstreamTalkbacks: Array<(type: number, data?: any) => void> = [];
 	_cachedValue: T | undefined;
 	_flags: number = 0;
 	_dirtyDeps!: Bitmask;
@@ -175,7 +179,7 @@ export class DynamicDerivedImpl<T> {
 		}
 
 		// Build new talkback array: reuse existing for kept deps, null for new
-		const newTalkbacks: Array<(type: number) => void> = [];
+		const newTalkbacks: Array<(type: number, data?: any) => void> = [];
 		for (let i = 0; i < newDeps.length; i++) {
 			const oldIndex = oldDeps.indexOf(newDeps[i]);
 			if (oldIndex !== -1) {
@@ -401,6 +405,27 @@ export class DynamicDerivedImpl<T> {
 		this._dirtyDeps.reset();
 	}
 
+	_handleLifecycleSignal(s: LifecycleSignal): void {
+		if (this._flags & D_COMPLETED) return;
+
+		if (s === TEARDOWN) {
+			for (const tb of this._upstreamTalkbacks) {
+				if (tb) tb(STATE, TEARDOWN);
+			}
+			this._handleEnd(undefined);
+			return;
+		}
+
+		if (s === RESET) {
+			this._flags &= ~(D_HAS_CACHED | D_ANY_DATA);
+			this._dirtyDeps.reset();
+		}
+
+		for (const tb of this._upstreamTalkbacks) {
+			if (tb) tb(STATE, s);
+		}
+	}
+
 	get(): T {
 		if (this._flags & D_CONNECTED) {
 			return this._cachedValue as T;
@@ -458,8 +483,12 @@ export class DynamicDerivedImpl<T> {
 				(this._output as Set<any>).add(sink);
 			}
 
-			sink(START, (t: number) => {
+			sink(START, (t: number, d?: any) => {
 				if (t === DATA) sink(DATA, this._cachedValue);
+				if (t === STATE && isLifecycleSignal(d)) {
+					this._handleLifecycleSignal(d);
+					return;
+				}
 				if (t === END) {
 					if (this._output === null) return;
 					if (this._flags & D_MULTI) {

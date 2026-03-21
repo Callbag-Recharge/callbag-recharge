@@ -83,7 +83,7 @@ describe("fromLLM", () => {
 			messages: [{ role: "user", content: "Hi" }],
 		});
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("streams Ollama-format response", async () => {
@@ -287,7 +287,7 @@ describe("fromLLM", () => {
 
 		expect(statuses).toContain("active");
 		expect(statuses[statuses.length - 1]).toBe("completed");
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("auto-cancel actually aborts first generation", async () => {

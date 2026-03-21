@@ -88,7 +88,7 @@ interface ManagedEntry {
 	statusStore: WritableStore<PipelineStatus | "stopped">;
 	restartCountStore: WritableStore<number>;
 	healthyStore: WritableStore<boolean>;
-	statusUnsub: (() => void) | null;
+	statusUnsub: { unsubscribe(): void } | null;
 	healthTimer: ReturnType<typeof setInterval> | null;
 	restartTimer: ReturnType<typeof setTimeout> | null;
 	/** Whether this entry is actively managed (not manually stopped). */
@@ -331,7 +331,7 @@ export function pipelineRunner(configs: PipelineRunnerConfig[]): PipelineRunnerR
 			entry.healthTimer = null;
 		}
 		if (entry.statusUnsub) {
-			entry.statusUnsub();
+			entry.statusUnsub.unsubscribe();
 			entry.statusUnsub = null;
 		}
 		if (entry.pipeline) {
@@ -444,12 +444,16 @@ export function pipelineRunner(configs: PipelineRunnerConfig[]): PipelineRunnerR
 			if (runnerDestroyed) return;
 			runnerDestroyed = true;
 
-			aggregateUnsub();
+			// Teardown aggregate status — cascades END to subscribers
+			aggregateUnsub.unsubscribe();
 			teardown(aggregateStatus);
 
+			// Signal TEARDOWN to each managed pipeline, then teardown companion stores.
+			// pipeline.destroy() already sends TEARDOWN signals through its graph (5f-6).
 			for (const entry of entries.values()) {
 				entry.destroyed = true;
 				teardownPipeline(entry);
+				// Teardown companion stores — cascades END to any subscribers
 				teardown(entry.pipelineStore);
 				teardown(entry.statusStore);
 				teardown(entry.restartCountStore);

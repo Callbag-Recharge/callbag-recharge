@@ -89,12 +89,15 @@ export function atom<T>(initial: T): NanoAtom<T> {
 		get: () => s.get(),
 		set: (value: T) => s.set(value),
 		subscribe: (cb: (value: T) => void) => {
-			const unsub = coreSubscribe(s, (v) => cb(v));
+			const sub = coreSubscribe(s, (v) => cb(v));
 			cb(s.get());
-			return unsub;
+			return () => sub.unsubscribe();
 		},
 		listen: (cb: (value: T) => void) => {
-			return coreSubscribe(s, (v) => cb(v));
+			{
+				const sub = coreSubscribe(s, (v) => cb(v));
+				return () => sub.unsubscribe();
+			}
 		},
 		store: s,
 	};
@@ -156,12 +159,15 @@ export function computed<T>(stores: any, fn: (...args: any[]) => T): NanoCompute
 	return {
 		get: () => d.get(),
 		subscribe: (cb: (value: T) => void) => {
-			const unsub = coreSubscribe(d, (v) => cb(v));
+			const sub = coreSubscribe(d, (v) => cb(v));
 			cb(d.get());
-			return unsub;
+			return () => sub.unsubscribe();
 		},
 		listen: (cb: (value: T) => void) => {
-			return coreSubscribe(d, (v) => cb(v));
+			{
+				const sub = coreSubscribe(d, (v) => cb(v));
+				return () => sub.unsubscribe();
+			}
 		},
 		store: d,
 	};
@@ -199,12 +205,15 @@ export function map<T extends Record<string, unknown>>(initial: T): NanoMap<T> {
 			s.set({ ...s.get(), [key]: value });
 		},
 		subscribe: (cb: (value: T) => void) => {
-			const unsub = coreSubscribe(s, (v) => cb(v));
+			const sub = coreSubscribe(s, (v) => cb(v));
 			cb(s.get());
-			return unsub;
+			return () => sub.unsubscribe();
 		},
 		listen: (cb: (value: T) => void) => {
-			return coreSubscribe(s, (v) => cb(v));
+			{
+				const sub = coreSubscribe(s, (v) => cb(v));
+				return () => sub.unsubscribe();
+			}
 		},
 		store: s,
 	};

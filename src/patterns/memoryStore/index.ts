@@ -10,6 +10,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../../core/derived";
+import { teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
 import { collection } from "../../memory/collection";
@@ -205,6 +206,9 @@ export function memoryStore<T>(opts?: MemoryStoreOptions): MemoryStoreResult<T> 
 		_session.destroy();
 		_working.destroy();
 		_longTerm.destroy();
+		// Teardown reactive stores — cascades END to subscribers of
+		// totalSize, sessionNodes, and sessionVersion.
+		teardown(_sessionVersion);
 	}
 
 	// Session nodes: re-read from _session on version change

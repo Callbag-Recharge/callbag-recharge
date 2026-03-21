@@ -160,7 +160,7 @@ export function loop<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
-					let statusUnsub: (() => void) | undefined;
+					let statusUnsub: { unsubscribe(): void } | undefined;
 					let pendingReject: ((reason: unknown) => void) | undefined;
 
 					const safeEmit = (v: T | null) => {
@@ -176,7 +176,7 @@ export function loop<T>(
 					const cleanup = () => {
 						stopped = true;
 						if (statusUnsub) {
-							statusUnsub();
+							statusUnsub.unsubscribe();
 							statusUnsub = undefined;
 						}
 						if (pendingReject) {
@@ -225,13 +225,13 @@ export function loop<T>(
 									if (stopped || settled) return;
 									if (status === "completed") {
 										settled = true;
-										statusUnsub?.();
+										statusUnsub?.unsubscribe();
 										statusUnsub = undefined;
 										pendingReject = undefined;
 										resolve(outputStore.get() as T);
 									} else if (status === "errored") {
 										settled = true;
-										statusUnsub?.();
+										statusUnsub?.unsubscribe();
 										statusUnsub = undefined;
 										pendingReject = undefined;
 										reject(new Error("loop: child pipeline errored"));
@@ -241,7 +241,7 @@ export function loop<T>(
 								// statusUnsub wasn't assigned yet when the callback ran.
 								// Clean it up now to prevent subscription leak.
 								if (settled && statusUnsub) {
-									statusUnsub();
+									statusUnsub.unsubscribe();
 									statusUnsub = undefined;
 								}
 							});

@@ -38,7 +38,7 @@ describe("fromWebhook", () => {
 		expect(values[0].responded).toBe(true);
 
 		expect(webhook.requestCount.get()).toBe(1);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("respond() with custom status code", async () => {
@@ -56,7 +56,7 @@ describe("fromWebhook", () => {
 		values[0].respond({ created: true }, 201);
 		expect(res._statusCode).toBe(201);
 
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("respond() is idempotent — second call is no-op", async () => {
@@ -75,7 +75,7 @@ describe("fromWebhook", () => {
 		values[0].respond({ second: true }); // should be ignored
 
 		expect(JSON.parse(res._body)).toEqual({ first: true });
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("auto-responds with 504 on timeout", async () => {
@@ -93,7 +93,7 @@ describe("fromWebhook", () => {
 
 		expect(res._statusCode).toBe(504);
 		expect(JSON.parse(res._body)).toEqual({ error: "Response timeout" });
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("rejects non-POST requests with 404", async () => {
@@ -134,7 +134,7 @@ describe("fromWebhook", () => {
 
 		expect(res._statusCode).toBe(400);
 		expect(values).toEqual([]); // no emission on parse error
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("custom parse function", async () => {
@@ -154,7 +154,7 @@ describe("fromWebhook", () => {
 
 		expect(values[0].body).toBe("HELLO");
 		values[0].respond({ ok: true });
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("requestCount increments on each request", async () => {
@@ -176,7 +176,7 @@ describe("fromWebhook", () => {
 		await waitForRes(res2);
 
 		expect(webhook.requestCount.get()).toBe(2);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("multiple subscribers receive the same request", async () => {
@@ -200,8 +200,8 @@ describe("fromWebhook", () => {
 		v1[0].respond({ handled: true });
 		expect(res._statusCode).toBe(200);
 
-		u1();
-		u2();
+		u1.unsubscribe();
+		u2.unsubscribe();
 	});
 
 	it("rejects body exceeding maxBodySize with 413", async () => {
@@ -215,7 +215,7 @@ describe("fromWebhook", () => {
 		await waitForRes(res);
 
 		expect(res._statusCode).toBe(413);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("handles request stream errors gracefully", async () => {
@@ -229,7 +229,7 @@ describe("fromWebhook", () => {
 		await waitForRes(res);
 
 		expect(res._statusCode).toBe(400);
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("listen() rejects if already listening", async () => {
@@ -268,7 +268,7 @@ describe("fromWebhook", () => {
 		const json = await response.json();
 		expect(json).toEqual({ echo: "world" });
 
-		unsub();
+		unsub.unsubscribe();
 		webhook.close();
 		webhook = null;
 	});

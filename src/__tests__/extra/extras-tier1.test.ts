@@ -146,7 +146,7 @@ describe("pairwise", () => {
 		const s = state(0);
 		const p = pipe(s, pairwise());
 		const unsub = subscribe(p, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// no assertion needed — just must not throw
 	});
 });
@@ -281,7 +281,7 @@ describe("debounce", () => {
 		});
 
 		s.set(1);
-		unsub(); // unsubscribe before timer fires
+		unsub.unsubscribe(); // unsubscribe before timer fires
 		vi.advanceTimersByTime(200);
 
 		expect(values).toEqual([]); // timer was cleared
@@ -338,7 +338,7 @@ describe("throttle", () => {
 		const t = pipe(s, throttle(100));
 		const unsub = subscribe(t, () => {});
 		s.set(1);
-		unsub();
+		unsub.unsubscribe();
 		// must not throw, timer is cleared
 	});
 
@@ -418,7 +418,7 @@ describe("switchMap", () => {
 			switchMap(() => inner),
 		);
 		const unsub = subscribe(mapped, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// must not throw
 	});
 });
@@ -501,7 +501,7 @@ describe("concatMap", () => {
 		);
 		const unsub = subscribe(mapped, () => {});
 		outer.set("b");
-		unsub(); // queue should be cleared, no throw
+		unsub.unsubscribe(); // queue should be cleared, no throw
 	});
 });
 
@@ -581,7 +581,7 @@ describe("exhaustMap", () => {
 			exhaustMap(() => inner),
 		);
 		const unsub = subscribe(mapped, () => {});
-		unsub();
+		unsub.unsubscribe();
 		// must not throw
 	});
 });

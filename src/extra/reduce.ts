@@ -41,7 +41,7 @@ export function reduce<A, B>(reducer: (acc: B, value: A) => B, seed: B): StoreOp
 				);
 
 				return () => {
-					unsub();
+					unsub.unsubscribe();
 				};
 			},
 			{ initial: seed },

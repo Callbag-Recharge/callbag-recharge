@@ -1,5 +1,6 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import { RESET } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, StoreOperator, WritableStore } from "../core/types";
 import { subscribe } from "./subscribe";
@@ -15,7 +16,7 @@ import { subscribe } from "./subscribe";
  */
 export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined> {
 	return (input: Store<A>) => {
-		const store = producer<Store<A>>(({ emit, error, complete }) => {
+		const store = producer<Store<A>>(({ emit, error, complete, onSignal }) => {
 			let currentWindow: WritableStore<A> | null = state(input.get());
 
 			// Emit the initial window
@@ -46,10 +47,18 @@ export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined
 				},
 			);
 
+			onSignal((s) => {
+				unsub.signal(s);
+				if (s === RESET) {
+					currentWindow = null;
+					clearInterval(timer);
+				}
+			});
+
 			return () => {
 				clearInterval(timer);
 				currentWindow = null;
-				unsub();
+				unsub.unsubscribe();
 			};
 		});
 

@@ -186,7 +186,7 @@ describe("agentLoop", () => {
 		expect(phases).toContain("plan");
 		expect(phases).toContain("act");
 		expect(phases).toContain("completed");
-		unsub();
+		unsub.unsubscribe();
 	});
 
 	it("start() while running restarts with new context", async () => {

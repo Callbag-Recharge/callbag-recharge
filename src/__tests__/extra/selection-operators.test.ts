@@ -526,8 +526,8 @@ describe("partition", () => {
 		const unsub2 = subscribe(b, () => {});
 		expect(startCount).toBe(1);
 
-		unsub1();
-		unsub2();
+		unsub1.unsubscribe();
+		unsub2.unsubscribe();
 	});
 
 	it("unsubscribe one branch keeps other alive", () => {
@@ -540,7 +540,7 @@ describe("partition", () => {
 		subscribe(falseS, (v) => falseVals.push(v));
 
 		s.set(1); // true branch
-		unsub1(); // disconnect true branch
+		unsub1.unsubscribe(); // disconnect true branch
 		s.set(-1); // false branch still alive
 		s.set(2); // true branch disconnected, won't receive
 
@@ -560,9 +560,9 @@ describe("partition", () => {
 		const unsub1 = subscribe(a, () => {});
 		const unsub2 = subscribe(b, () => {});
 
-		unsub1();
+		unsub1.unsubscribe();
 		expect(cleanedUp).toBe(false); // one branch still alive
-		unsub2();
+		unsub2.unsubscribe();
 		expect(cleanedUp).toBe(true); // both disconnected → upstream cleaned up
 	});
 

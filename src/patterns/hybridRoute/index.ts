@@ -14,6 +14,7 @@
 //   router.process('What is 2+2?');
 // ---------------------------------------------------------------------------
 
+import type { Subscription } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 import type { Store } from "../../core/types";
@@ -93,12 +94,12 @@ export function hybridRoute<T, R>(opts: HybridRouteOptions<T, R>): HybridRouteRe
 	const cloudCountStore = state<number>(0, { name: `${name}.cloudCount` });
 	const errorStore = state<unknown | undefined>(undefined, { name: `${name}.error` });
 
-	let currentUnsub: (() => void) | null = null;
+	let currentSub: Subscription | null = null;
 
 	function cleanup(): void {
-		if (currentUnsub) {
-			currentUnsub();
-			currentUnsub = null;
+		if (currentSub) {
+			currentSub.unsubscribe();
+			currentSub = null;
 		}
 	}
 
@@ -108,7 +109,7 @@ export function hybridRoute<T, R>(opts: HybridRouteOptions<T, R>): HybridRouteRe
 		// Read initial value immediately
 		resultStore.set(handler.get());
 
-		currentUnsub = subscribe(
+		currentSub = subscribe(
 			handler,
 			(value) => {
 				resultStore.set(value);

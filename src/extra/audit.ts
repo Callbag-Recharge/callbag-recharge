@@ -1,5 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -16,12 +18,25 @@ import { subscribe } from "./subscribe";
  */
 export function audit<A>(ms: number): StoreOperator<A, A | undefined> {
 	return (input: Store<A>) => {
-		const store = producer<A>(({ emit, error, complete }) => {
+		const store = producer<A>(({ emit, error, complete, onSignal }) => {
 			let timer: ReturnType<typeof setTimeout> | null = null;
 			let latestValue: A | undefined;
 			let hasValue = false;
+			let outerSub: ReturnType<typeof subscribe>;
 
-			const unsub = subscribe(
+			onSignal((s: LifecycleSignal) => {
+				outerSub.signal(s);
+				if (s === RESET) {
+					if (timer !== null) {
+						clearTimeout(timer);
+						timer = null;
+					}
+					hasValue = false;
+					latestValue = undefined;
+				}
+			});
+
+			outerSub = subscribe(
 				input,
 				(v) => {
 					latestValue = v;
@@ -62,7 +77,7 @@ export function audit<A>(ms: number): StoreOperator<A, A | undefined> {
 					timer = null;
 				}
 				hasValue = false;
-				unsub();
+				outerSub.unsubscribe();
 			};
 		});
 

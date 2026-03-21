@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../../core/derived";
+import { teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
 
@@ -242,8 +243,14 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		if (disposed) return;
 		disposed = true;
 		listeners.clear();
+		// Reset state before teardown so get() returns clean values
 		undoStack.set([]);
 		redoStack.set([]);
+		// Teardown stores — cascades END to canUndo/canRedo derived stores
+		// and any external subscribers.
+		teardown(undoStack);
+		teardown(redoStack);
+		teardown(lastCommandStore);
 	}
 
 	return {

@@ -14,6 +14,8 @@
 
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal, Subscription } from "../core/protocol";
+import { PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe as coreSub } from "../core/subscribe";
 import type { Store } from "../core/types";
@@ -135,6 +137,7 @@ export function fromWebSocket<T = unknown>(
 		};
 
 		ws.onmessage = (event: MessageEvent) => {
+			if (messagePaused) return; // Drop messages while paused
 			try {
 				const parsed = parse(event.data) as T;
 				_emit?.(parsed);
@@ -175,17 +178,50 @@ export function fromWebSocket<T = unknown>(
 		};
 	}
 
+	let messagePaused = false;
+
 	const messages = producer<T>(
-		({ emit, error, complete }) => {
+		({ emit, error, complete, onSignal }) => {
 			_emit = emit;
 			_error = error;
 			_complete = complete;
+			messagePaused = false;
 			connect();
+
+			onSignal((s: LifecycleSignal) => {
+				if (s === PAUSE) {
+					messagePaused = true;
+				} else if (s === RESUME) {
+					messagePaused = false;
+				} else if (s === RESET) {
+					// Close and reconnect from scratch
+					messagePaused = false;
+					sendQueue.length = 0;
+					if (reconnectTimer !== null) {
+						clearTimeout(reconnectTimer);
+						reconnectTimer = null;
+					}
+					if (ws) {
+						intentionalClose = true;
+						ws.onopen = null;
+						ws.onmessage = null;
+						ws.onerror = null;
+						ws.onclose = null;
+						ws.close();
+						ws = null;
+					}
+					connectionStateStore.set("closed");
+					// Reconnect fresh
+					connect();
+				}
+				// TEARDOWN is handled by ProducerImpl._handleLifecycleSignal → complete()
+			});
 
 			return () => {
 				_emit = null;
 				_error = null;
 				_complete = null;
+				messagePaused = false;
 				intentionalClose = true;
 				sendQueue.length = 0;
 				if (reconnectTimer !== null) {
@@ -251,7 +287,7 @@ export interface ToWebSocketOptions {
  * @param source - The store to subscribe to.
  * @param opts - Optional configuration.
  *
- * @returns `() => void` — unsubscribe function that stops sending.
+ * @returns `Subscription` — call `.unsubscribe()` to stop sending.
  *
  * @category adapters
  */
@@ -259,7 +295,7 @@ export function toWebSocket<T>(
 	ws: WebSocketStore | WebSocket,
 	source: Store<T>,
 	opts?: ToWebSocketOptions,
-): () => void {
+): Subscription {
 	const defaultSerialize = (v: unknown): string => (typeof v === "string" ? v : JSON.stringify(v));
 	const serialize = opts?.serialize ?? defaultSerialize;
 

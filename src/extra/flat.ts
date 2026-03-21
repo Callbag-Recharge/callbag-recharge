@@ -1,5 +1,7 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
+import type { LifecycleSignal } from "../core/protocol";
+import { RESET } from "../core/protocol";
 import type { Store, StoreOperator } from "../core/types";
 import { subscribe } from "./subscribe";
 
@@ -21,13 +23,13 @@ export function flat<T>(opts?: {
 }): StoreOperator<Store<T> | undefined, T | undefined> {
 	return (outer: Store<Store<T> | undefined>) => {
 		const store = producer<T>(
-			({ emit, error, complete }) => {
-				let innerUnsub: (() => void) | null = null;
+			({ emit, error, complete, onSignal }) => {
+				let innerUnsub: { unsubscribe(): void } | null = null;
 				let outerDone = false;
 
 				function subscribeInner(innerStore: Store<T>) {
 					if (innerUnsub) {
-						innerUnsub();
+						innerUnsub.unsubscribe();
 						innerUnsub = null;
 					}
 					emit(innerStore.get());
@@ -46,12 +48,24 @@ export function flat<T>(opts?: {
 					if (innerEnded) innerUnsub = null;
 				}
 
-				const outerUnsub = subscribe(
+				let outerSub: ReturnType<typeof subscribe>;
+
+				onSignal((s: LifecycleSignal) => {
+					outerSub.signal(s);
+					if (s === RESET) {
+						if (innerUnsub) {
+							innerUnsub.unsubscribe();
+							innerUnsub = null;
+						}
+					}
+				});
+
+				outerSub = subscribe(
 					outer,
 					(innerStore) => {
 						if (innerStore === undefined) {
 							if (innerUnsub) {
-								innerUnsub();
+								innerUnsub.unsubscribe();
 								innerUnsub = null;
 							}
 							emit(undefined as T);
@@ -72,8 +86,8 @@ export function flat<T>(opts?: {
 				);
 
 				return () => {
-					if (innerUnsub) innerUnsub();
-					outerUnsub();
+					if (innerUnsub) innerUnsub.unsubscribe();
+					outerSub.unsubscribe();
 				};
 			},
 			opts && "initial" in opts ? { initial: opts.initial as T } : undefined,

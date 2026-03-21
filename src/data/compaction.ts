@@ -13,6 +13,7 @@
 //   c.compact(); // keeps only { id: "a", value: 2 }
 // ---------------------------------------------------------------------------
 
+import type { Subscription } from "../core/protocol";
 import { subscribe } from "../core/subscribe";
 import type { ReactiveLog } from "./types";
 
@@ -63,7 +64,7 @@ export function compaction<V>(
 	opts?: CompactionOptions,
 ): CompactionResult<V> {
 	const threshold = opts?.threshold ?? 0;
-	let unsub: (() => void) | null = null;
+	let unsub: Subscription | null = null;
 	let compacting = false;
 
 	function compact(): number {
@@ -110,7 +111,7 @@ export function compaction<V>(
 	return {
 		compact,
 		destroy(): void {
-			unsub?.();
+			unsub?.unsubscribe();
 			unsub = null;
 		},
 	};

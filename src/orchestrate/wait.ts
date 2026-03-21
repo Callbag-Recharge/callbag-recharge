@@ -119,21 +119,21 @@ export function wait<T>(
 					// synchronously (unsub would be undefined at call time) and
 					// double-unsub from teardown after callback already unsubscribed.
 					let released = false;
-					let unsub: (() => void) | undefined;
-					unsub = subscribe(signal$, (v) => {
+					let sub: { unsubscribe(): void } | undefined;
+					sub = subscribe(signal$, (v) => {
 						if (v && !released) {
 							released = true;
-							unsub?.();
+							sub?.unsubscribe();
 							emit(value);
 							complete();
 						}
 					});
-					// If subscribe delivered truthy synchronously, unsub already called
+					// If subscribe delivered truthy synchronously, sub already called
 					if (released) return undefined;
 					return () => {
 						if (!released) {
 							released = true;
-							unsub?.();
+							sub?.unsubscribe();
 						}
 					};
 				});

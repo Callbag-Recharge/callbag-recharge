@@ -94,7 +94,7 @@ describe("dynamicDerived", () => {
 			// result still reads b=20
 			expect(d.get()).toBe(20);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("deps discovered later are subscribed dynamically", () => {
@@ -119,7 +119,7 @@ describe("dynamicDerived", () => {
 			b.set(100);
 			expect(d.get()).toBe(110);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 	});
 
@@ -146,7 +146,7 @@ describe("dynamicDerived", () => {
 			expect(d.get()).toBe(25); // (5*2) + (5+10) = 10 + 15
 			expect(dCount).toBe(1); // computed exactly once
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("5-branch diamond recomputes once", () => {
@@ -166,7 +166,7 @@ describe("dynamicDerived", () => {
 			expect(leaf.get()).toBe(60);
 			expect(leafCount).toBe(1);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("works with batch", () => {
@@ -190,7 +190,7 @@ describe("dynamicDerived", () => {
 			expect(doubled.get()).toBe(60); // (10+20)*2
 			expect(computeCount).toBe(1);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 	});
 
@@ -214,7 +214,7 @@ describe("dynamicDerived", () => {
 			count.set(-1); // now false
 			expect(cb).toHaveBeenCalledWith(false, true);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 	});
 
@@ -228,7 +228,7 @@ describe("dynamicDerived", () => {
 			const d = dynamicDerived((get) => get(a) * 2);
 
 			const unsub = subscribe(d, () => {});
-			unsub();
+			unsub.unsubscribe();
 
 			// After disconnect, get() should still pull-compute
 			a.set(5);
@@ -249,11 +249,11 @@ describe("dynamicDerived", () => {
 			expect(v2).toContain(10);
 
 			// Removing one subscriber keeps the other active
-			unsub1();
+			unsub1.unsubscribe();
 			a.set(10);
 			expect(v2).toContain(20);
 
-			unsub2();
+			unsub2.unsubscribe();
 		});
 
 		it("handles upstream completion", () => {
@@ -276,7 +276,7 @@ describe("dynamicDerived", () => {
 			const unsub1 = subscribe(d, () => {});
 			a.set(5);
 			expect(d.get()).toBe(10);
-			unsub1();
+			unsub1.unsubscribe();
 
 			// Second subscription — should reconnect
 			a.set(3);
@@ -287,7 +287,7 @@ describe("dynamicDerived", () => {
 			a.set(7);
 			expect(values).toContain(14);
 
-			unsub2();
+			unsub2.unsubscribe();
 		});
 	});
 
@@ -313,7 +313,7 @@ describe("dynamicDerived", () => {
 			expect(onEnd).toHaveBeenCalledWith(expect.any(Error));
 			expect((onEnd.mock.calls[0][0] as Error).message).toBe("boom");
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("propagates fn error via END on first subscribe (lazyConnect)", () => {
@@ -391,7 +391,7 @@ describe("dynamicDerived", () => {
 			expect(values).toEqual([6, 15]);
 			expect(d.get()).toBe(15);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("single-dep computes exactly once per upstream change (no double-compute from DIRTY+DATA)", () => {
@@ -413,7 +413,7 @@ describe("dynamicDerived", () => {
 			expect(computeCount).toBe(2);
 			expect(d.get()).toBe(20);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("single-dep with equals sends RESOLVED (skips downstream)", () => {
@@ -441,7 +441,7 @@ describe("dynamicDerived", () => {
 			expect(downstreamCount).toBe(1);
 			expect(downstream.get()).toBe(false);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("single-dep → effect: effect runs exactly once per state change", () => {
@@ -495,7 +495,7 @@ describe("dynamicDerived", () => {
 			expect(d.get()).toBe(30); // 10 + 20
 			expect(computeCount).toBe(2);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("rewire from multi-dep to single-dep works correctly", () => {
@@ -526,7 +526,7 @@ describe("dynamicDerived", () => {
 			a.set(5);
 			expect(d.get()).toBe(5);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 
 		it("single-dep reconnect after disconnect resets dirty state", () => {
@@ -537,7 +537,7 @@ describe("dynamicDerived", () => {
 			const unsub1 = subscribe(d, () => {});
 			a.set(5);
 			expect(d.get()).toBe(10);
-			unsub1();
+			unsub1.unsubscribe();
 
 			// Modify while disconnected
 			a.set(3);
@@ -551,7 +551,7 @@ describe("dynamicDerived", () => {
 			expect(values).toContain(14);
 			expect(d.get()).toBe(14);
 
-			unsub2();
+			unsub2.unsubscribe();
 		});
 
 		it("single-dep works correctly with batch", () => {
@@ -574,7 +574,7 @@ describe("dynamicDerived", () => {
 			expect(d.get()).toBe(40);
 			expect(computeCount).toBe(1);
 
-			unsub();
+			unsub.unsubscribe();
 		});
 	});
 });
