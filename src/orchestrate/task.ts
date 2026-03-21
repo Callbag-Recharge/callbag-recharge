@@ -36,7 +36,7 @@ export interface TaskOpts<T> {
 	/** Debug name for Inspector. */
 	name?: string;
 	/** Skip predicate: when true, emit null without running the task. */
-	skip?: (...values: any[]) => boolean;
+	skip?: (values: any[]) => boolean;
 	/** Fallback value or factory on error (after retries exhausted). */
 	fallback?: T | ((error: unknown) => T);
 	/** Retry count or full retry options. */
@@ -69,7 +69,8 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  * Unlike `step()`, the factory receives **values** (not stores) and the framework
  * handles diamond resolution, re-trigger cancellation, and task status tracking.
  *
- * @param fn - Function receiving dep values, returns result or Promise.
+ * @param fn - Function receiving `(signal, values)`. Signal is an AbortSignal aborted on reset/destroy.
+ *   Values is an array of resolved dep values. No-deps overload receives `(signal)` only.
  * @param opts - Optional configuration (skip, fallback, retry, timeout).
  *
  * @returns `TaskStepDef<T>` — step definition for pipeline() with internal task tracking.
@@ -77,6 +78,7 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  * @remarks **Auto-join:** Deps wait for ALL deps to emit non-undefined values before calling fn.
  * @remarks **Re-trigger:** New upstream values cancel the previous in-flight execution (switchMap semantics).
  * @remarks **Task tracking:** Internal `taskState` tracks status/duration/errors. Pipeline auto-detects it for `runStatus`.
+ * @remarks **Cancellation:** The AbortSignal is aborted on re-trigger, reset, or destroy. Forward it to fetch(), etc.
  *
  * @example
  * ```ts
@@ -84,8 +86,8 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  *
  * const wf = pipeline({
  *   trigger: step(fromTrigger<string>()),
- *   fetch:   task(["trigger"], async (v) => {
- *     const res = await fetch(`/api/${v}`);
+ *   fetch:   task(["trigger"], async (signal, [v]) => {
+ *     const res = await fetch(`/api/${v}`, { signal });
  *     return res.json();
  *   }, { retry: 3, timeout: 5000 }),
  * });
@@ -93,29 +95,33 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  *
  * @category orchestrate
  */
-export function task<T>(fn: () => T | Promise<T>, opts?: TaskOpts<T>): TaskStepDef<T>;
 export function task<T>(
-	deps: string[],
-	fn: (...values: any[]) => T | Promise<T>,
+	fn: (signal: AbortSignal) => T | Promise<T>,
 	opts?: TaskOpts<T>,
 ): TaskStepDef<T>;
 export function task<T>(
-	depsOrFn: string[] | (() => T | Promise<T>),
-	fnOrOpts?: ((...values: any[]) => T | Promise<T>) | TaskOpts<T>,
+	deps: string[],
+	fn: (signal: AbortSignal, values: any[]) => T | Promise<T>,
+	opts?: TaskOpts<T>,
+): TaskStepDef<T>;
+export function task<T>(
+	depsOrFn: string[] | ((signal: AbortSignal) => T | Promise<T>),
+	fnOrOpts?: ((signal: AbortSignal, values: any[]) => T | Promise<T>) | TaskOpts<T>,
 	maybeOpts?: TaskOpts<T>,
 ): TaskStepDef<T> {
 	// Parse overloads
 	let deps: string[];
-	let fn: (...values: any[]) => T | Promise<T>;
+	let fn: (signal: AbortSignal, values: any[]) => T | Promise<T>;
 	let opts: TaskOpts<T> | undefined;
 
 	if (Array.isArray(depsOrFn)) {
 		deps = depsOrFn;
-		fn = fnOrOpts as (...values: any[]) => T | Promise<T>;
+		fn = fnOrOpts as (signal: AbortSignal, values: any[]) => T | Promise<T>;
 		opts = maybeOpts;
 	} else {
 		deps = [];
-		fn = depsOrFn as () => T | Promise<T>;
+		const noDepsFn = depsOrFn as (signal: AbortSignal) => T | Promise<T>;
+		fn = (signal: AbortSignal) => noDepsFn(signal);
 		opts = fnOrOpts as TaskOpts<T> | undefined;
 	}
 
@@ -170,7 +176,7 @@ export function task<T>(
 				}
 
 				// Skip predicate
-				if (skipPred?.(...values)) {
+				if (skipPred?.(values)) {
 					return producer<T | null>(({ emit, complete }) => {
 						emit(null);
 						complete();
@@ -199,8 +205,8 @@ export function task<T>(
 					const runTask = async (attempt: number): Promise<void> => {
 						if (stopped) return;
 						try {
-							const result = await ts.run(async () => {
-								let maybePromise = fn(...values);
+							const result = await ts.run(async (signal) => {
+								let maybePromise = fn(signal, values);
 
 								// Guard: async generators silently resolve to the generator
 								// object instead of yielded values. Detect and throw early.

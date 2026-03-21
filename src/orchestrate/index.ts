@@ -14,6 +14,9 @@ export type { ApprovalOpts, ApprovalStepDef } from "./approval";
 export { approval } from "./approval";
 export type { BranchStepDef } from "./branch";
 export { branch } from "./branch";
+// -- Additional workflow nodes ------------------------------------------------
+export type { D2Opts, MermaidOpts } from "./diagram";
+export { toD2, toMermaid } from "./diagram";
 // -- Orchestration plumbing --------------------------------------------------
 export type {
 	ExecutionEntry,
@@ -34,6 +37,17 @@ export type { ForEachOpts, ForEachStepDef } from "./forEach";
 export { forEach } from "./forEach";
 export type { GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
+export type {
+	AppendStrategy,
+	IntersectStrategy,
+	JoinOpts,
+	JoinStepDef,
+	JoinStrategy,
+	MergeStrategy,
+} from "./join";
+export { join } from "./join";
+export type { LoopDef, LoopOpts, LoopStepDef } from "./loop";
+export { loop } from "./loop";
 export type { OnFailureOpts, OnFailureStepDef } from "./onFailure";
 export { onFailure } from "./onFailure";
 export type {
@@ -44,6 +58,15 @@ export type {
 	StepMeta,
 } from "./pipeline";
 export { pipeline, step } from "./pipeline";
+export type {
+	ManagedPipeline,
+	PipelineRunnerConfig,
+	PipelineRunnerResult,
+	RunnerStatus,
+} from "./pipelineRunner";
+export { pipelineRunner } from "./pipelineRunner";
+export type { SensorOpts, SensorStepDef } from "./sensor";
+export { sensor } from "./sensor";
 export type { SubPipelineDef, SubPipelineOpts, SubPipelineStepDef } from "./subPipeline";
 export { subPipeline } from "./subPipeline";
 export type { TaskOpts, TaskStepDef } from "./task";

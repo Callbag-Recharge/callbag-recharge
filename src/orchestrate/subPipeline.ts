@@ -72,7 +72,7 @@ export interface SubPipelineStepDef<T = any> extends StepDef<T | null> {
  * Previous child pipelines are destroyed on re-trigger (switchMap semantics).
  *
  * @param deps - Names of upstream steps whose values are passed to the factory.
- * @param factory - Function receiving dep values, returns a `SubPipelineDef` describing the child pipeline.
+ * @param factory - Function receiving `(signal, values)`. Signal is aborted on reset/destroy. Values is an array of dep values. Returns a `SubPipelineDef` describing the child pipeline.
  * @param opts - Optional configuration (name).
  *
  * @returns `SubPipelineStepDef<T>` — step definition for pipeline() with task tracking.
@@ -104,7 +104,7 @@ export interface SubPipelineStepDef<T = any> extends StepDef<T | null> {
  */
 export function subPipeline<T>(
 	deps: string[],
-	factory: (...values: any[]) => SubPipelineDef,
+	factory: (signal: AbortSignal, values: any[]) => SubPipelineDef,
 	opts?: SubPipelineOpts,
 ): SubPipelineStepDef<T> {
 	const ts = taskState<T>({ id: opts?.name });
@@ -179,9 +179,9 @@ export function subPipeline<T>(
 						}
 					};
 
-					ts.run(async () => {
+					ts.run(async (signal) => {
 						// Create child pipeline
-						const def = factory(...values);
+						const def = factory(signal, values);
 						const outputName = def.output;
 
 						const child = pipeline(def.steps, {

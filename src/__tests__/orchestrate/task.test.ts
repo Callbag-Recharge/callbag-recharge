@@ -11,20 +11,20 @@ import { TASK_STATE } from "../../orchestrate/types";
 // ==========================================================================
 describe("task", () => {
 	it("creates a step def with no deps", () => {
-		const t = task(() => 42);
+		const t = task((_signal) => 42);
 		expect(t.deps).toEqual([]);
 		expect(t.factory).toBeDefined();
 		expect(t[TASK_STATE]).toBeDefined();
 	});
 
 	it("creates a step def with deps", () => {
-		const t = task(["a", "b"], (a, b) => a + b);
+		const t = task(["a", "b"], (_signal, [a, b]) => a + b);
 		expect(t.deps).toEqual(["a", "b"]);
 		expect(t[TASK_STATE]).toBeDefined();
 	});
 
 	it("accepts name option", () => {
-		const t = task(["a"], (v) => v, { name: "myTask" });
+		const t = task(["a"], (_signal, [v]) => v, { name: "myTask" });
 		expect(t.name).toBe("myTask");
 	});
 });
@@ -37,7 +37,7 @@ describe("task in pipeline — single dep", () => {
 		const trigger = fromTrigger<number>();
 		const wf = pipeline({
 			input: step(trigger),
-			doubled: task(["input"], (v: number) => v * 2),
+			doubled: task(["input"], (_signal, [v]: [number]) => v * 2),
 		});
 
 		const values: (number | null)[] = [];
@@ -57,7 +57,7 @@ describe("task in pipeline — single dep", () => {
 		const trigger = fromTrigger<string>();
 		const wf = pipeline({
 			input: step(trigger),
-			fetched: task(["input"], async (v: string) => {
+			fetched: task(["input"], async (_signal, [v]: [string]) => {
 				await new Promise((r) => setTimeout(r, 30));
 				return `result:${v}`;
 			}),
@@ -79,7 +79,7 @@ describe("task in pipeline — single dep", () => {
 		const trigger = fromTrigger<number>();
 		const wf = pipeline({
 			input: step(trigger),
-			slow: task(["input"], async (v: number) => {
+			slow: task(["input"], async (_signal, [v]: [number]) => {
 				await new Promise((r) => setTimeout(r, 100));
 				return v * 10;
 			}),
@@ -112,17 +112,20 @@ describe("task in pipeline — diamond join", () => {
 
 		const wf = pipeline({
 			trigger: step(trigger),
-			fetchA: task(["trigger"], async () => {
+			fetchA: task(["trigger"], async (_signal) => {
 				await new Promise((r) => setTimeout(r, 30));
 				return "a-result";
 			}),
-			fetchB: task(["trigger"], async () => {
+			fetchB: task(["trigger"], async (_signal) => {
 				await new Promise((r) => setTimeout(r, 60));
 				return "b-result";
 			}),
-			aggregate: task(["fetchA", "fetchB"], async (a: string | null, b: string | null) => {
-				return `merged:${a}+${b}`;
-			}),
+			aggregate: task(
+				["fetchA", "fetchB"],
+				async (_signal, [a, b]: [string | null, string | null]) => {
+					return `merged:${a}+${b}`;
+				},
+			),
 		});
 
 		const aggValues: (string | null)[] = [];
@@ -148,18 +151,21 @@ describe("task in pipeline — diamond join", () => {
 
 		const wf = pipeline({
 			trigger: step(trigger),
-			fetchA: task(["trigger"], async () => {
+			fetchA: task(["trigger"], async (_signal) => {
 				await new Promise((r) => setTimeout(r, 30));
 				return "a";
 			}),
-			fetchB: task(["trigger"], async () => {
+			fetchB: task(["trigger"], async (_signal) => {
 				await new Promise((r) => setTimeout(r, 80));
 				return "b";
 			}),
-			aggregate: task(["fetchA", "fetchB"], async (a: string | null, b: string | null) => {
-				aggCalls++;
-				return `${a}+${b}`;
-			}),
+			aggregate: task(
+				["fetchA", "fetchB"],
+				async (_signal, [a, b]: [string | null, string | null]) => {
+					aggCalls++;
+					return `${a}+${b}`;
+				},
+			),
 		});
 
 		subscribe(wf.steps.aggregate, () => {});
@@ -187,11 +193,11 @@ describe("task — skip predicate", () => {
 			input: step(trigger),
 			work: task(
 				["input"],
-				async (v: string | null) => {
+				async (_signal, [v]: [string | null]) => {
 					taskRan = true;
 					return `processed:${v}`;
 				},
-				{ skip: (v: string | null) => v === null },
+				{ skip: ([v]: [string | null]) => v === null },
 			),
 		});
 
@@ -221,7 +227,7 @@ describe("task — error handling", () => {
 
 		const wf = pipeline({
 			input: step(trigger),
-			failing: task(["input"], async () => {
+			failing: task(["input"], async (_signal) => {
 				throw new Error("boom");
 			}),
 		});
@@ -244,7 +250,7 @@ describe("task — error handling", () => {
 			input: step(trigger),
 			failing: task(
 				["input"],
-				async () => {
+				async (_signal) => {
 					throw new Error("boom");
 				},
 				{ fallback: "default-value" },
@@ -269,7 +275,7 @@ describe("task — error handling", () => {
 			input: step(trigger),
 			failing: task(
 				["input"],
-				async () => {
+				async (_signal) => {
 					throw new Error("boom");
 				},
 				{ fallback: (e: unknown) => `recovered:${(e as Error).message}` },
@@ -300,7 +306,7 @@ describe("task — retry", () => {
 			input: step(trigger),
 			retrying: task(
 				["input"],
-				async () => {
+				async (_signal) => {
 					attempts++;
 					if (attempts < 3) throw new Error(`attempt ${attempts}`);
 					return "success";
@@ -331,7 +337,7 @@ describe("task — pipeline runStatus auto-detection", () => {
 
 		const wf = pipeline({
 			input: step(trigger),
-			work: task(["input"], async (v: string) => {
+			work: task(["input"], async (_signal, [v]: [string]) => {
 				await new Promise((r) => setTimeout(r, 30));
 				return `done:${v}`;
 			}),
@@ -359,7 +365,7 @@ describe("task — pipeline runStatus auto-detection", () => {
 
 		const wf = pipeline({
 			input: step(trigger),
-			work: task(["input"], async () => {
+			work: task(["input"], async (_signal) => {
 				await new Promise((r) => setTimeout(r, 20));
 				return "done";
 			}),
@@ -385,7 +391,7 @@ describe("task — pipeline runStatus auto-detection", () => {
 			// Expert step — no auto-detection
 			sync: step(["input"], (s) => derived([s], () => (s.get() ?? 0) * 2)),
 			// Task step — auto-detected
-			async: task(["sync"], async (v: number) => {
+			async: task(["sync"], async (_signal, [v]: [number]) => {
 				await new Promise((r) => setTimeout(r, 20));
 				return v + 1;
 			}),
@@ -408,7 +414,7 @@ describe("task — pipeline runStatus auto-detection", () => {
 describe("task — no deps", () => {
 	it("runs immediately when pipeline starts", async () => {
 		const wf = pipeline({
-			init: task(() => "initialized"),
+			init: task((_signal) => "initialized"),
 		});
 
 		const values: any[] = [];
@@ -430,7 +436,7 @@ describe("task — async generator guard", () => {
 
 		const wf = pipeline({
 			input: step(trigger),
-			stream: task(["input"], async function* () {
+			stream: task(["input"], async function* (_signal) {
 				yield 1;
 				yield 2;
 			}),

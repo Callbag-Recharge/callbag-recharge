@@ -363,6 +363,147 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
+	// --- AbortController ---
+
+	it("run() passes AbortSignal to fn", async () => {
+		const task = taskState<string>();
+		let receivedSignal: AbortSignal | undefined;
+		await task.run((signal) => {
+			receivedSignal = signal;
+			return "ok";
+		});
+		expect(receivedSignal).toBeInstanceOf(AbortSignal);
+		expect(receivedSignal!.aborted).toBe(false);
+		task.destroy();
+	});
+
+	it("reset() aborts in-flight task", async () => {
+		const task = taskState<string>();
+		let receivedSignal: AbortSignal | undefined;
+		let resolve: (v: string) => void;
+		const p = task.run((signal) => {
+			receivedSignal = signal;
+			return new Promise<string>((r) => {
+				resolve = r;
+			});
+		});
+
+		expect(receivedSignal!.aborted).toBe(false);
+		task.reset();
+		expect(receivedSignal!.aborted).toBe(true);
+
+		resolve!("ignored");
+		await p;
+		expect(task.status.get()).toBe("idle");
+		task.destroy();
+	});
+
+	it("restart() aborts in-flight task", async () => {
+		const task = taskState<string>();
+		let receivedSignal: AbortSignal | undefined;
+		let resolve: (v: string) => void;
+		const p = task.run((signal) => {
+			receivedSignal = signal;
+			return new Promise<string>((r) => {
+				resolve = r;
+			});
+		});
+
+		expect(receivedSignal!.aborted).toBe(false);
+		task.restart();
+		expect(receivedSignal!.aborted).toBe(true);
+
+		resolve!("ignored");
+		await p;
+		expect(task.status.get()).toBe("idle");
+		task.destroy();
+	});
+
+	it("destroy() aborts in-flight task", async () => {
+		const task = taskState<string>();
+		let receivedSignal: AbortSignal | undefined;
+		let resolve: (v: string) => void;
+		const p = task.run((signal) => {
+			receivedSignal = signal;
+			return new Promise<string>((r) => {
+				resolve = r;
+			});
+		});
+
+		expect(receivedSignal!.aborted).toBe(false);
+		task.destroy();
+		expect(receivedSignal!.aborted).toBe(true);
+
+		resolve!("ignored");
+		await p;
+	});
+
+	it("signal is not aborted on successful completion", async () => {
+		const task = taskState<number>();
+		let receivedSignal: AbortSignal | undefined;
+		await task.run((signal) => {
+			receivedSignal = signal;
+			return 42;
+		});
+		expect(receivedSignal!.aborted).toBe(false);
+		task.destroy();
+	});
+
+	it("signal is not aborted on error completion", async () => {
+		const task = taskState<number>();
+		let receivedSignal: AbortSignal | undefined;
+		await expect(
+			task.run((signal) => {
+				receivedSignal = signal;
+				throw new Error("fail");
+			}),
+		).rejects.toThrow("fail");
+		expect(receivedSignal!.aborted).toBe(false);
+		task.destroy();
+	});
+
+	it("each run gets a fresh AbortSignal", async () => {
+		const task = taskState<number>();
+		const signals: AbortSignal[] = [];
+
+		await task.run((signal) => {
+			signals.push(signal);
+			return 1;
+		});
+		await task.run((signal) => {
+			signals.push(signal);
+			return 2;
+		});
+
+		expect(signals).toHaveLength(2);
+		expect(signals[0]).not.toBe(signals[1]);
+		expect(signals[0].aborted).toBe(false);
+		expect(signals[1].aborted).toBe(false);
+		task.destroy();
+	});
+
+	it("fn can use signal to abort fetch-like operations", async () => {
+		const task = taskState<string>();
+		let abortReason: any;
+
+		const p = task.run((signal) => {
+			return new Promise<string>((_, reject) => {
+				signal.addEventListener("abort", () => {
+					abortReason = signal.reason;
+					reject(new DOMException("Aborted", "AbortError"));
+				});
+			});
+		});
+
+		task.reset();
+		expect(abortReason).toBeDefined();
+
+		// The promise rejects with AbortError, but generation guard discards it
+		await expect(p).rejects.toThrow("Aborted");
+		expect(task.status.get()).toBe("idle"); // reset state persists
+		task.destroy();
+	});
+
 	// --- Companion stores ---
 
 	it("individual companion stores are independently subscribable", async () => {

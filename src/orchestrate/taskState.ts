@@ -7,14 +7,14 @@
 //
 // Usage:
 //   const task = taskState<Result>();
-//   await task.run(() => fetchData());
+//   await task.run((signal) => fetchData({ signal }));
 //   task.status.get()   // 'success'
 //   task.duration.get() // ms
 //   task.get()          // { status, result, error, ... } convenience
 //
 // Compose with fromCron + effect for scheduled tasks:
 //   const cron = fromCron('0 9 * * *');
-//   effect([cron], () => { task.run(() => fetchData()); });
+//   effect([cron], () => { task.run((signal) => fetchData({ signal })); });
 // ---------------------------------------------------------------------------
 
 import { batch, teardown } from "../core/protocol";
@@ -75,6 +75,7 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 	// P4: Generation counter — incremented by reset(). run() captures at start;
 	// if it changes during await, the completion is silently discarded.
 	let generation = 0;
+	let abortController: AbortController | null = null;
 
 	const self: TaskState<T> & { _restore(meta: TaskMeta<T>): void } = {
 		// P5: Type-safe restore for from() — not exposed on TaskState interface
@@ -115,11 +116,13 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			};
 		},
 
-		async run(fn: () => T | Promise<T>): Promise<T> {
+		async run(fn: (signal: AbortSignal) => T | Promise<T>): Promise<T> {
 			if (destroyed) throw new Error("TaskState is destroyed");
 			if (_status.get() === "running") throw new Error("Task is already running");
 
 			const gen = generation;
+			abortController = new AbortController();
+			const signal = abortController.signal;
 			const startTime = Date.now();
 			const prevResult = _result.get();
 			const prevRunCount = _runCount.get();
@@ -129,9 +132,10 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			});
 
 			try {
-				const result = await fn();
+				const result = await fn(signal);
 				// P4: If destroyed or reset() was called during await, discard
 				if (destroyed || gen !== generation) return result;
+				abortController = null;
 				const duration = Date.now() - startTime;
 				batch(() => {
 					_status.set("success");
@@ -146,6 +150,7 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			} catch (e) {
 				// P4: If destroyed or reset() was called during await, discard
 				if (destroyed || gen !== generation) throw e;
+				abortController = null;
 				const duration = Date.now() - startTime;
 				batch(() => {
 					_status.set("error");
@@ -162,6 +167,10 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 
 		reset() {
 			if (destroyed) return;
+			if (abortController) {
+				abortController.abort();
+				abortController = null;
+			}
 			generation++;
 			batch(() => {
 				_status.set("idle");
@@ -176,6 +185,10 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 
 		restart() {
 			if (destroyed) return;
+			if (abortController) {
+				abortController.abort();
+				abortController = null;
+			}
 			generation++;
 			batch(() => {
 				_status.set("idle");
@@ -196,6 +209,10 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 
 		destroy() {
 			if (destroyed) return;
+			if (abortController) {
+				abortController.abort();
+				abortController = null;
+			}
 			destroyed = true;
 			teardown(_status);
 			teardown(_error);

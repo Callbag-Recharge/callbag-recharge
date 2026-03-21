@@ -12,7 +12,7 @@ describe("wait (intentional pause step)", () => {
 			const wf = pipeline({
 				trigger: step(fromTrigger<string>()),
 				pause: wait("trigger", 50),
-				process: task(["pause"], async (v: string) => `done: ${v}`),
+				process: task(["pause"], async (_signal, [v]: [string]) => `done: ${v}`),
 			});
 
 			const results: any[] = [];

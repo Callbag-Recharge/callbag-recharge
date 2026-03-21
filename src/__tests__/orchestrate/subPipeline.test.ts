@@ -9,10 +9,10 @@ describe("subPipeline (nested pipeline invocation)", () => {
 	it("creates child pipeline, runs to completion, emits output", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<number>()),
-			sub: subPipeline(["trigger"], (n: number) => ({
+			sub: subPipeline(["trigger"], (_signal, [n]: [number]) => ({
 				steps: {
-					double: task([], async () => n * 2),
-					add: task(["double"], async (d: number) => d + 10),
+					double: task([], async (_signal) => n * 2),
+					add: task(["double"], async (_signal, [d]: [number]) => d + 10),
 				},
 				output: "add",
 			})),
@@ -34,10 +34,10 @@ describe("subPipeline (nested pipeline invocation)", () => {
 	it("defaults output to last step in topological order", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			sub: subPipeline(["trigger"], (v: string) => ({
+			sub: subPipeline(["trigger"], (_signal, [v]: [string]) => ({
 				steps: {
-					first: task([], async () => `step1: ${v}`),
-					last: task(["first"], async (s: string) => `step2: ${s}`),
+					first: task([], async (_signal) => `step1: ${v}`),
+					last: task(["first"], async (_signal, [s]: [string]) => `step2: ${s}`),
 				},
 				// No output specified — should default to "last"
 			})),
@@ -57,9 +57,9 @@ describe("subPipeline (nested pipeline invocation)", () => {
 	});
 
 	it("tracks task status through lifecycle", async () => {
-		const subStep = subPipeline(["trigger"], (v: number) => ({
+		const subStep = subPipeline(["trigger"], (_signal, [v]: [number]) => ({
 			steps: {
-				work: task([], async () => {
+				work: task([], async (_signal) => {
 					await new Promise((r) => setTimeout(r, 30));
 					return v * 3;
 				}),
@@ -95,11 +95,11 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		let childCount = 0;
 		const wf = pipeline({
 			trigger: step(fromTrigger<number>()),
-			sub: subPipeline(["trigger"], (v: number) => {
+			sub: subPipeline(["trigger"], (_signal, [v]: [number]) => {
 				childCount++;
 				return {
 					steps: {
-						work: task([], async () => {
+						work: task([], async (_signal) => {
 							await new Promise((r) => setTimeout(r, 50));
 							return v;
 						}),
@@ -131,9 +131,9 @@ describe("subPipeline (nested pipeline invocation)", () => {
 	});
 
 	it("handles child pipeline errors", async () => {
-		const subStep = subPipeline(["trigger"], () => ({
+		const subStep = subPipeline(["trigger"], (_signal) => ({
 			steps: {
-				fail: task([], async () => {
+				fail: task([], async (_signal) => {
 					throw new Error("child boom");
 				}),
 			},
@@ -163,9 +163,9 @@ describe("subPipeline (nested pipeline invocation)", () => {
 		const wf = pipeline({
 			a: step(fromTrigger<number>()),
 			b: step(fromTrigger<string>()),
-			sub: subPipeline(["a", "b"], (num: number, str: string) => ({
+			sub: subPipeline(["a", "b"], (_signal, [num, str]: [number, string]) => ({
 				steps: {
-					merge: task([], async () => `${str}-${num}`),
+					merge: task([], async (_signal) => `${str}-${num}`),
 				},
 				output: "merge",
 			})),
@@ -188,9 +188,9 @@ describe("subPipeline (nested pipeline invocation)", () => {
 	it("destroys child pipeline on parent destroy", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<number>()),
-			sub: subPipeline(["trigger"], (v: number) => ({
+			sub: subPipeline(["trigger"], (_signal, [v]: [number]) => ({
 				steps: {
-					work: task([], async () => {
+					work: task([], async (_signal) => {
 						await new Promise((r) => setTimeout(r, 500));
 						return v;
 					}),

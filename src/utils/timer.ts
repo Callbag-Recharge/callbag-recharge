@@ -13,6 +13,89 @@ import { state } from "../core/state";
 import type { Store } from "../core/types";
 
 // ---------------------------------------------------------------------------
+// Shared ticker — internal helper
+// ---------------------------------------------------------------------------
+
+interface Ticker {
+	/** Start or restart the ticker. */
+	start(): void;
+	/** Pause — returns the partial-tick delta and stops the interval. */
+	pause(): number;
+	/** Resume from paused state. */
+	resume(): void;
+	/** Stop the interval without computing a delta. */
+	stop(): void;
+	/** True if currently ticking. */
+	readonly active: boolean;
+	/** True after dispose() has been called. */
+	readonly disposed: boolean;
+	/** Dispose — stops interval, prevents future operations. */
+	dispose(): void;
+}
+
+function createTicker(tickMs: number, onTick: (delta: number) => void): Ticker {
+	let timerId: ReturnType<typeof setInterval> | null = null;
+	let lastTick = 0;
+	let disposed = false;
+	let active = false;
+
+	function clearTimer(): void {
+		if (timerId != null) {
+			clearInterval(timerId);
+			timerId = null;
+		}
+	}
+
+	function tick(): void {
+		const now = Date.now();
+		const delta = now - lastTick;
+		lastTick = now;
+		onTick(delta);
+	}
+
+	return {
+		start() {
+			if (disposed) return;
+			clearTimer();
+			lastTick = Date.now();
+			active = true;
+			timerId = setInterval(tick, tickMs);
+		},
+		pause(): number {
+			if (disposed || !active) return 0;
+			const now = Date.now();
+			const delta = now - lastTick;
+			active = false;
+			clearTimer();
+			return delta;
+		},
+		resume() {
+			if (disposed || active) return;
+			lastTick = Date.now();
+			active = true;
+			timerId = setInterval(tick, tickMs);
+		},
+		stop() {
+			if (disposed) return;
+			active = false;
+			clearTimer();
+		},
+		get active() {
+			return active;
+		},
+		get disposed() {
+			return disposed;
+		},
+		dispose() {
+			if (disposed) return;
+			disposed = true;
+			active = false;
+			clearTimer();
+		},
+	};
+}
+
+// ---------------------------------------------------------------------------
 // Countdown
 // ---------------------------------------------------------------------------
 
@@ -78,84 +161,51 @@ export function countdown(ms: number, opts?: CountdownOptions): CountdownResult 
 		name: `${prefix}.expired`,
 	});
 
-	let timerId: ReturnType<typeof setInterval> | null = null;
-	let lastTick = 0;
-	let disposed = false;
-
-	function clearTimer(): void {
-		if (timerId != null) {
-			clearInterval(timerId);
-			timerId = null;
-		}
-	}
-
-	function tick(): void {
-		const now = Date.now();
-		const elapsed = now - lastTick;
-		lastTick = now;
-
-		const remaining = remainingStore.get() - elapsed;
+	const ticker = createTicker(tickMs, (delta) => {
+		const remaining = remainingStore.get() - delta;
 		if (remaining <= 0) {
 			remainingStore.set(0);
 			activeStore.set(false);
-			clearTimer();
+			ticker.stop();
 		} else {
 			remainingStore.set(remaining);
 		}
-	}
-
-	function start(): void {
-		if (disposed) return;
-		clearTimer();
-		remainingStore.set(ms);
-		lastTick = Date.now();
-		activeStore.set(true);
-		timerId = setInterval(tick, tickMs);
-	}
-
-	function pause(): void {
-		if (disposed) return;
-		if (!activeStore.get()) return;
-		// Account for partial tick
-		const now = Date.now();
-		const elapsed = now - lastTick;
-		remainingStore.set(Math.max(0, remainingStore.get() - elapsed));
-		activeStore.set(false);
-		clearTimer();
-	}
-
-	function resume(): void {
-		if (disposed) return;
-		if (activeStore.get()) return;
-		if (remainingStore.get() <= 0) return;
-		lastTick = Date.now();
-		activeStore.set(true);
-		timerId = setInterval(tick, tickMs);
-	}
-
-	function reset(newMs?: number): void {
-		if (disposed) return;
-		clearTimer();
-		activeStore.set(false);
-		remainingStore.set(newMs ?? ms);
-	}
-
-	function dispose(): void {
-		if (disposed) return;
-		disposed = true;
-		clearTimer();
-		activeStore.set(false);
-	}
+	});
 
 	return {
 		remaining: remainingStore,
 		active: activeStore,
 		expired,
-		start,
-		pause,
-		resume,
-		reset,
-		dispose,
+		start() {
+			if (ticker.disposed) return;
+			remainingStore.set(ms);
+			activeStore.set(true);
+			ticker.start();
+		},
+		pause() {
+			if (!ticker.active) return;
+			const delta = ticker.pause();
+			if (delta > 0) {
+				remainingStore.set(Math.max(0, remainingStore.get() - delta));
+			}
+			activeStore.set(false);
+		},
+		resume() {
+			if (ticker.active) return;
+			if (remainingStore.get() <= 0) return;
+			ticker.resume();
+			activeStore.set(true);
+		},
+		reset(newMs?: number) {
+			if (ticker.disposed) return;
+			ticker.pause();
+			activeStore.set(false);
+			remainingStore.set(newMs ?? ms);
+		},
+		dispose() {
+			ticker.dispose();
+			activeStore.set(false);
+		},
 	};
 }
 
@@ -225,89 +275,54 @@ export function stopwatch(opts?: StopwatchOptions): StopwatchResult {
 	const activeStore = state<boolean>(false, { name: `${prefix}.active` });
 	const lapsStore = state<readonly number[]>([], { name: `${prefix}.laps` });
 
-	let timerId: ReturnType<typeof setInterval> | null = null;
-	let lastTick = 0;
-	let disposed = false;
-
-	function clearTimer(): void {
-		if (timerId != null) {
-			clearInterval(timerId);
-			timerId = null;
-		}
-	}
-
-	function tick(): void {
-		const now = Date.now();
-		const delta = now - lastTick;
-		lastTick = now;
+	const ticker = createTicker(tickMs, (delta) => {
 		elapsedStore.update((e) => e + delta);
-	}
-
-	function start(): void {
-		if (disposed) return;
-		clearTimer();
-		elapsedStore.set(0);
-		lapsStore.set([]);
-		lastTick = Date.now();
-		activeStore.set(true);
-		timerId = setInterval(tick, tickMs);
-	}
-
-	function pause(): void {
-		if (disposed) return;
-		if (!activeStore.get()) return;
-		// Account for partial tick
-		const now = Date.now();
-		const delta = now - lastTick;
-		elapsedStore.update((e) => e + delta);
-		activeStore.set(false);
-		clearTimer();
-	}
-
-	function resume(): void {
-		if (disposed) return;
-		if (activeStore.get()) return;
-		lastTick = Date.now();
-		activeStore.set(true);
-		timerId = setInterval(tick, tickMs);
-	}
-
-	function lap(): void {
-		if (disposed) return;
-		if (!activeStore.get()) return;
-		// Account for partial tick
-		const now = Date.now();
-		const delta = now - lastTick;
-		lastTick = now;
-		const current = elapsedStore.get() + delta;
-		elapsedStore.set(current);
-		lapsStore.update((l) => [...l, current]);
-	}
-
-	function reset(): void {
-		if (disposed) return;
-		clearTimer();
-		activeStore.set(false);
-		elapsedStore.set(0);
-		lapsStore.set([]);
-	}
-
-	function dispose(): void {
-		if (disposed) return;
-		disposed = true;
-		clearTimer();
-		activeStore.set(false);
-	}
+	});
 
 	return {
 		elapsed: elapsedStore,
 		active: activeStore,
 		laps: lapsStore,
-		start,
-		pause,
-		resume,
-		lap,
-		reset,
-		dispose,
+		start() {
+			if (ticker.disposed) return;
+			elapsedStore.set(0);
+			lapsStore.set([]);
+			activeStore.set(true);
+			ticker.start();
+		},
+		pause() {
+			if (!ticker.active) return;
+			const delta = ticker.pause();
+			if (delta > 0) {
+				elapsedStore.update((e) => e + delta);
+			}
+			activeStore.set(false);
+		},
+		resume() {
+			if (ticker.active) return;
+			ticker.resume();
+			activeStore.set(true);
+		},
+		lap() {
+			if (!ticker.active) return;
+			const delta = ticker.pause();
+			if (delta > 0) {
+				elapsedStore.update((e) => e + delta);
+			}
+			const current = elapsedStore.get();
+			lapsStore.update((l) => [...l, current]);
+			ticker.resume();
+		},
+		reset() {
+			if (ticker.disposed) return;
+			ticker.pause();
+			activeStore.set(false);
+			elapsedStore.set(0);
+			lapsStore.set([]);
+		},
+		dispose() {
+			ticker.dispose();
+			activeStore.set(false);
+		},
 	};
 }

@@ -308,71 +308,72 @@ Replaced `state<MemoryNode[]>` (which allocated a new array on every add/remove)
 
 **Measured impact:** collection x50 + byTag improved from **~41.6x → 29.4x** gap. Remaining gap is dominated by per-node overhead: each `memoryNode` creates 3 reactive stores + 1 derived, and collection creates per-node tag-tracking effects + reactive eviction policy. The `reactiveScored` evict+reinsert benchmark shows a 19.6x gap — this is the primary remaining bottleneck.
 
+### 22. SINGLE_DEP for `dynamicDerived`
+
+`dynamicDerived()` now uses the same SINGLE_DEP optimization as `derived()` and `operator()`. When a `dynamicDerived` has exactly one tracked dep, it sends `talkback(STATE, SINGLE_DEP)` to skip redundant DIRTY dispatch in unbatched paths.
+
+**Implementation:** Two code paths in `_connectUpstream()`:
+- **Single-dep** (`_connectSingleDep()`): closure-local `dirty` boolean, no bitmask. Sends SINGLE_DEP on START. Handles DATA-without-DIRTY by synthesizing DIRTY for downstream. Guards against double DIRTY (`if (dirty) return;`).
+- **Multi-dep**: unchanged bitmask path via `_connectOneDep()`.
+
+**Rewire safety:** When deps change between recomputations, old connections are disconnected (clearing SINGLE_DEP on the source). The `_connectOneDep()` method (used during rewire) does NOT send SINGLE_DEP — only `_connectSingleDep()` does, which is used for initial `_connectUpstream()` when `deps.length === 1`. This avoids a performance regression where SINGLE_DEP would tell the producer to skip DIRTY but the bitmask handler would re-synthesize it anyway.
+
+**Double DIRTY guard:** Both `derived._connectSingleDep()` and `dynamicDerived._connectSingleDep()` now guard against cascading double DIRTY signals with `if (dirty) return;`.
+
+**Dispatch savings:** Same as derived SINGLE_DEP — 50% reduction for single-dep unbatched paths.
+
+### 23. Cancellation via AbortController in `taskState`
+
+`taskState.run(fn)` now passes an `AbortSignal` to `fn`, enabling proactive cancellation of in-flight async work. Previously, `reset()`/`restart()`/`destroy()` bumped a generation counter to discard stale results, but the async work continued running to completion.
+
+```ts
+await task.run((signal) => fetch('/api/data', { signal }));
+task.reset(); // aborts the fetch immediately
+```
+
+**Implementation:**
+- `run()` creates a new `AbortController`, passes `signal` to `fn`, clears on completion
+- `reset()` / `restart()` / `destroy()` call `controller.abort()` before bumping generation
+- The generation counter is retained as a secondary guard — abort is proactive, generation is defensive
+- All orchestrate callers forward signal to user functions:
+  - `task(deps, (signal, values) => ...)` — signal first, dep values as array
+  - `forEach(dep, (signal, item, index) => ...)` — signal first, then positional args
+  - `onFailure(dep, (signal, error) => ...)` — signal first, then error
+  - `sensor(dep, (signal, value) => ...)` — signal first, then value
+  - `loop(deps, (signal, values) => ...)` — signal first, dep values as array
+  - `subPipeline(deps, (signal, values) => ...)` — signal first, dep values as array
+  - `join()` — internal only, no user fn
+
+**API changes:**
+- `TaskState.run()`: `(fn: (signal: AbortSignal) => T | Promise<T>) => Promise<T>`
+- All orchestrate step callbacks: signal is always the first parameter (Go `ctx` convention)
+
+### 24. Shared timer runtime (`createTicker`)
+
+Extracted an internal `createTicker(tickMs, onTick)` helper in `utils/timer.ts` that centralizes all duplicated timer lifecycle logic from `countdown()` and `stopwatch()`.
+
+**`Ticker` interface:** `start()`, `pause()` (returns partial-tick delta), `resume()`, `stop()` (no delta), `active` (readonly), `disposed` (readonly), `dispose()`.
+
+**What it consolidates:**
+- interval creation/teardown (`clearInterval`/`setInterval`)
+- `lastTick` bookkeeping with `Date.now()` delta
+- partial-tick flushing on pause
+- disposed/active guard handling
+
+Both `countdown` and `stopwatch` now delegate all timer mechanics to their `Ticker` instance. Public interfaces unchanged.
+
 ---
 
 ## Potential optimizations
 
 These are not yet implemented but represent concrete opportunities for improvement.
 
-### 1. SINGLE_DEP optimization for `dynamicDerived`
-
-**Status:** Not implemented. **Impact:** Medium (throughput for single-dep dynamicDerived nodes). **Priority:** Medium.
-
-`derived()` has a P0 SINGLE_DEP optimization (optimization #18 above) that skips redundant DIRTY dispatch when a single-dep subscriber connects. `dynamicDerived()` always uses the multi-dep bitmask path, even when it has exactly one dep. This means every unbatched `set()` on the sole upstream dep dispatches a redundant DIRTY signal before DATA.
-
-**Complexity:** Dynamic deps can change between recomputations — a node may go from 1 dep to 3 deps or vice versa. The optimization must handle SINGLE_DEP signaling, revocation on rewire to multi-dep, and restoration on rewire back to single-dep. The `_connectOneDep` path needs to detect the single-dep case and send `talkback(STATE, SINGLE_DEP)` conditionally, with proper cleanup when deps are rewired.
-
-**Dispatch savings (when applicable):** Same as derived SINGLE_DEP — 50% reduction for single-dep unbatched paths.
-
-### 2. Cancellation-safe pipeline reset
-
-**Status:** Not implemented. **Impact:** Medium (correctness for long-running async tasks). **Priority:** Medium.
-
-`pipeline.reset()` resets all TaskState instances to idle synchronously, but in-flight async work (e.g., a `task.run(() => fetch(...))` that hasn't resolved yet) continues executing. When it eventually resolves, the TaskState's generation counter guards against stale completions — but the derived `runStatus` may momentarily see mixed states (some tasks idle from reset, some completing from the previous run) during the transition window.
-
-**Current mitigation:** TaskState uses a generation counter — `reset()` bumps `_generation`, and the `.run()` promise checks `gen === this._generation` before writing success/error. This prevents stale completions from corrupting state. The race is therefore a timing issue (brief mixed-state window), not a correctness bug.
-
-**Proper fix:** Cancellation tokens. `pipeline.reset()` would abort in-flight tasks via `AbortController`, ensuring they reject immediately rather than completing later. This eliminates the mixed-state window entirely. Requires:
-- `TaskState.run()` to accept an `AbortSignal` parameter
-- `pipeline.reset()` to abort the previous run's controller before creating a new one
-- User factories to plumb the signal into their async work (fetch, setTimeout, etc.)
-
-**Complexity:** Medium — the AbortController wiring is straightforward, but user-facing API changes (signal parameter) need careful design. Deferring until a real-world use case demands it.
-
-**Related:** Roadmap phase 5a refactors `taskState` from packed `TaskMeta` to companion stores (§20 pattern). The AbortController wiring should be done during that refactor to avoid a second breaking change to `taskState`'s API.
-
-### 3. Compile-time Inspector removal
+### 1. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
-### 4. Shared timer runtime for `countdown()` and `stopwatch()`
-
-**Status:** Not implemented. **Impact:** Low-medium (maintainability + small runtime consistency wins). **Priority:** Low.
-
-`utils/timer.ts` currently implements separate interval lifecycle logic in `countdown()` and `stopwatch()` (timer start/stop, partial-tick accounting, dispose guards). The semantics are correct, but there is duplicated control-flow code.
-
-**Possible refactor:** Extract a small internal timer runtime (e.g. `createTicker`) that centralizes:
-- interval creation/teardown
-- last-tick bookkeeping
-- pause/resume partial-tick flushing
-- disposed/active guard handling
-
-Both APIs (`countdown`, `stopwatch`) would remain high-level and unchanged. This is primarily a code-size/readability optimization with potential reduction in lifecycle bugs when future timer features are added.
-
-### 5. `validationPipeline` composition over shared reactive operators
-
-**Status:** Not implemented. **Impact:** Medium (code simplification while preserving semantics). **Priority:** Medium-low.
-
-`utils/validationPipeline.ts` correctly handles sync-first validation, debounced async validation, cancellation via `AbortController`, and combined error/valid stores. The current implementation is explicit and imperative in places (timer + async orchestration).
-
-**Possible refactor:** Restructure internals to compose more from core/extras building blocks, while keeping behavior identical:
-- keep sync validation as immediate derived/effect path
-- isolate async scheduling/cancellation into a small reusable helper
-- rely on existing reactive composition for output stores (`errors`, `error`, `valid`)
-
-This should reduce code volume and improve consistency with the library’s composition style without exposing low-level callbag APIs at the pattern layer.
 
 ---
 
@@ -409,7 +410,11 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 
 **Not implementing.** `state.set()` calls `this._eqFn!(old, new)` — an indirect call through a stored reference. For the default case (99% of stores), `_eqFn` is `Object.is`. V8 cannot inline through the indirect call. The proposed fix was a `P_DEFAULT_EQ` flag to branch between `Object.is` directly vs `_eqFn`. However, V8's inline cache (IC) monomorphizes the `_eqFn` call site after the first invocation — subsequent calls go through a fast IC stub, not a full indirect dispatch. The measured ~3-5ns gap is within noise for real workloads. The added flag complexity and branch in the hot path is not justified.
 
-### ~~6. Pull-compute version check for disconnected derived.get()~~
+### ~~6. `validationPipeline` composition refactor~~
+
+**Not implementing.** The implementation is already well-composed — `effect([source])` watches changes, `derived` computes combined errors/valid, proper `AbortController` handles async cancellation. The remaining procedural code (debounce timer + async orchestration) is inherently imperative and wouldn't benefit from reactive abstraction. Replacing `setTimeout` with a reactive debounce operator would add complexity without simplifying the code.
+
+### ~~7. Pull-compute version check for disconnected derived.get()~~
 
 **Not implementing.** With D3, disconnected `derived.get()` calls `_fn()` every time. A version stamp on deps would let `get()` skip recomputation when deps haven't changed. However, the overhead of adding and syncing version counters across the graph outweighs the benefit:
 
@@ -453,12 +458,12 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Skip DIRTY (SINGLE_DEP signaling) | Built-in | 50% fewer dispatches for single-dep unbatched paths | Effect re-run, simple chains |
 | Reduced bound methods (6→3) | Built-in | ~30 bytes/store saved, fewer constructor allocations | All stores |
 | Streamlined DISCONNECTED↔SINGLE | Built-in | Reuses `_upstreamTalkbacks` array on reconnect | Derived sub/unsub cycles |
-| SINGLE_DEP for dynamicDerived | Potential (medium priority) | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
-| Cancellation-safe pipeline reset | Potential (medium priority) | Prevents stale task completions corrupting post-reset runStatus | Pipelines with long-running async tasks |
+| SINGLE_DEP for dynamicDerived | Built-in | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
+| `taskState` AbortController cancellation | Built-in | Proactive abort of in-flight tasks on reset/restart/destroy | Pipelines with long-running async tasks |
+| Shared timer runtime (`createTicker`) | Built-in | Deduplicated timer lifecycle code; lower maintenance risk | Timer utils |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
-| Shared timer runtime (`countdown`/`stopwatch`) | Potential (low priority) | Reduce duplicated lifecycle code; lower maintenance risk | Timer utils evolution |
-| `validationPipeline` composition refactor | Potential (medium-low priority) | Smaller, more compositional internals with same semantics | Validation-heavy patterns/utils |
 
+| ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |
 | ~~Pull-compute version check~~ | Not implementing | Version syncing overhead ≈ pull-compute cost; userland `memo()` operator preferred | — |
 | ~~Memory footprint reduction~~ | Not implementing | ~6x gap is structural; lazy binding and WeakRef-free don't justify complexity | — |

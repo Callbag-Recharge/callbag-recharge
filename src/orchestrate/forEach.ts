@@ -60,7 +60,7 @@ export interface ForEachStepDef<R = any> extends StepDef<R[]> {
  * use `task()` as a preceding step (or the future `join` step from 5b-7).
  *
  * @param dep - Name of the upstream step (must emit `T[]`).
- * @param fn - Function called per item. Receives `(item, index)`, returns `R` or `Promise<R>`.
+ * @param fn - Function called per item. Receives `(signal, item, index)`, returns `R` or `Promise<R>`. Signal is aborted on re-trigger/reset/destroy.
  * @param opts - Optional configuration (name, concurrency, fallback).
  *
  * @returns `ForEachStepDef<R>` — step definition for pipeline() with task tracking.
@@ -87,7 +87,7 @@ export interface ForEachStepDef<R = any> extends StepDef<R[]> {
  */
 export function forEach<T, R>(
 	dep: string,
-	fn: (item: T, index: number) => R | Promise<R>,
+	fn: (signal: AbortSignal, item: T, index: number) => R | Promise<R>,
 	opts?: ForEachOpts<R>,
 ): ForEachStepDef<R> {
 	const ts = taskState<R[]>({ id: opts?.name });
@@ -130,10 +130,11 @@ export function forEach<T, R>(
 						if (!stopped) complete();
 					};
 
-					ts.run(async () => {
+					ts.run(async (signal) => {
 						const results = await runWithConcurrency(
 							items as T[],
 							fn,
+							signal,
 							concurrency,
 							fallbackOpt,
 							() => stopped,
@@ -177,7 +178,8 @@ export function forEach<T, R>(
 
 async function runWithConcurrency<T, R>(
 	items: T[],
-	fn: (item: T, index: number) => R | Promise<R>,
+	fn: (signal: AbortSignal, item: T, index: number) => R | Promise<R>,
+	signal: AbortSignal,
 	concurrency: number,
 	fallback: R | ((error: unknown, index: number) => R) | undefined,
 	isStopped: () => boolean,
@@ -189,7 +191,7 @@ async function runWithConcurrency<T, R>(
 		return Promise.all(
 			items.map((item, i) => {
 				if (isStopped()) return undefined as any as R;
-				return runOne(item, i, fn, fallback);
+				return runOne(item, i, fn, signal, fallback);
 			}),
 		);
 	}
@@ -202,7 +204,7 @@ async function runWithConcurrency<T, R>(
 		while (nextIndex < items.length) {
 			if (isStopped()) return;
 			const i = nextIndex++;
-			results[i] = await runOne(items[i], i, fn, fallback);
+			results[i] = await runOne(items[i], i, fn, signal, fallback);
 		}
 	}
 
@@ -215,11 +217,12 @@ async function runWithConcurrency<T, R>(
 async function runOne<T, R>(
 	item: T,
 	index: number,
-	fn: (item: T, index: number) => R | Promise<R>,
+	fn: (signal: AbortSignal, item: T, index: number) => R | Promise<R>,
+	signal: AbortSignal,
 	fallback: R | ((error: unknown, index: number) => R) | undefined,
 ): Promise<R> {
 	try {
-		return await fn(item, index);
+		return await fn(signal, item, index);
 	} catch (err) {
 		if (fallback !== undefined) {
 			return typeof fallback === "function"

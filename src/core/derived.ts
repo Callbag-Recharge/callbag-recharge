@@ -168,6 +168,7 @@ export class DerivedImpl<T> {
 
 			if (type === STATE) {
 				if (data === DIRTY) {
+					if (dirty) return;
 					dirty = true;
 					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
 					this._dispatch(STATE, DIRTY);

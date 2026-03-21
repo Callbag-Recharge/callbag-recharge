@@ -27,6 +27,7 @@ import {
 	S_ERRORED,
 	S_RESOLVED,
 	S_SETTLED,
+	SINGLE_DEP,
 	START,
 	STATE,
 	STATUS_MASK,
@@ -301,11 +302,57 @@ export class DynamicDerivedImpl<T> {
 		endDeferredStart();
 	}
 
+	/** Single-dep: no bitmask, direct forward (SINGLE_DEP optimization) */
+	_connectSingleDep(): void {
+		let dirty = false;
+		this._deps[0].source(START, (type: number, data: any) => {
+			if (type === START) {
+				this._upstreamTalkbacks.push(data);
+				data(STATE, SINGLE_DEP);
+				return;
+			}
+			if (this._flags & D_COMPLETED) return;
+
+			if (type === STATE) {
+				if (data === DIRTY) {
+					if (dirty) return;
+					dirty = true;
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
+					this._dispatch(STATE, DIRTY);
+				} else if (data === RESOLVED) {
+					if (dirty) {
+						dirty = false;
+						this._flags = (this._flags & ~_STATUS_MASK) | _S_RESOLVED;
+						this._dispatch(STATE, RESOLVED);
+					}
+				} else {
+					this._dispatch(STATE, data);
+				}
+			} else if (type === DATA) {
+				if (dirty) {
+					dirty = false;
+					this._recompute();
+				} else {
+					// DATA without DIRTY — synthesize DIRTY for downstream
+					this._flags = (this._flags & ~_STATUS_MASK) | _S_DIRTY;
+					this._dispatch(STATE, DIRTY);
+					this._recompute();
+				}
+			} else if (type === END) {
+				this._handleEnd(data);
+			}
+		});
+	}
+
 	_connectUpstream(): void {
 		this._upstreamTalkbacks.length = 0;
-		for (let i = 0; i < this._deps.length; i++) {
-			if (this._flags & D_COMPLETED) break;
-			this._connectOneDep(i);
+		if (this._deps.length === 1) {
+			this._connectSingleDep();
+		} else {
+			for (let i = 0; i < this._deps.length; i++) {
+				if (this._flags & D_COMPLETED) break;
+				this._connectOneDep(i);
+			}
 		}
 	}
 

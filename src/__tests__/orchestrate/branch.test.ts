@@ -81,7 +81,7 @@ describe("branch with task downstream", () => {
 		const wf = pipeline({
 			input: step(trigger),
 			check: branch("input", (v: number) => v > 0),
-			process: task(["check"], (v: number | undefined) => `good:${v}`),
+			process: task(["check"], (_signal, [v]: [number | undefined]) => `good:${v}`),
 		});
 
 		const values: any[] = [];
@@ -101,7 +101,7 @@ describe("branch with task downstream", () => {
 		const wf = pipeline({
 			input: step(trigger),
 			check: branch("input", (v: number) => v > 0),
-			reject: task(["check.fail"], (v: number | undefined) => `bad:${v}`),
+			reject: task(["check.fail"], (_signal, [v]: [number | undefined]) => `bad:${v}`),
 		});
 
 		const values: any[] = [];
@@ -121,8 +121,8 @@ describe("branch with task downstream", () => {
 		const wf = pipeline({
 			input: step(trigger),
 			validate: branch("input", (v: number) => v > 0),
-			process: task(["validate"], (v: number | undefined) => `processed:${v}`),
-			reject: task(["validate.fail"], (v: number | undefined) => `rejected:${v}`),
+			process: task(["validate"], (_signal, [v]: [number | undefined]) => `processed:${v}`),
+			reject: task(["validate.fail"], (_signal, [v]: [number | undefined]) => `rejected:${v}`),
 		});
 
 		const processValues: any[] = [];
@@ -153,7 +153,7 @@ describe("branch — topological order", () => {
 		const wf = pipeline({
 			input: step(trigger),
 			check: branch("input", (v: number) => v > 0),
-			reject: task(["check.fail"], (v: number | undefined) => `bad:${v}`),
+			reject: task(["check.fail"], (_signal, [v]: [number | undefined]) => `bad:${v}`),
 		});
 
 		// check should come before reject in order

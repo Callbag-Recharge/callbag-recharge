@@ -47,8 +47,11 @@ export interface TaskState<T = unknown> extends NodeV0 {
 	 * Execute fn, tracking status/duration/error automatically.
 	 * Transitions: idle/success/error → running → success/error.
 	 * Throws if task is already running or destroyed.
+	 *
+	 * The fn receives an AbortSignal that is aborted on reset(), restart(),
+	 * or destroy(). Users can forward it to fetch(), etc. for cancellation.
 	 */
-	run(fn: () => T | Promise<T>): Promise<T>;
+	run(fn: (signal: AbortSignal) => T | Promise<T>): Promise<T>;
 
 	/** Reset to idle state (clears result, error, timing, runCount). */
 	reset(): void;

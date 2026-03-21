@@ -675,12 +675,12 @@ Workflow nodes — users build pipelines with these building blocks. All nodes e
 | Node | What it does |
 |------|-------------|
 | `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. `destroy()` tears down subscriptions and destroys auto-detected `task()` states (externally provided `opts.tasks` are left to the caller). Expert internals under `.inner` (streamStatus, stepMeta, topo order). |
-| `task(deps, fn, opts)` | Value-level work step. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
+| `task(deps, fn, opts)` | Value-level work step. `fn(signal, values)` — signal first (AbortSignal, aborted on re-trigger/reset/destroy), dep values as array. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
 | `branch(dep, pred)` | Binary conditional routing. Creates `name` (pass) + `name.fail` (fail) steps. |
 | `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
 | `step(factory)` | Raw reactive source wrapper. For `fromTrigger()`, `state()`, or expert-only full reactive control. |
 | `gate(opts)` | Pipe operator for approval queuing — the building block under `approval()`. Also usable standalone for custom human-in-the-loop flows. |
-| `taskState(opts)` | Reactive task tracker with companion stores: `status`, `error`, `duration`, `runCount`, `result`, `lastRun`. Each companion is an independent `Store`. `.get()` returns composed `TaskMeta` for convenience. Used internally by `task()`, but also standalone. |
+| `taskState(opts)` | Reactive task tracker with companion stores: `status`, `error`, `duration`, `runCount`, `result`, `lastRun`. Each companion is an independent `Store`. `.get()` returns composed `TaskMeta` for convenience. `run(fn)` passes `AbortSignal` to `fn`; aborted on `reset()`/`restart()`/`destroy()`. Used internally by `task()`, but also standalone. |
 | `executionLog(opts)` | Reactive execution history with pipeline auto-logging. Backed by `reactiveLog`. |
 
 ## 20. Companion Store Pattern (`with*()` Wrappers)

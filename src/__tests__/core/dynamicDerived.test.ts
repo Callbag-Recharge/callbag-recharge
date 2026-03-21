@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { derived } from "../../core/derived";
 import { dynamicDerived } from "../../core/dynamicDerived";
+import { effect } from "../../core/effect";
 import { Inspector } from "../../core/inspector";
 import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
@@ -369,6 +371,210 @@ describe("dynamicDerived", () => {
 			flag.set(true);
 
 			expect(() => d.get()).toThrow("get-dd-err");
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// SINGLE_DEP optimization
+	// -----------------------------------------------------------------------
+
+	describe("SINGLE_DEP optimization", () => {
+		it("single-dep dynamicDerived recomputes correctly on change", () => {
+			const a = state(1);
+			const d = dynamicDerived((get) => get(a) * 3);
+
+			const values: number[] = [];
+			const unsub = subscribe(d, (v) => values.push(v));
+
+			a.set(2);
+			a.set(5);
+			expect(values).toEqual([6, 15]);
+			expect(d.get()).toBe(15);
+
+			unsub();
+		});
+
+		it("single-dep computes exactly once per upstream change (no double-compute from DIRTY+DATA)", () => {
+			const a = state(1);
+			let computeCount = 0;
+			const d = dynamicDerived((get) => {
+				computeCount++;
+				return get(a) * 2;
+			});
+
+			const unsub = subscribe(d, () => {});
+			computeCount = 0;
+
+			a.set(5);
+			expect(computeCount).toBe(1);
+			expect(d.get()).toBe(10);
+
+			a.set(10);
+			expect(computeCount).toBe(2);
+			expect(d.get()).toBe(20);
+
+			unsub();
+		});
+
+		it("single-dep with equals sends RESOLVED (skips downstream)", () => {
+			const a = state(1);
+			const isPositive = dynamicDerived((get) => get(a) > 0, {
+				equals: Object.is,
+			});
+
+			let downstreamCount = 0;
+			const downstream = derived([isPositive], () => {
+				downstreamCount++;
+				return isPositive.get();
+			});
+
+			const unsub = subscribe(downstream, () => {});
+			downstreamCount = 0;
+
+			// same boolean result — should RESOLVED, skipping downstream
+			a.set(2);
+			expect(downstreamCount).toBe(0);
+			expect(downstream.get()).toBe(true);
+
+			// different result — should recompute downstream
+			a.set(-1);
+			expect(downstreamCount).toBe(1);
+			expect(downstream.get()).toBe(false);
+
+			unsub();
+		});
+
+		it("single-dep → effect: effect runs exactly once per state change", () => {
+			const a = state(1);
+			const d = dynamicDerived((get) => get(a) * 10);
+
+			let effectCount = 0;
+			const dispose = effect([d], () => {
+				effectCount++;
+			});
+			effectCount = 0;
+
+			a.set(2);
+			expect(effectCount).toBe(1);
+
+			a.set(3);
+			expect(effectCount).toBe(2);
+
+			dispose();
+		});
+
+		it("rewire from single-dep to multi-dep works correctly", () => {
+			const flag = state(true);
+			const a = state(1);
+			const b = state(2);
+
+			let computeCount = 0;
+			const d = dynamicDerived((get) => {
+				computeCount++;
+				// flag=true → only reads a (single dep)
+				// flag=false → reads a AND b (multi dep)
+				if (get(flag)) return get(a);
+				return get(a) + get(b);
+			});
+
+			const values: number[] = [];
+			const unsub = subscribe(d, (v) => values.push(v));
+			expect(d.get()).toBe(1); // single dep: a=1
+
+			// Switch to multi-dep
+			flag.set(false);
+			expect(d.get()).toBe(3); // a + b = 1 + 2
+
+			// Both deps should now trigger recomputation
+			computeCount = 0;
+			a.set(10);
+			expect(d.get()).toBe(12); // 10 + 2
+			expect(computeCount).toBe(1);
+
+			b.set(20);
+			expect(d.get()).toBe(30); // 10 + 20
+			expect(computeCount).toBe(2);
+
+			unsub();
+		});
+
+		it("rewire from multi-dep to single-dep works correctly", () => {
+			const flag = state(false);
+			const a = state(1);
+			const b = state(2);
+
+			const d = dynamicDerived((get) => {
+				if (get(flag)) return get(a);
+				return get(a) + get(b);
+			});
+
+			const values: number[] = [];
+			const unsub = subscribe(d, (v) => values.push(v));
+			expect(d.get()).toBe(3); // multi-dep: a + b
+
+			// Switch to single-dep (flag + a, but flag is constant after this)
+			flag.set(true);
+			expect(d.get()).toBe(1); // single dep: a=1
+
+			// b changes should NOT trigger recomputation
+			values.length = 0;
+			b.set(100);
+			expect(values).toEqual([]);
+			expect(d.get()).toBe(1);
+
+			// a changes should still work
+			a.set(5);
+			expect(d.get()).toBe(5);
+
+			unsub();
+		});
+
+		it("single-dep reconnect after disconnect resets dirty state", () => {
+			const a = state(1);
+			const d = dynamicDerived((get) => get(a) * 2);
+
+			// First subscription (uses single-dep path)
+			const unsub1 = subscribe(d, () => {});
+			a.set(5);
+			expect(d.get()).toBe(10);
+			unsub1();
+
+			// Modify while disconnected
+			a.set(3);
+
+			// Reconnect — should use single-dep path again
+			const values: number[] = [];
+			const unsub2 = subscribe(d, (v) => values.push(v));
+			expect(d.get()).toBe(6);
+
+			a.set(7);
+			expect(values).toContain(14);
+			expect(d.get()).toBe(14);
+
+			unsub2();
+		});
+
+		it("single-dep works correctly with batch", () => {
+			const a = state(1);
+			let computeCount = 0;
+			const d = dynamicDerived((get) => {
+				computeCount++;
+				return get(a) * 2;
+			});
+
+			const unsub = subscribe(d, () => {});
+			computeCount = 0;
+
+			batch(() => {
+				a.set(10);
+				a.set(20);
+			});
+
+			// Batch coalesces — only the final value should trigger one recompute
+			expect(d.get()).toBe(40);
+			expect(computeCount).toBe(1);
+
+			unsub();
 		});
 	});
 });

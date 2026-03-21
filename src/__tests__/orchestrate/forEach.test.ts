@@ -8,7 +8,7 @@ describe("forEach (fan-out step)", () => {
 	it("maps each item in parallel and emits results array", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<number[]>()),
-			doubled: forEach("trigger", async (n: number) => n * 2),
+			doubled: forEach("trigger", async (_signal, n: number) => n * 2),
 		});
 
 		const results: any[] = [];
@@ -30,7 +30,7 @@ describe("forEach (fan-out step)", () => {
 	it("handles empty array", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<string[]>()),
-			processed: forEach("trigger", async (s: string) => s.toUpperCase()),
+			processed: forEach("trigger", async (_signal, s: string) => s.toUpperCase()),
 		});
 
 		const results: any[] = [];
@@ -50,7 +50,7 @@ describe("forEach (fan-out step)", () => {
 			trigger: step(fromTrigger<number[]>()),
 			processed: forEach(
 				"trigger",
-				async (n: number) => {
+				async (_signal, n: number) => {
 					await new Promise((r) => setTimeout(r, 20));
 					return n + 1;
 				},
@@ -80,7 +80,7 @@ describe("forEach (fan-out step)", () => {
 			trigger: step(fromTrigger<number[]>()),
 			processed: forEach(
 				"trigger",
-				async (n: number) => {
+				async (_signal, n: number) => {
 					currentConcurrent++;
 					if (currentConcurrent > maxConcurrent) maxConcurrent = currentConcurrent;
 					await new Promise((r) => setTimeout(r, 30));
@@ -110,7 +110,7 @@ describe("forEach (fan-out step)", () => {
 			trigger: step(fromTrigger<number[]>()),
 			processed: forEach(
 				"trigger",
-				async (n: number) => {
+				async (_signal, n: number) => {
 					if (n === 2) throw new Error("bad");
 					return n * 10;
 				},
@@ -136,7 +136,7 @@ describe("forEach (fan-out step)", () => {
 			trigger: step(fromTrigger<number[]>()),
 			processed: forEach(
 				"trigger",
-				async (n: number) => {
+				async (_signal, n: number) => {
 					if (n === 3) throw new Error("oops");
 					return n;
 				},
@@ -158,7 +158,7 @@ describe("forEach (fan-out step)", () => {
 	});
 
 	it("errors propagate when no fallback", async () => {
-		const forEachDef = forEach("trigger", async (n: number) => {
+		const forEachDef = forEach("trigger", async (_signal, n: number) => {
 			if (n === 2) throw new Error("fail");
 			return n;
 		});
@@ -183,7 +183,7 @@ describe("forEach (fan-out step)", () => {
 	it("re-trigger cancels previous batch (switchMap semantics)", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<number[]>()),
-			processed: forEach("trigger", async (n: number) => {
+			processed: forEach("trigger", async (_signal, n: number) => {
 				await new Promise((r) => setTimeout(r, 50));
 				return n;
 			}),
@@ -207,7 +207,7 @@ describe("forEach (fan-out step)", () => {
 	});
 
 	it("runCount accumulates across re-triggers", async () => {
-		const forEachDef = forEach("trigger", async (n: number) => n);
+		const forEachDef = forEach("trigger", async (_signal, n: number) => n);
 
 		const wf = pipeline({
 			trigger: step(fromTrigger<number[]>()),

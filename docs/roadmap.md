@@ -6,19 +6,19 @@
 
 ## What's Shipped
 
-138 modules across 9 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
+146 modules across 9 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
 
 | Category | Count | Highlights |
 |----------|------:|------------|
 | Core | 6 | `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect` + protocol, inspector, pipe, bitmask |
 | Extra | 65 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, …), sources (`fromPromise`, `fromCron`, `fromEvent`, …), sinks (`subscribe`, `forEach`) |
-| Utils | 22 | `retry`, `withBreaker`, `withStatus`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, … |
-| Data | 5 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub` |
+| Utils | 27 | `retry`, `withBreaker`, `withStatus`, `withSchema`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, … |
+| Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
 | Memory | 3 | `collection`, `decay`, `node` |
-| Orchestrate | 7 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog` |
+| Orchestrate | 13 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, … |
 | Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
-| Compat | 6 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`), React (`useStore`/`useSubscribe`) |
+| Compat | 8 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`), React (`useStore`/`useSubscribe`), Svelte (`useSubscribe`), Solid (`useSubscribe`) |
 
 ---
 
@@ -56,6 +56,23 @@
 | ~~5a-2~~ | ~~`task()` flat companions~~ | `TaskStepDef` exposes `status`, `error`, `duration`, `runCount` as flat properties delegating to internal `taskState`. `TASK_STATE` symbol kept internal. Pipeline auto-detection unchanged. | ~~S~~ |
 | ~~5a-3~~ | ~~Adapter `withStatus` reuse~~ | `fromHTTP`, `fromWebSocket`, `fromWebhook` use `withStatus()` for lifecycle tracking. `fromLLM` and `fromMCP` standardized to `WithStatusStatus` enum. Domain-specific `HTTPStatus`, `WebSocketStatus`, `MCPToolStatus` types removed. WebSocket adds `connectionState` companion. Adapter return types extend `Store<T>` (no separate `.store` property). | ~~S~~ |
 
+### Phase 5d: Cross-Cutting Infrastructure
+
+> **Goal:** Generic primitives that benefit messaging, orchestration, and agentic memory equally.
+> These live in `utils/` and `data/` (tiers 2 and cross-cutting) so all higher layers can use them
+> without circular dependencies.
+>
+> **Status:** Complete.
+
+| # | Deliverable | Where | What | Status |
+|---|-------------|-------|------|--------|
+| ~~5d-1~~ | ~~`PriorityQueue<T>`~~ | `utils/` | Array-backed binary min-heap with comparator. O(log n) insert/extract-min. `peek()`, `poll()`, `size`, `drain()`. Non-reactive internal data structure. | ~~S~~ |
+| ~~5d-2~~ | ~~`withSchema`~~ | `utils/` | `withSchema<T>(store, schema)` — runtime validation wrapper. Accepts `{ parse(v: unknown): T }` (Zod/Valibot/ArkType). Error companion store. Validated `set()` with read-only guard. Fail-fast on invalid initial value. | ~~S~~ |
+| ~~5d-3~~ | ~~`namespace`~~ | `utils/` | `namespace(name)` — scoped naming + isolation. `ns.prefix("orders")` → `"tenant-a/orders"`. `ns.checkpoint(adapter)` → prefixed keys. `ns.child(sub)` for nesting. | ~~S~~ |
+| ~~5d-4~~ | ~~`transaction`~~ | `utils/` | `transaction(stores, fn)` — atomic multi-store writes with rollback. Extends `batch()`: captures snapshots, rolls back on throw. Shallow snapshot (assumes immutable update patterns). | ~~S~~ |
+| ~~5d-5~~ | ~~`compaction`~~ | `data/` | `compaction(log, keyFn, opts?)` — composable log compaction. Retains latest entry per key. Manual + auto-triggered (threshold). Reentrancy-safe. | ~~S~~ |
+| ~~5d-6~~ | ~~`tieredStorage`~~ | `utils/` | `tieredStorage(hot, cold, opts?)` — two-tier `CheckpointAdapter` composition. Hot-first reads, cold fallback, auto-promote on cold hit. Pluggable eviction policy (LRU default, FIFO). `promote()`/`demote()` for manual tier migration. | ~~S~~ |
+
 ---
 
 ## Backlog
@@ -75,11 +92,11 @@
 | ~~5b-4~~ | ~~`onFailure` step / dead letter~~ | `onFailure(dep, handler)` — watches upstream task's error companion store (auto-registered as `"stepName.error"` compound dep). Fires handler on terminal failure. Has own `taskState` for tracking handler execution. | ~~M~~ |
 | ~~5b-5~~ | ~~`wait` node~~ | `wait(dep, ms \| signal)` — duration mode (setTimeout) or signal mode (waits for truthy store emission). switchMap re-trigger cancellation. No taskState — pure passthrough delay. | ~~S~~ |
 | ~~5b-6~~ | ~~`subPipeline` step~~ | `subPipeline(deps, factory)` — creates fresh child `pipeline()` per trigger, subscribes to child status, emits output step value, destroys child on re-trigger/parent destroy. Has own `taskState`. | ~~M~~ |
-| 5b-7 | `join` step (merge strategies) | `join(deps, strategy)` — append, merge-by-key, keep-matches-only. Beyond diamond resolution. | M |
-| 5b-8 | `toMermaid` / `toD2` export | Serialize `pipeline()` graph to Mermaid or D2 diagram syntax. Inspector has the data; this adds the serializer. | S |
-| 5b-9 | Pipeline runner | `pipelineRunner(pipelines[])` — supervisor for long-running pipelines: health checks, auto-restart. | L |
-| 5b-10 | `sensor` step | `sensor(poll, pred, interval)` — Airflow sensor pattern. Poll external condition until true, then proceed. | S |
-| 5b-11 | `loop` step | `loop(pred, steps)` — declarative iteration in pipeline builder. Repeat sub-graph until condition met. | M |
+| ~~5b-7~~ | ~~`join` step (merge strategies)~~ | `join(deps, strategy)` — append, merge-by-key (`{ merge: keyFn }`), intersect (`{ intersect: keyFn }`). Full outer join and inner join semantics. Has own `taskState`, `_kind` discriminator for diagram detection, error tracking for non-array inputs. | ~~M~~ |
+| ~~5b-8~~ | ~~`toMermaid` / `toD2` export~~ | `toMermaid(steps, opts?)` and `toD2(steps, opts?)` — serialize pipeline step-level DAG to diagram syntax. Step type auto-detection via `_kind` discriminator + `TASK_STATE` + `_failStore`. Optional runtime status decoration from `PipelineResult`. Branch `.fail` companion auto-included. | ~~S~~ |
+| ~~5b-9~~ | ~~Pipeline runner~~ | `pipelineRunner(configs[])` — supervisor for long-running pipelines: health checks via periodic probes, auto-restart with pluggable backoff (exponential default), per-pipeline `Store<PipelineResult | null>` for reactive instance tracking, aggregate `RunnerStatus` (running/degraded/stopped). Manual `start`/`stop`/`restart` per-pipeline. | ~~S~~ |
+| ~~5b-10~~ | ~~`sensor` step~~ | `sensor(dep, poll, opts?)` — Airflow sensor pattern. Poll external condition at interval until truthy, then forward upstream value. Has own `taskState`, timeout support, `_kind: "sensor"` for diagram detection. | ~~S~~ |
+| ~~5b-11~~ | ~~`loop` step~~ | `loop(deps, factory, opts?)` — declarative iteration in pipeline builder. Fresh child pipeline per iteration, feeds output to next iteration. Predicate receives `(value, iteration)`. `maxIterations` safety valve (default 100). Has own `taskState`, `_kind: "loop"` for diagram detection. | ~~M~~ |
 
 ### Phase 5c: `with*()` Wrappers & Framework Bindings
 
@@ -98,8 +115,8 @@
 | ~~5c-0~~ | ~~`withStatus` wrapper~~ | ~~Shipped.~~ `withStatus(store)` → `Store<T> & { status, error }`. Producer-backed with proper teardown. | ~~S~~ |
 | ~~5c-1~~ | ~~Vue binding~~ | ~~Shipped.~~ `useStore(store)` → writable `Ref<T>`, `useSubscribe(store)` → readonly `Ref<T>`. `onScopeDispose` cleanup. | ~~S~~ |
 | ~~5c-2~~ | ~~React binding~~ | ~~Shipped.~~ `useStore(store)` → `[value, set]`, `useSubscribe(store)` → `value`. Via `useSyncExternalStore` + core `subscribe()`. | ~~S~~ |
-| 5c-3 | Svelte binding | `useSubscribe(store)` → Svelte readable store (implements Svelte store contract). | S |
-| 5c-4 | Solid binding | `useSubscribe(store)` → Solid signal. Via `createSignal` + `onCleanup`. | S |
+| ~~5c-3~~ | ~~Svelte binding~~ | ~~Shipped.~~ `useSubscribe(store)` → Svelte readable store (implements Svelte store contract). | ~~S~~ |
+| ~~5c-4~~ | ~~Solid binding~~ | ~~Shipped.~~ `useSubscribe(store)` → Solid signal. Via `createSignal` + `onCleanup`. | ~~S~~ |
 
 **Naming:** `useStore()` for writable stores (read + set). `useSubscribe()` for read-only
 subscriptions — any `Store<T>`, including companions like `ws.status`. The name signals that
@@ -147,6 +164,70 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | D4 | **Real-time Dashboard** | `reactiveMap` + `reactiveLog`, live aggregation, sampling |
 | D5 | **State Machine Visualizer** | `stateMachine` util, typed transitions, graph rendering |
 | D6 | **Compat Comparison** | Same counter/todo in callbag-recharge vs Jotai vs Zustand vs Signals |
+
+### Phase 5d-follow: Compaction Event Type
+
+> **Goal:** Add `"compact"` to `LogEventType` so subscribers can distinguish compaction-generated
+> events from user-initiated appends. Decide after 5e when real consumption patterns are clear.
+>
+> **Depends on:** 5d-5 (shipped), 5e (topic uses compaction).
+> **Trigger:** When implementing 5e-1 (topic) — if topic subscribers need to filter compaction events,
+> add `"compact"` to `LogEventType` and emit it from `compaction.compact()` instead of
+> synthetic clear+append events.
+
+### Phase 5e: Messaging — Pulsar-Inspired Topic System
+
+> **Goal:** Embeddable messaging layer modeled after Apache Pulsar's topic/subscription
+> architecture. Topics are persistent streams with cursor-based consumption. A message queue
+> is the foundation; a job queue is a thin wrapper that adds processing semantics on top.
+>
+> **Why Pulsar over RabbitMQ:** Pulsar's model (topic = append-only stream, subscription =
+> cursor on that stream) maps directly to callbag-recharge's stream primitives. Sources emit,
+> subscribers consume at their own pace, the source doesn't care about consumer state. RabbitMQ's
+> consume-and-delete model is fundamentally at odds with reactive streams.
+>
+> **Key mapping:**
+> - Pulsar topic → `reactiveLog` (append-only, sequence numbers, bounded)
+> - Pulsar subscription → cursor + callbag `subscribe()` with backpressure
+> - Pulsar Functions → `operator` / `task`
+> - Subscription modes → dispatch strategies (exclusive, shared, failover, key_shared)
+>
+> **Depends on:** Phase 5d (cross-cutting infra), orchestrate (shipped), data (shipped).
+>
+> **Non-goals:** CRDTs, distributed locks, broker-free competing consumers. Distribution
+> defers to Phase 7 adapters — the external broker (Redis, NATS) owns atomic dispatch for
+> cross-process shared subscriptions. Saga pattern (pipeline + checkpoint + onFailure)
+> handles failure recovery.
+
+#### Layer 1: Message Queue (topic + subscriptions)
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5e-1 | `topic` | `topic<T>(name, opts?)` — persistent append-only stream. Backed by `reactiveLog` (sequence numbers, bounded buffer). `publish(msg, opts?)` with optional priority (5d-1), delay, dedup key, and schema validation (5d-2). Delayed messages use `wait` internally. Persistence via `tieredStorage` (5d-6) — hot in-memory, cold to adapter. Supports `compaction` (5d-5) mode. Namespaced via `namespace` (5d-3). | M |
+| 5e-2 | `subscription` | `subscription(topic, opts)` — cursor-based consumer on a topic. Tracks position (sequence number) with persistent cursor state. Subscription modes: **exclusive** (single consumer), **shared** (round-robin fan-out via `forEach`), **failover** (hot standby via `pipelineRunner` auto-restart), **key_shared** (partition by key via `branch`/`groupBy`). Pull-based backpressure — consumer controls read pace. `ack()` / `nack()` per message. | M |
+| 5e-3 | Topic lifecycle | `pause()`/`resume()`, `seek(sequenceId \| timestamp)` (cursor rewind/fast-forward), `peek()`, `backlog()` (unacked message count). Companion stores: `depth`, `throughput`, `oldestUnacked`. | S |
+| 5e-4 | Retry + dead letter topics | `nack()` routes to retry topic with configurable backoff. Terminal failures route to dead letter topic. Both are just topics — subscribe to DLQ for monitoring/reprocessing. Uses `retry` + `onFailure` internally. | S |
+| 5e-5 | Repeatable producers | `publish(msg, { repeat: { cron, every, limit } })` — scheduled message production via `fromCron`. Dedup by repeat key. | S |
+
+#### Layer 2: Job Queue (processing on top of topics)
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5e-6 | `jobQueue` | `jobQueue<T>(name, processor, opts?)` — wraps a `topic` + `subscription(shared)` + `task` processing. Each message becomes a job with `taskState` (status, error, duration, runCount, result). `add(data, opts?)` publishes to the underlying topic. Concurrency control via `forEach`. The processor is just a `task` fn. Atomic claim + status update via `transaction` (5d-4). | M |
+| 5e-7 | Job events + monitoring | `on('completed' \| 'failed' \| 'stalled', fn)` — effect subscriptions on companion stores. Stall detection via configurable ack timeout + `sensor`-style polling. Aggregate companions: `active`, `completed`, `failed`, `delayed` counts. | S |
+| 5e-8 | Multi-queue workflows | `jobFlow(queues, wiring)` — chains job queues into a pipeline. Output of queue A publishes to queue B's topic. Uses `subPipeline` internally. Diagram export via `toMermaid`/`toD2`. | M |
+
+**Distribution story (Phase 7 dependency):**
+Once Redis/NATS adapters ship, topics gain cross-process capabilities with zero architecture
+changes:
+- **Shared subscriptions across processes:** External broker (Redis `BRPOPLPUSH`, NATS queue
+  groups) replaces in-process round-robin. The subscription mode stays `shared` — only the
+  dispatch backend swaps.
+- **Distributed dead letter:** DLQ topic backed by `toRedis`/`toNats` sink for centralized
+  failure handling.
+- **Cross-process monitoring:** Companion stores bridge via adapter for centralized dashboards.
+- **Geo-replication (future):** Topic replication across regions via adapter-to-adapter
+  forwarding. Cursor positions sync independently per region.
 
 ### Phase 6: Deep Memory
 

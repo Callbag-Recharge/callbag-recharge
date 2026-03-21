@@ -9,10 +9,10 @@ describe("onFailure (dead letter step)", () => {
 	it("fires handler when upstream task errors", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			fetch: task(["trigger"], async () => {
+			fetch: task(["trigger"], async (_signal) => {
 				throw new Error("fetch failed");
 			}),
-			dlq: onFailure("fetch", async (error) => {
+			dlq: onFailure("fetch", async (_signal, error) => {
 				return { handled: true, message: (error as Error).message };
 			}),
 		});
@@ -34,8 +34,8 @@ describe("onFailure (dead letter step)", () => {
 	it("does not fire when upstream task succeeds", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			fetch: task(["trigger"], async (v: string) => `result: ${v}`),
-			dlq: onFailure("fetch", async (error) => {
+			fetch: task(["trigger"], async (_signal, [v]: [string]) => `result: ${v}`),
+			dlq: onFailure("fetch", async (_signal, error) => {
 				return { error };
 			}),
 		});
@@ -61,10 +61,10 @@ describe("onFailure (dead letter step)", () => {
 	it("tracks its own taskState for handler execution", async () => {
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			fetch: task(["trigger"], async () => {
+			fetch: task(["trigger"], async (_signal) => {
 				throw new Error("boom");
 			}),
-			dlq: onFailure("fetch", async () => {
+			dlq: onFailure("fetch", async (_signal) => {
 				return "logged";
 			}),
 		});
@@ -87,13 +87,13 @@ describe("onFailure (dead letter step)", () => {
 			trigger: step(fromTrigger<string>()),
 			fetch: task(
 				["trigger"],
-				async () => {
+				async (_signal) => {
 					attempts++;
 					throw new Error(`fail #${attempts}`);
 				},
 				{ retry: 2 },
 			),
-			dlq: onFailure("fetch", async (error) => {
+			dlq: onFailure("fetch", async (_signal, error) => {
 				return (error as Error).message;
 			}),
 		});
@@ -118,10 +118,10 @@ describe("onFailure (dead letter step)", () => {
 		let callCount = 0;
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			fetch: task(["trigger"], async () => {
+			fetch: task(["trigger"], async (_signal) => {
 				throw new Error("always fails");
 			}),
-			dlq: onFailure("fetch", async () => {
+			dlq: onFailure("fetch", async (_signal) => {
 				callCount++;
 				return `handled-${callCount}`;
 			}),
@@ -144,13 +144,13 @@ describe("onFailure (dead letter step)", () => {
 	});
 
 	it("handler errors are tracked in its own taskState", async () => {
-		const dlqStep = onFailure("fetch", async () => {
+		const dlqStep = onFailure("fetch", async (_signal) => {
 			throw new Error("handler failed");
 		});
 
 		const wf = pipeline({
 			trigger: step(fromTrigger<string>()),
-			fetch: task(["trigger"], async () => {
+			fetch: task(["trigger"], async (_signal) => {
 				throw new Error("upstream fail");
 			}),
 			dlq: dlqStep,

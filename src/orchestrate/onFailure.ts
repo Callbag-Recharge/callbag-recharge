@@ -58,7 +58,7 @@ export interface OnFailureStepDef<T = any> extends StepDef<T | null> {
  * `onFailure` resolves its dep to the task's error companion store.
  *
  * @param dep - Name of the upstream task step to watch for failures.
- * @param handler - Function receiving the error. Returns a value for downstream steps.
+ * @param handler - Function receiving `(signal, error)`. Signal is aborted on reset/destroy. Returns a value for downstream steps.
  * @param opts - Optional configuration (name).
  *
  * @returns `OnFailureStepDef<T>` — step definition for pipeline() with task tracking.
@@ -85,7 +85,7 @@ export interface OnFailureStepDef<T = any> extends StepDef<T | null> {
  */
 export function onFailure<T>(
 	dep: string,
-	handler: (error: unknown) => T | Promise<T>,
+	handler: (signal: AbortSignal, error: unknown) => T | Promise<T>,
 	opts?: OnFailureOpts,
 ): OnFailureStepDef<T> {
 	const ts = taskState<T>({ id: opts?.name });
@@ -117,8 +117,8 @@ export function onFailure<T>(
 						if (!stopped) complete();
 					};
 
-					ts.run(async () => {
-						const result = await handler(error);
+					ts.run(async (signal) => {
+						const result = await handler(signal, error);
 						safeEmit(result);
 						safeComplete();
 						return result;
