@@ -36,6 +36,8 @@
 
 14. **High-level layers speak domain language, not callbag.** `core/`, `extra/`, `utils/`, and `data/` are low-level infrastructure — they expose callbag protocol, `Store` primitives, and reactive plumbing. Everything above (`orchestrate/`, `patterns/`, `adapters/`, `compat/`) must present user-friendly APIs with domain semantics (workflow steps, form fields, chat streams). If low-level internals must be accessible, lump them under an `inner` property (see `pipeline().inner` for the canonical example). Users should never need to understand DIRTY/RESOLVED, output slots, or bitmasks to use a high-level API.
 
+15. **Control flows through the graph, not around it.** Lifecycle events (reset, cancel, pause, resume) must propagate as TYPE 3 STATE signals through the reactive graph — never as imperative method calls that bypass the topology. When control bypasses the graph: new node types silently escape supervision, composition breaks (child pipelines miss parent resets), and the signal model has a hole where control and data diverge. AbortSignal bridges STATE signals to imperative async (fetch, setTimeout) but is never the primary control mechanism. **Litmus test:** if adding a new orchestrate node requires registering it in a flat list for lifecycle management, the design is wrong — the graph should carry the signal.
+
 ---
 
 ## 2. Folder & Dependency Hierarchy

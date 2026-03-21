@@ -32,6 +32,11 @@ callbag-recharge is a reactive state management library where **every store is a
 | [docs/test-guidance.md](docs/test-guidance.md) | Test organization, patterns, Inspector tools | Writing tests |
 | [docs/optimizations.md](docs/optimizations.md) | Built-in and potential optimizations | Performance work |
 
+## Design invariants
+
+- **Control flows through the graph, not around it** (architecture.md §1.15). Lifecycle events (reset, cancel, pause) must propagate as TYPE 3 STATE signals — never as imperative method calls that bypass the graph topology. AbortSignal bridges STATE to imperative async but is not the primary mechanism. Litmus test: if a new node needs registering in a flat list for lifecycle management, the design is wrong.
+- **Signal-first for orchestrate**: When implementing any orchestrate node (`task`, `forEach`, `sensor`, etc.), the `signal: AbortSignal` is always the first parameter to user callbacks. Values follow as array (for deps) or positional args (for fixed-arity callbacks).
+
 ## Code style
 
 - Biome: tabs, 100 char line width, `noExplicitAny: off`

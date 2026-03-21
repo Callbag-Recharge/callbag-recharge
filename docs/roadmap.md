@@ -229,6 +229,37 @@ changes:
 - **Geo-replication (future):** Topic replication across regions via adapter-to-adapter
   forwarding. Cursor positions sync independently per region.
 
+### Phase 5f: Protocol-Native Lifecycle Signals
+
+> **Goal:** Move lifecycle control (reset, cancel, pause/resume) from imperative method calls
+> to TYPE 3 STATE channel signals. Currently, `pipeline.reset()` iterates a flat task list and
+> calls `ts.reset()` on each — the callbag graph has no knowledge of reset. This phase makes
+> lifecycle events first-class protocol signals that cascade through the graph topology.
+>
+> **Anti-pattern being fixed:** Imperative control bypassing the reactive graph. When lifecycle
+> events don't flow through the protocol, new node types must be manually registered in
+> supervisor lists, composition breaks (subPipeline doesn't naturally receive parent resets),
+> and the signal model has a hole where control and data diverge.
+>
+> **Depends on:** Phase 5b (orchestrate shipped), Phase 5d (cross-cutting shipped).
+>
+> **Design constraint:** AbortSignal stays for canceling imperative async work (fetch, setTimeout)
+> that lives outside the reactive graph. STATE signals trigger the abort; AbortSignal bridges
+> to the imperative world. They're complementary, not competing.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5f-1 | `RESET` STATE signal | Add `RESET` symbol to protocol.ts. Audit all existing imperative lifecycle patterns (reset, restart, destroy, pause, resume) across all layers and identify which should become STATE signals vs remain imperative. Design signal semantics: direction (downstream), cascading rules, interaction with DIRTY/RESOLVED cycle. | S |
+| 5f-2 | `PAUSE` / `RESUME` signals | Optional. If 5f-1 audit identifies pause/resume as candidates, add `PAUSE`/`RESUME` to STATE channel. | S |
+| 5f-3 | Core node RESET handling | Producer, derived, operator, effect: define how each node type handles `STATE, RESET`. Producers clear pending state and forward. Derived/operator reset cached values and forward. Effects re-run or skip based on semantics. | M |
+| 5f-4 | Timer utils signal migration | `countdown`/`stopwatch` in `utils/timer.ts`: `pause()`/`resume()`/`reset()`/`dispose()` all call imperative methods on internal ticker and mutate state stores directly. Should respond to `PAUSE`/`RESUME`/`RESET`/`DESTROY` STATE signals natively (depends on 5f-2). | S |
+| 5f-5 | Memory layer signal migration | `collection.destroy()` iterates `_nodes` map calling `node.destroy()`, clears `_tagEffects`/`_tagIndex` imperatively. Should propagate DESTROY as TYPE 3 signal so nodes self-teardown. `collection.remove()` imperatively calls `node.destroy()` — should emit targeted END. | S |
+| 5f-6 | Orchestrate RESET migration | `pipeline.reset()` sends `STATE, RESET` to root sources via talkback instead of iterating task list. `task()`, `forEach()`, `sensor()`, `loop()`, `subPipeline()` handle RESET on STATE channel → trigger internal `ts.reset()` + forward downstream. Remove flat task registration. | M |
+| 5f-7 | Orchestrate flat-registry cleanup | `pipelineRunner`: flat `entries` map iterated for `destroy()` — should receive DESTROY signal from parent pipeline. `executionLog`: `clear()`/`destroy()` imperatively clears `_stepIndex` map and persistence adapter — should respond to RESET/DESTROY signals. `join`: imperative `ts.restart()` before each computation. `onFailure`: imperative `ts.restart()` on error transitions. | M |
+| 5f-8 | Adapter lifecycle signal migration | `fromHTTP.stop()` imperatively mutates `active` flag, calls `currentAbort?.abort()`, and `clearTimeout()` — should respond to END or DESTROY STATE signal from the graph. AbortController invocation is acceptable as the bridge, but the *trigger* must come from a signal, not an imperative `stop()` call. | S |
+| 5f-9 | Patterns layer signal migration | `memoryStore.resetSession()` destroys and recreates session collection imperatively, bumps version as workaround — should emit RESET signal. `memoryStore.destroy()` iterates 3 collections calling `.destroy()`. `commandBus.dispose()` imperatively clears listeners map and resets stacks. `focusManager.dispose()` clears cache/arrays imperatively; `register()`/`unregister()` mutate flat `_ids` array outside the graph. All should respond to DESTROY/DISPOSE via STATE channel. | M |
+| 5f-10 | Lifecycle signal tests + docs | Test suite for signal cascading through complex graphs (diamonds, subPipelines, loops, memory collections, timer hierarchies). Update architecture.md §1 principles and §19 orchestrate table. | S |
+
 ### Phase 6: Deep Memory
 
 > **Goal:** Reactive agentic memory — vector search, knowledge graphs, memory lifecycle.
