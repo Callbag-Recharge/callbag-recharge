@@ -245,6 +245,17 @@ Research across edge LLM landscape (Ollama, WebLLM, ExecuTorch, Apple Foundation
 
 **Outcome:** 3-phase build plan. Phase 1: extract dirtyTracker + validationPipeline + asyncQueue from existing patterns. Phase 2: new primitives (selection, reactiveList, timer, commandBus, focusManager). Phase 3: compose into textBuffer → textEditor → examples. 13 steps total, 10 independently testable legos.
 
+### Session repo-audit-design-principles (March 20) — Full Repo Audit + Design Principles Codification
+**Topic:** Comprehensive audit of all 138 modules against architecture doc, new design principles, import hierarchy unification, companion store standardization
+
+**Key insight:** The codebase already converged on companion stores (8 modules) — taskState's packed `TaskMeta` is the lone outlier, not a deliberate alternative. `batch()` is the companion store's secret weapon: without it, transitioning 4 companion stores means 4 effect runs; with it, 1. The `inner` property pattern (pioneered by `pipeline().inner`) should be the standard for hiding callbag internals in high-level APIs.
+
+**Also decided:** 5-tier import hierarchy (core → extra → utils → orchestrate/memory → patterns/adapters/compat), data as cross-cutting layer, intra-folder imports blessed, adapters can now import from utils/. §1.14 principle: high-level layers speak domain language, not callbag.
+
+**Rejected:** Move withStatus to core (utility, not foundation); keep packed TaskMeta (8:1 ratio against); keep adapter core-only import rule (forced duplication); file-level inventory in docs (user: "don't care about counts").
+
+**Outcome:** Architecture doc §1.14, §2, §19 updated. reactiveList extends NodeV0. Phase 5a (Uniform Metadata Pattern) added to roadmap. API leakage audit found 11 violations: 2 type-level (taskState.source, task._taskState), 8 JSDoc (DIRTY/RESOLVED/END terminology in gate, branch, pipeline, adapters, createStore), 1 export-level (createStore re-exports teardown). All tracked in Phase 5a-0.
+
 ---
 
 ## Additional Sessions (Partial Coverage)
@@ -317,7 +328,7 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session text-editor-lego-plan (March 19, 2026)
+**Archive Status:** Complete through Session repo-audit-design-principles (March 20, 2026)
 
 ---
 

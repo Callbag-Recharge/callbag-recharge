@@ -13,6 +13,7 @@ export type {
 	IndexSnapshot,
 	KVEvent,
 	KVEventType,
+	ListSnapshot,
 	LogEntry,
 	LogEvent,
 	LogEventType,

@@ -24,11 +24,38 @@
 
 ## In Progress
 
-*(Nothing currently in progress)*
+### Phase 5a-0: §1.14 Compliance Pass
+
+> **Goal:** Audit and fix all high-level modules for §1.14 compliance — no callbag protocol
+> leakage in public APIs of orchestrate/, patterns/, adapters/, compat/.
+>
+> **Status:** API leakage audit complete. Two mild violations found.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5a-0.1 | `taskState` inner isolation | Hide `taskState.source` behind an `inner` property. Pipeline reads from `inner.source` instead. | S |
+| 5a-0.2 | `task._taskState` encapsulation | Replace `_taskState` public property with Symbol key or `inner` property for pipeline auto-detection. | S |
+| 5a-0.3 | JSDoc sanitization | Replace callbag protocol terminology in high-level JSDoc: "DIRTY+value cycle" → "reactive update cycle", "sends END" → "terminates the store", "RESOLVED signals" → "suppression signaling", "callbag DATA/END" → "stream lifecycle events". Affects: gate.ts, branch.ts, pipeline.ts, http.ts, websocket.ts, webhook.ts, createStore. | S |
+| 5a-0.4 | `batch()` audit for companion stores | Audit all high-level modules that update multiple stores simultaneously. Ensure `batch()` wraps multi-store transitions (especially taskState, which will need it post-5a-1). | S |
 
 ---
 
 ## Backlog
+
+### Phase 5a: Uniform Metadata Pattern
+
+> **Goal:** Standardize all status/error/lifecycle metadata on the companion store pattern (§20).
+> Today, `taskState` packs all metadata into a single `Store<TaskMeta>`, while every other module
+> (withStatus, adapters, patterns) exposes individual companion stores. Consumers of TaskMeta must
+> subscribe to the entire object just to watch `status`, and can't pipe individual fields.
+>
+> **Breaking change:** `task.get().status` → `task.status.get()`. Affects pipeline consumers.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5a-1 | `taskState` companion refactor | Refactor `taskState` to expose `status`, `error`, `duration`, `runCount` as individual companion `Store` properties instead of a single packed `TaskMeta` value. Aligns with the `with*()` pattern used everywhere else. | M |
+| 5a-2 | `task()` flat companions | After 5a-1, flatten task's metadata: `task.status`, `task.error`, `task.duration`, `task.runCount` instead of `task._taskState`. Pipeline auto-detection updated accordingly. | M |
+| 5a-3 | Adapter `withStatus` reuse | Now that adapters can import from `utils/` (import rule update), refactor `fromHTTP`, `fromWebSocket`, `fromSSE`, `fromLLM`, `fromMCP`, `fromWebhook` to use `withStatus()` as the base layer instead of duplicating status/error store creation. Domain-specific companions added on top. | M |
 
 ### Phase 5b: Orchestration — Production Parity
 

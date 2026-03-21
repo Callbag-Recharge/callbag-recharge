@@ -16,6 +16,7 @@
 import { derived } from "../core/derived";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import type { ListSnapshot, NodeV0 } from "./types";
 
 export interface ReactiveListOptions {
 	/** User-specified ID. Auto-generated if omitted. */
@@ -24,13 +25,13 @@ export interface ReactiveListOptions {
 	name?: string;
 }
 
-export interface ReactiveListResult<T> {
+export interface ReactiveListResult<T> extends NodeV0 {
 	/** Reactive store of all items (read-only snapshot). */
 	items: Store<readonly T[]>;
 	/** Reactive store of the list length. */
 	length: Store<number>;
-	/** Reactive version counter (bumped on every mutation). */
-	version: Store<number>;
+	/** Reactive version store (bumped on every mutation). Subscribe for reactive updates. */
+	versionStore: Store<number>;
 
 	/** Get item at index. */
 	get(index: number): T | undefined;
@@ -58,8 +59,8 @@ export interface ReactiveListResult<T> {
 	/** Reactive find — returns first item matching predicate. Caller should store the returned store. */
 	find(predicate: (item: T) => boolean): Store<T | undefined>;
 
-	/** Snapshot of current items. */
-	snapshot(): readonly T[];
+	/** JSON-serializable snapshot following the NodeV0 contract. */
+	snapshot(): ListSnapshot<T>;
 
 	/** Tear down all internal stores and caches. */
 	destroy(): void;
@@ -97,7 +98,8 @@ export function reactiveList<T>(
 	opts?: ReactiveListOptions,
 ): ReactiveListResult<T> {
 	const counter = ++listCounter;
-	const prefix = opts?.name ?? opts?.id ?? `rlist-${counter}`;
+	const listId = opts?.id ?? `rlist-${counter}`;
+	const prefix = opts?.name ?? listId;
 
 	// Source of truth
 	const _items: T[] = [...initial];
@@ -212,8 +214,8 @@ export function reactiveList<T>(
 		});
 	}
 
-	function snapshot(): readonly T[] {
-		return [..._items];
+	function snapshot(): ListSnapshot<T> {
+		return { type: "reactiveList", id: listId, version: _version.get(), items: [..._items] };
 	}
 
 	function destroy(): void {
@@ -223,9 +225,13 @@ export function reactiveList<T>(
 	}
 
 	return {
+		id: listId,
+		get version() {
+			return _version.get();
+		},
 		items: itemsStore,
 		length: lengthStore,
-		version: _version,
+		versionStore: _version,
 		get,
 		set,
 		push,

@@ -276,3 +276,12 @@ export interface PubSubSnapshot<T> extends NodeV0 {
 	type: "pubsub";
 	channels: Record<string, T | undefined>;
 }
+
+// ---------------------------------------------------------------------------
+// ReactiveList
+// ---------------------------------------------------------------------------
+
+export interface ListSnapshot<T> extends NodeV0 {
+	type: "reactiveList";
+	items: T[];
+}

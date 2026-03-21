@@ -34,6 +34,8 @@
 
 13. **Compatibility targets: TC39 Signals, raw callbag, RxJS.**
 
+14. **High-level layers speak domain language, not callbag.** `core/`, `extra/`, `utils/`, and `data/` are low-level infrastructure — they expose callbag protocol, `Store` primitives, and reactive plumbing. Everything above (`orchestrate/`, `patterns/`, `adapters/`, `compat/`) must present user-friendly APIs with domain semantics (workflow steps, form fields, chat streams). If low-level internals must be accessible, lump them under an `inner` property (see `pipeline().inner` for the canonical example). Users should never need to understand DIRTY/RESOLVED, output slots, or bitmasks to use a high-level API.
+
 ---
 
 ## 2. Folder & Dependency Hierarchy
@@ -45,38 +47,48 @@
 
 ```
 src/
-├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types
-│   ├── protocol.ts  ← type constants, batch, deferStart — no other core imports
-│   ├── types.ts     ← Store, WritableStore, Actions, NodeStatus — no runtime imports
-│   ├── inspector.ts ← observability singleton — imports protocol only
-│   ├── producer.ts  ← source role — imports protocol + inspector + types
-│   ├── state.ts     ← syntax sugar over producer
-│   ├── operator.ts  ← transform role — imports protocol + inspector + types
-│   ├── derived.ts   ← syntax sugar over operator with terminator management
-│   ├── dynamicDerived.ts ← derived with runtime dep tracking + rewiring
-│   ├── effect.ts    ← sink role — imports protocol + types
-│   └── pipe.ts      ← map/filter/scan sugar via derived
-├── extra/           ← basic operators, sources, sinks (may use core and/or raw callbag)
-├── utils/           ← versatile utilities reused by many modules (more abstract than extras)
-├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, pubsub)
-├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval) + plumbing (taskState, gate, executionLog)
-├── memory/          ← agent memory primitives (specialized domain)
-├── patterns/        ← composed recipes specializing certain use cases
-├── adapters/        ← external system connectors (peer deps for external libs)
-├── compat/          ← drop-in API wrappers for other state libraries
-└── index.ts         ← public API barrel
+├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types + bitmask
+├── extra/           ← operators, sources, sinks (tier 1 + tier 2)
+├── utils/           ← resilience, async, tracking, strategies (withStatus, withBreaker, retry, backoff, …)
+├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
+├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval, gate, taskState, executionLog)
+├── memory/          ← agent memory primitives (collection, decay, node)
+├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
+├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
+├── compat/          ← drop-in API wrappers + framework bindings (react, vue, signals, zustand, jotai, nanostores)
+└── index.ts         ← public API barrel (core primitives only; other layers via subpath exports)
 ```
 
-**Strict import rules (the canonical reference):**
+### Dependency tiers
+
+The import hierarchy flows strictly downward. Each tier can import from its own level and below.
+
+```
+Tier 0 (foundation)   core/
+                        ↓
+Tier 1 (operators)    extra/
+                        ↓
+Tier 2 (utilities)    utils/
+                        ↓
+Tier 3 (domains)      orchestrate/    memory/
+                        ↓                ↓
+Tier 4 (surface)      patterns/    adapters/    compat/
+```
+
+`data/` is a **cross-cutting layer** — importable from any tier (core excluded).
+
+### Strict import rules (the canonical reference)
+
 - `core/` never imports from any other folder
-- `extra/` imports from `core/` only; intra-extra imports allowed (e.g. `subscribe`)
+- `extra/` imports from `core/` only
 - `utils/` imports from `core/` and `extra/` only
 - `data/` imports from `core/` and `utils/` only
 - `orchestrate/` imports from `core/`, `extra/`, `utils/`, and `data/`
 - `memory/` imports from `core/`, `utils/`, and `data/`
 - `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
-- `adapters/` imports from `core/` only (peer deps for external libs)
-- `compat/` imports from `core/` only
+- `adapters/` imports from `core/`, `extra/`, `utils/`, and `data/`
+- `compat/` imports from `core/` and `extra/` only
+- **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 
 ### Site & Demo Structure
@@ -623,9 +635,22 @@ For all extras:
 
 These layers build on core + extra. Read the source READMEs when working in these areas.
 
+> **Design principle (§1.14):** High-level layers expose user-friendly APIs with domain semantics.
+> If low-level callbag internals must be accessible, lump them under an `inner` property.
+> Users of `pipeline()`, `formField()`, `chatStream()`, etc. should never need to understand
+> DIRTY/RESOLVED or output slots.
+
 ### Utils (`src/utils/`)
 
-Pure strategies and reactive utilities: `backoff.ts` (constant/linear/exponential/fibonacci/decorrelatedJitter), `eviction.ts` (fifo/lru/lfu/scored/random), `reactiveEviction.ts` (O(log n) min-heap with effect subscriptions).
+Pure strategies and reactive utilities. Key categories:
+
+- **Resilience:** `circuitBreaker`, `withBreaker`, `retry`, `backoff` (constant/linear/exponential/fibonacci/decorrelatedJitter)
+- **Async/concurrency:** `asyncQueue`, `cancellableAction`, `cancellableStream`, `batchWriter`
+- **Metadata wrappers:** `withStatus`, `track`, `tokenTracker`, `connectionHealth`
+- **Eviction:** `eviction` (fifo/lru/lfu/scored/random), `reactiveEviction` (O(log n) min-heap with effect subscriptions)
+- **State:** `dirtyTracker`, `stateMachine`, `timer` (countdown/stopwatch), `validationPipeline`
+- **Persistence:** `checkpoint`, `checkpointAdapters` (file/SQLite/IndexedDB)
+- **Graph:** `dag` (topological sort, acyclicity validation)
 
 ### Data (`src/data/`)
 
@@ -636,6 +661,7 @@ Reactive data structures using the **version-gated pattern**: `state<number>` ve
 | `reactiveMap` | Key-value store with TTL, eviction, namespaces, keyspace events |
 | `reactiveLog` | Append-only log with bounded circular buffer, sequence numbers |
 | `reactiveIndex` | Secondary index (`indexKey → Set<primaryKey>`) with reverse map |
+| `reactiveList` | Ordered collection with positional operations (index-based, version-gated) |
 | `pubsub` | Topic-based pub/sub — lazy `state` per topic, `equals: () => false` |
 
 ### Memory (`src/memory/`)
@@ -644,25 +670,18 @@ Reactive data structures using the **version-gated pattern**: `state<number>` ve
 
 ### Orchestrate (`src/orchestrate/`)
 
-Workflow nodes and orchestration-specific plumbing. Users build pipelines with these building blocks:
+Workflow nodes — users build pipelines with these building blocks. All nodes expose workflow-friendly APIs. Low-level callbag internals (stream status, step metadata) live under `pipeline().inner`.
 
-| Workflow node | What it does |
-|---------------|-------------|
-| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. |
+| Node | What it does |
+|------|-------------|
+| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. Expert internals under `.inner` (streamStatus, stepMeta, topo order). |
 | `task(deps, fn, opts)` | Value-level work step. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
 | `branch(dep, pred)` | Binary conditional routing. Creates `name` (pass) + `name.fail` (fail) steps. |
 | `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
 | `step(factory)` | Raw callbag source wrapper. For `fromTrigger()`, `state()`, or expert-only full callbag control. |
-
-| Internal plumbing | What it does |
-|-------------------|-------------|
-| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Used by `task()`. |
-| `gate(opts)` | Pipe operator for approval queuing. Wrapped by `approval()`. |
-| `executionLog(opts)` | Reactive execution history with pipeline auto-logging. |
-
-Generic operators/sources that were previously here have moved to their natural homes:
-- **`extra/`**: `fromTrigger`, `fromCron`, `cron`, `route`, `timeout`
-- **`utils/`**: `track`, `checkpoint`, `checkpointAdapters`, `tokenTracker`, `withBreaker`, `dag`, `retry` (with `retryMeta`)
+| `gate(opts)` | Pipe operator for approval queuing — the building block under `approval()`. Also usable standalone for custom human-in-the-loop flows. |
+| `taskState(opts)` | Reactive task tracker: status/duration/error/runCount. Used internally by `task()`, but also standalone for custom task lifecycle tracking. |
+| `executionLog(opts)` | Reactive execution history with pipeline auto-logging. Backed by `reactiveLog`. |
 
 ## 20. Companion Store Pattern (`with*()` Wrappers)
 

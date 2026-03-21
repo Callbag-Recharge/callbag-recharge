@@ -339,6 +339,8 @@ These are not yet implemented but represent concrete opportunities for improveme
 
 **Complexity:** Medium — the AbortController wiring is straightforward, but user-facing API changes (signal parameter) need careful design. Deferring until a real-world use case demands it.
 
+**Related:** Roadmap phase 5a refactors `taskState` from packed `TaskMeta` to companion stores (§20 pattern). The AbortController wiring should be done during that refactor to avoid a second breaking change to `taskState`'s API.
+
 ### 3. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.

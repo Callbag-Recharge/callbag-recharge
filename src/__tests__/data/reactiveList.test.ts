@@ -11,7 +11,30 @@ describe("reactiveList", () => {
 		const list = reactiveList<number>();
 		expect(list.items.get()).toEqual([]);
 		expect(list.length.get()).toBe(0);
-		expect(list.version.get()).toBe(0);
+		expect(list.version).toBe(0);
+	});
+
+	it("implements NodeV0 (id, version, snapshot)", () => {
+		const list = reactiveList([1, 2], { id: "test-list" });
+		expect(list.id).toBe("test-list");
+		expect(list.version).toBe(0);
+		list.push(3);
+		expect(list.version).toBe(1);
+
+		const snap = list.snapshot();
+		expect(snap.type).toBe("reactiveList");
+		expect(snap.id).toBe("test-list");
+		expect(snap.version).toBe(1);
+		expect(snap.items).toEqual([1, 2, 3]);
+	});
+
+	it("exposes versionStore for reactive subscriptions", () => {
+		const list = reactiveList([1]);
+		const versions: number[] = [];
+		subscribe(list.versionStore, (v) => versions.push(v));
+		list.push(2);
+		list.push(3);
+		expect(versions).toEqual([1, 2]);
 	});
 
 	it("initializes with provided items", () => {
@@ -48,9 +71,9 @@ describe("reactiveList", () => {
 
 	it("set out of bounds is a no-op", () => {
 		const list = reactiveList([1, 2]);
-		const v = list.version.get();
+		const v = list.version;
 		list.set(5, 99);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	// -----------------------------------------------------------------------
@@ -66,9 +89,9 @@ describe("reactiveList", () => {
 
 	it("push with no args is a no-op", () => {
 		const list = reactiveList([1]);
-		const v = list.version.get();
+		const v = list.version;
 		list.push();
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	it("pop removes and returns last item", () => {
@@ -107,17 +130,17 @@ describe("reactiveList", () => {
 
 	it("insert with negative index is a no-op", () => {
 		const list = reactiveList([1, 2]);
-		const v = list.version.get();
+		const v = list.version;
 		list.insert(-1, 99);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 		expect(list.items.get()).toEqual([1, 2]);
 	});
 
 	it("insert with no items is a no-op", () => {
 		const list = reactiveList([1]);
-		const v = list.version.get();
+		const v = list.version;
 		list.insert(0);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	it("remove removes items at index", () => {
@@ -152,18 +175,18 @@ describe("reactiveList", () => {
 
 	it("move same index is a no-op", () => {
 		const list = reactiveList([1, 2, 3]);
-		const v = list.version.get();
+		const v = list.version;
 		list.move(1, 1);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	it("move out of bounds is a no-op", () => {
 		const list = reactiveList([1, 2]);
-		const v = list.version.get();
+		const v = list.version;
 		list.move(-1, 0);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 		list.move(0, 5);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	it("swap exchanges items at two indices", () => {
@@ -174,9 +197,9 @@ describe("reactiveList", () => {
 
 	it("swap same index is a no-op", () => {
 		const list = reactiveList([1, 2]);
-		const v = list.version.get();
+		const v = list.version;
 		list.swap(0, 0);
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	// -----------------------------------------------------------------------
@@ -192,9 +215,9 @@ describe("reactiveList", () => {
 
 	it("clear on empty list is a no-op", () => {
 		const list = reactiveList<number>();
-		const v = list.version.get();
+		const v = list.version;
 		list.clear();
-		expect(list.version.get()).toBe(v);
+		expect(list.version).toBe(v);
 	});
 
 	// -----------------------------------------------------------------------
@@ -263,16 +286,16 @@ describe("reactiveList", () => {
 
 	it("version bumps on every mutation", () => {
 		const list = reactiveList([1]);
-		const v0 = list.version.get();
+		const v0 = list.version;
 
 		list.push(2);
-		expect(list.version.get()).toBe(v0 + 1);
+		expect(list.version).toBe(v0 + 1);
 
 		list.pop();
-		expect(list.version.get()).toBe(v0 + 2);
+		expect(list.version).toBe(v0 + 2);
 
 		list.set(0, 99);
-		expect(list.version.get()).toBe(v0 + 3);
+		expect(list.version).toBe(v0 + 3);
 	});
 
 	// -----------------------------------------------------------------------
@@ -308,13 +331,16 @@ describe("reactiveList", () => {
 	// snapshot
 	// -----------------------------------------------------------------------
 
-	it("snapshot returns a copy of items", () => {
+	it("snapshot returns a NodeV0-compliant snapshot", () => {
 		const list = reactiveList([1, 2, 3]);
 		const snap = list.snapshot();
-		expect(snap).toEqual([1, 2, 3]);
+		expect(snap.type).toBe("reactiveList");
+		expect(snap.id).toBe(list.id);
+		expect(snap.version).toBe(list.version);
+		expect(snap.items).toEqual([1, 2, 3]);
 
 		list.push(4);
-		expect(snap).toEqual([1, 2, 3]); // snapshot is independent
+		expect(snap.items).toEqual([1, 2, 3]); // snapshot is independent
 	});
 
 	// -----------------------------------------------------------------------
@@ -329,6 +355,6 @@ describe("reactiveList", () => {
 		list.destroy();
 
 		expect(list.get(0)).toBeUndefined();
-		expect(list.snapshot()).toEqual([]);
+		expect(list.snapshot().items).toEqual([]);
 	});
 });
