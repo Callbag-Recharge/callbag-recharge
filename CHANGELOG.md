@@ -1,3 +1,11 @@
+# [0.17.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.16.0...v0.17.0) (2026-03-22)
+
+
+### Features
+
+* fix promise and intervals ([dc1541c](https://github.com/Callbag-Recharge/callbag-recharge/commit/dc1541c5861e9a8d5a077021bfaf4f42c9d1c9be))
+* implement 5g ([4091b12](https://github.com/Callbag-Recharge/callbag-recharge/commit/4091b129b1181537e7d80f6286b643eb10355fba))
+
 # [0.16.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.15.0...v0.16.0) (2026-03-22)
 
 
