@@ -1,13 +1,16 @@
 # tieredStorage()
 
-Compose two `CheckpointAdapter`s into a tiered storage adapter.
+Creates a reactive tiered storage cache backed by `CheckpointAdapter`s.
+
+Each cached key is a `state()` store. On cache miss, tiers are tried in order
+(index 0 = hottest). Hits auto-promote to all faster tiers. Concurrent lookups
+for the same key share the same state instance (natural dedup).
 
 ## Signature
 
 ```ts
 function tieredStorage(
-	hot: CheckpointAdapter,
-	cold: CheckpointAdapter,
+	adapters: CheckpointAdapter[],
 	opts?: TieredStorageOptions,
 ): TieredStorageAdapter
 ```
@@ -16,32 +19,23 @@ function tieredStorage(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `hot` | `CheckpointAdapter` | Fast-access adapter (e.g., memoryAdapter, in-process cache). |
-| `cold` | `CheckpointAdapter` | Durable adapter (e.g., fileAdapter, sqliteAdapter). |
-| `opts` | `TieredStorageOptions` | Optional configuration. |
+| `adapters` | `CheckpointAdapter[]` | Ordered `CheckpointAdapter`s, hottest first. |
+| `opts` | `TieredStorageOptions` | Optional configuration (maxSize, eviction policy). |
 
 ## Returns
 
-`TieredStorageAdapter` — a CheckpointAdapter with `promote()` and `demote()` methods.
+`TieredStorageAdapter` — a reactive cache where each entry is a `WritableStore`.
 
 ## Basic Usage
 
 ```ts
-import { tieredStorage, memoryAdapter, lru } from 'callbag-recharge/utils';
-import { fileAdapter } from 'callbag-recharge/utils';
+import { tieredStorage, memoryAdapter } from 'callbag-recharge/utils';
+import { subscribe } from 'callbag-recharge/extra';
 
-const adapter = tieredStorage(
-  memoryAdapter(),
-  fileAdapter({ dir: ".cache" }),
-  { maxHotSize: 50, eviction: lru() },
-);
-adapter.save("key", { data: 42 }); // → hot tier
-adapter.load("key");               // → hot hit
+const storage = tieredStorage([memoryAdapter(), fileAdapter({ dir: ".cache" })], {
+    maxSize: 100,
+  });
+
+const store = storage.load("key");   // WritableStore<unknown | undefined>
+subscribe(store, v => console.log(v)); // reactive updates on cache changes
 ```
-
-## Options / Behavior Details
-
-- **Read path:** Hot first, fall back to cold. On cold hit, auto-promotes to hot (which may trigger eviction/demotion of another key).
-- **Write path:** Always writes to hot. If `maxHotSize` is set and hot tier exceeds limit, eviction policy selects keys to demote to cold.
-- **Eviction:** Uses `EvictionPolicy<string>` (default: LRU). Tracks access via `touch()` on reads, `insert()` on writes. Evicted keys are demoted to cold (fire-and-forget).
-- **Manual control:** `promote(id)` copies cold→hot, `demote(id)` copies hot→cold then clears hot.

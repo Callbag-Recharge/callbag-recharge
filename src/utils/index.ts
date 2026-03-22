@@ -32,6 +32,13 @@ export type {
 	StreamFactory,
 } from "./cancellableStream";
 export { cancellableStream, fromAbortable } from "./cancellableStream";
+// Cascading cache
+export type {
+	CacheTier,
+	CascadingCache,
+	CascadingCacheOptions,
+} from "./cascadingCache";
+export { cascadingCache } from "./cascadingCache";
 // Checkpoint
 export type {
 	CheckpointAdapter,
@@ -64,6 +71,8 @@ export type { DirtyTrackerOptions, DirtyTrackerResult } from "./dirtyTracker";
 export { dirtyTracker } from "./dirtyTracker";
 export type { EvictionPolicy } from "./eviction";
 export { fifo, lfu, lru, random, scored } from "./eviction";
+// Keyed async dedup
+export { keyedAsync } from "./keyedAsync";
 // Rate limiter
 export type {
 	RateLimiter,
@@ -81,6 +90,12 @@ export type {
 	StateMachineResult,
 } from "./stateMachine";
 export { stateMachine } from "./stateMachine";
+// Tiered storage
+export type {
+	TieredStorageAdapter,
+	TieredStorageOptions,
+} from "./tieredStorage";
+export { tieredStorage } from "./tieredStorage";
 // Timer
 export type {
 	CountdownOptions,

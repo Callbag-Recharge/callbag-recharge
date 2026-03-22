@@ -147,7 +147,7 @@ legend. The point is "look what you can build", not "look at our API".
 | # | App | What the user experiences |
 |---|-----|--------------------------|
 | H1 | **Markdown Editor** | Split-pane: CodeMirror left, live Markdown preview right. Toolbar with undo/redo, word count, cursor position, auto-save dot. Feels like a real editor. |
-| H2 | **AI Chat (WebLLM)** | Chat UI running a model in-browser via WebGPU (no API key). Tokens stream in real-time, cancel mid-response, retry, token usage meter. Feels like ChatGPT lite. |
+| H2 | **AI Chat (WebLLM)** | Chat UI running a model in-browser via WebGPU (no API key). Three workers: Web Worker (WebLLM inference, token streaming), SharedWorker (cross-tab memory — summarization + IndexedDB, via `workerBridge`), Service Worker (model weight caching). Tokens stream in real-time, cancel mid-response, retry, token usage meter, rolling conversation summary. Depends on 5g (worker bridge). Feels like ChatGPT lite. |
 | H3 | **Workflow Builder** | Code-first n8n. Left: CodeMirror editor with `pipeline()` code. Right: live DAG (Vue Flow). Press "Update" → code parses into a visual graph. Fire triggers, watch nodes animate, inspect logs, execution history persists to IndexedDB. Feels like a workflow tool. |
 
 **Build order:** H1 → H2 → H3 (each builds on confidence from the last; H3 may depend on 5b-1)
@@ -214,9 +214,9 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 5e-6 | `jobQueue` | `jobQueue<T>(name, processor, opts?)` — wraps a `topic` + `subscription(shared)` + `task` processing. Each message becomes a job with `taskState` (status, error, duration, runCount, result). `add(data, opts?)` publishes to the underlying topic. Concurrency control via `forEach`. The processor is just a `task` fn. Atomic claim + status update via `transaction` (5d-4). | M |
-| 5e-7 | Job events + monitoring | `on('completed' \| 'failed' \| 'stalled', fn)` — effect subscriptions on companion stores. Stall detection via configurable ack timeout + `sensor`-style polling. Aggregate companions: `active`, `completed`, `failed`, `delayed` counts. | S |
-| 5e-8 | Multi-queue workflows | `jobFlow(queues, wiring)` — chains job queues into a pipeline. Output of queue A publishes to queue B's topic. Uses `subPipeline` internally. Diagram export via `toMermaid`/`toD2`. | M |
+| 5e-6 | `jobQueue` | **Shipped.** `jobQueue<T>(name, processor, opts?)` — wraps a `topic` + `subscription(shared)` + per-job processing. Each message becomes a job with per-job `AbortController`. `add(data, opts?)` publishes to the underlying topic. Concurrency control via semaphore. Retry with configurable backoff, DLQ routing for terminal failures. | M |
+| 5e-7 | Job events + monitoring | **Shipped.** `on('completed' \| 'failed' \| 'stalled', fn)` — event subscriptions with unsubscribe. Stall detection via configurable ack timeout + periodic polling. `stalledJobAction`: `"none"` (event only), `"cancel"` (abort + fail), `"retry"` (abort + re-enqueue). Aggregate companion stores: `active`, `completed`, `failed`, `waiting` counts. | S |
+| 5e-8 | Multi-queue workflows | **Shipped.** `jobFlow(queues, edges, opts?)` — chains job queues via completion event wiring. Output of queue A publishes to queue B's topic. Optional transform per edge. Diagram export via `toMermaid()`/`toD2()`. Flow owns edges only; queue lifecycle managed by caller. | M |
 
 **Distribution story (Phase 7 dependency):**
 Once Redis/NATS adapters ship, topics gain cross-process capabilities with zero architecture
@@ -306,6 +306,42 @@ changes:
 | 7.5-3 | Positioning blog posts | Top 3 from blog-strategy §Market-Positioning: "Missing Middle" (#10), "Durable Reactive Streams" (#11), "Trust Bottleneck" (#12). | M |
 | 7.5-4 | npm publish prep | Keywords (reactive, state, signals, callbag, orchestration, agentic, durable), description, package.json metadata audit. | S |
 | 7.5-5 | Community launch | HN Show, Reddit r/javascript + r/typescript + r/AI_Agents, dev.to cross-post. | S |
+
+### Phase 5g: Worker Bridge — Reactive Cross-Thread Communication
+
+> **Goal:** Abstract Web Workers, SharedWorkers, Service Workers, and BroadcastChannel behind
+> a unified reactive store bridge. Stores exposed from one thread appear as reactive `Store<T>`
+> on the other — no `postMessage`, no message IDs, no switch statements.
+>
+> **Key insight:** The worker channel is inherently a stream, yet the dominant abstraction
+> (Comlink/RPC) models it as isolated request/response. Callbag stores embrace the streaming
+> nature. Only settled values cross the wire; DIRTY/RESOLVED stays local to each side's graph.
+>
+> **Depends on:** Core (shipped), utils/withStatus (shipped), Phase 5f lifecycle signals (shipped).
+>
+> **Design:** [SESSION-worker-bridge-h2-design.md](../src/archive/docs/SESSION-worker-bridge-h2-design.md)
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 5g-1 | `WorkerTransport` | Internal transport abstraction — auto-detects Worker, SharedWorker, ServiceWorker, BroadcastChannel. Normalizes `post()`/`listen()`/`terminate()`. ~10 lines per transport adapter. | S |
+| 5g-2 | `workerBridge()` + `workerSelf()` | Main-thread and worker-side APIs. `expose` sends store values across; `import` creates proxy `Store<T>` for received values. Batch coalescing via `batch()` — multiple rapid `set()` calls → one `postMessage`. TypeScript inference from `expose`/`import` declarations. | M |
+| 5g-3 | Lifecycle signals across bridge | PAUSE/RESET/RESUME/TEARDOWN serialize across the wire and propagate into the remote graph. `destroy()` sends TEARDOWN + calls `worker.terminate()`. | S |
+| 5g-4 | `withStatus()` + transfer support | Bridge wraps with `withStatus()` for connection lifecycle (connecting → ready → error). `transfer` option per store for zero-copy `ArrayBuffer` passing. | S |
+| 5g-5 | Tests | Wire protocol, multi-store sync, lifecycle signal propagation, batch coalescing, transfer semantics, auto-detect for all 4 transport types. | S |
+
+**Wire protocol:**
+```
+{ t: 'v', s: storeName, d: value }     — value update
+{ t: 's', s: storeName, sig: signal }  — lifecycle signal
+{ t: 'r', stores: string[] }           — worker ready (declares exported stores)
+{ t: 'i', stores: Record<string,any> } — main sends initial values
+```
+
+**H2 dependency:** Worker bridge enables H2 AI Chat's SharedWorker memory manager.
+Cross-tab shared summarization + IndexedDB writes without `postMessage` plumbing.
+
+**Phase 8c precursor:** `WorkerTransport` generalizes to any bidirectional message channel.
+Redis, NATS, Unix socket adapters can reuse the same transport interface.
 
 ### Phase 8: Persistence + Distribution
 

@@ -45,6 +45,10 @@ const REGISTRY = {
 	teardown: "src/core/protocol.ts",
 	subscribe: "src/core/subscribe.ts",
 
+	// Raw — cross-cutting callbag bridges
+	firstValueFrom: "src/raw/firstValueFrom.ts",
+	fromTimer: "src/raw/fromTimer.ts",
+
 	// Extras — operators
 	map: "src/extra/map.ts",
 	filter: "src/extra/filter.ts",
@@ -119,7 +123,10 @@ const REGISTRY = {
 	route: "src/extra/route.ts",
 
 	// Utils
+	cascadingCache: "src/utils/cascadingCache.ts",
+	keyedAsync: "src/utils/keyedAsync.ts",
 	retry: "src/utils/retry.ts",
+	tieredStorage: "src/utils/tieredStorage.ts",
 	track: "src/utils/track.ts",
 	checkpoint: "src/utils/checkpoint.ts",
 	tokenTracker: "src/utils/tokenTracker.ts",
@@ -158,6 +165,8 @@ const REGISTRY = {
 	topic: "src/messaging/topic.ts",
 	subscription: "src/messaging/subscription.ts",
 	repeatPublish: "src/messaging/repeatPublish.ts",
+	jobQueue: "src/messaging/jobQueue.ts",
+	jobFlow: "src/messaging/jobFlow.ts",
 
 	// Patterns
 	textBuffer: "src/patterns/textBuffer/index.ts",

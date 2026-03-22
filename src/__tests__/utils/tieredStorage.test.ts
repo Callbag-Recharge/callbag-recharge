@@ -9,10 +9,10 @@ describe("tieredStorage", () => {
 	it("writes to hot, reads from hot", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+		const storage = tieredStorage([hot, cold]);
 
-		adapter.save("key", 42);
-		expect(adapter.load("key")).toBe(42);
+		storage.save("key", 42);
+		expect(storage.load("key").get()).toBe(42);
 	});
 
 	it("falls back to cold on hot miss", () => {
@@ -20,16 +20,16 @@ describe("tieredStorage", () => {
 		const cold = memoryAdapter();
 		cold.save("key", "from-cold");
 
-		const adapter = tieredStorage(hot, cold);
-		expect(adapter.load("key")).toBe("from-cold");
+		const storage = tieredStorage([hot, cold]);
+		expect(storage.load("key").get()).toBe("from-cold");
 	});
 
 	it("returns undefined when both miss", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+		const storage = tieredStorage([hot, cold]);
 
-		expect(adapter.load("missing")).toBeUndefined();
+		expect(storage.load("missing").get()).toBeUndefined();
 	});
 
 	// --- Auto-promote on cold hit ---
@@ -39,163 +39,198 @@ describe("tieredStorage", () => {
 		const cold = memoryAdapter();
 		cold.save("key", "value");
 
-		const adapter = tieredStorage(hot, cold);
-		adapter.load("key"); // triggers auto-promote
+		const storage = tieredStorage([hot, cold]);
+		storage.load("key"); // triggers auto-promote
 
 		expect(hot.load("key")).toBe("value");
 	});
 
-	// --- Clear ---
+	// --- Delete ---
 
-	it("clear removes from both tiers", () => {
+	it("delete removes from both tiers", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+		const storage = tieredStorage([hot, cold]);
 
-		adapter.save("key", "value");
+		storage.save("key", "value");
 		cold.save("key", "cold-value"); // also in cold
 
-		adapter.clear("key");
+		storage.delete("key");
 		expect(hot.load("key")).toBeUndefined();
 		expect(cold.load("key")).toBeUndefined();
 	});
 
-	// --- Eviction with maxHotSize ---
+	// --- Eviction with maxSize ---
 
-	it("evicts from hot when maxHotSize exceeded (LRU default)", () => {
+	it("evicts from cache when maxSize exceeded (LRU default)", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold, { maxHotSize: 2 });
+		const storage = tieredStorage([hot, cold], { maxSize: 2 });
 
-		adapter.save("a", 1);
-		adapter.save("b", 2);
-		adapter.save("c", 3); // should evict "a" (LRU)
+		storage.save("a", 1);
+		storage.save("b", 2);
+		storage.save("c", 3); // should evict "a" (LRU)
 
-		// "a" demoted to cold
+		// "a" demoted to cold (last tier with save)
 		expect(cold.load("a")).toBe(1);
-		// "b" and "c" still in hot
-		expect(hot.load("b")).toBe(2);
-		expect(hot.load("c")).toBe(3);
+		// "b" and "c" still cached
+		expect(storage.has("b")).toBe(true);
+		expect(storage.has("c")).toBe(true);
 	});
 
 	it("LRU eviction respects access order", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold, { maxHotSize: 2, eviction: lru() });
+		const storage = tieredStorage([hot, cold], {
+			maxSize: 2,
+			eviction: lru(),
+		});
 
-		adapter.save("a", 1);
-		adapter.save("b", 2);
-		adapter.load("a"); // touch "a", making "b" the LRU
-		adapter.save("c", 3); // should evict "b" (least recently used)
+		storage.save("a", 1);
+		storage.save("b", 2);
+		storage.load("a"); // touch "a", making "b" the LRU
+		storage.save("c", 3); // should evict "b" (least recently used)
 
 		expect(cold.load("b")).toBe(2);
-		expect(hot.load("a")).toBe(1);
-		expect(hot.load("c")).toBe(3);
+		expect(storage.has("a")).toBe(true);
+		expect(storage.has("c")).toBe(true);
 	});
 
 	it("uses custom eviction policy (FIFO)", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold, { maxHotSize: 2, eviction: fifo() });
+		const storage = tieredStorage([hot, cold], {
+			maxSize: 2,
+			eviction: fifo(),
+		});
 
-		adapter.save("a", 1);
-		adapter.save("b", 2);
-		adapter.load("a"); // touch doesn't matter for FIFO
-		adapter.save("c", 3); // should evict "a" (first in)
+		storage.save("a", 1);
+		storage.save("b", 2);
+		storage.load("a"); // touch doesn't matter for FIFO
+		storage.save("c", 3); // should evict "a" (first in)
 
 		expect(cold.load("a")).toBe(1);
-		expect(hot.load("b")).toBe(2);
-		expect(hot.load("c")).toBe(3);
+		expect(storage.has("b")).toBe(true);
+		expect(storage.has("c")).toBe(true);
 	});
 
-	it("auto-promote triggers eviction if hot full", () => {
+	it("auto-promote triggers eviction if cache full", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold, { maxHotSize: 2 });
+		const storage = tieredStorage([hot, cold], { maxSize: 2 });
 
-		adapter.save("a", 1);
-		adapter.save("b", 2);
+		storage.save("a", 1);
+		storage.save("b", 2);
 		// Now load from cold — should promote and evict "a"
 		cold.save("c", 3);
-		adapter.load("c"); // promote "c", evict "a"
+		storage.load("c"); // promote "c", evict "a"
 
-		expect(hot.load("c")).toBe(3);
-		// "a" should have been demoted back to cold
+		expect(storage.load("c").get()).toBe(3);
+		// "a" should have been demoted to cold
 		expect(cold.load("a")).toBe(1);
 	});
 
-	// --- Manual promote/demote ---
+	// --- Singleton store behavior ---
 
-	it("promote copies cold to hot", () => {
-		const hot = memoryAdapter();
-		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
-
-		cold.save("key", "value");
-		adapter.promote("key");
-		expect(hot.load("key")).toBe("value");
+	it("load returns same store instance for same key", () => {
+		const storage = tieredStorage([memoryAdapter()]);
+		storage.save("k", 1);
+		const s1 = storage.load("k");
+		const s2 = storage.load("k");
+		expect(s1).toBe(s2);
 	});
 
-	it("promote is no-op when key not in cold", () => {
-		const hot = memoryAdapter();
-		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+	it("save updates existing store in-place", () => {
+		const storage = tieredStorage([memoryAdapter()]);
+		storage.save("k", 1);
+		const store = storage.load("k");
+		expect(store.get()).toBe(1);
 
-		adapter.promote("missing"); // should not throw
-		expect(hot.load("missing")).toBeUndefined();
+		storage.save("k", 2);
+		expect(store.get()).toBe(2); // same instance, updated in-place
 	});
 
-	it("demote copies hot to cold and clears hot", () => {
+	it("invalidate re-cascades into same store", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+		cold.save("k", "original");
 
-		adapter.save("key", "value");
-		adapter.demote("key");
+		const storage = tieredStorage([hot, cold]);
+		const store = storage.load("k");
+		expect(store.get()).toBe("original");
 
-		expect(hot.load("key")).toBeUndefined();
-		expect(cold.load("key")).toBe("value");
+		// Simulate external update to cold
+		cold.save("k", "updated");
+		hot.clear("k");
+		storage.invalidate("k");
+
+		expect(store.get()).toBe("updated");
 	});
 
-	it("demote is safe when key not in hot", () => {
-		const hot = memoryAdapter();
-		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+	// --- 3-tier cascade ---
 
-		adapter.demote("missing"); // should not throw
+	it("supports 3+ tiers", () => {
+		const t0 = memoryAdapter();
+		const t1 = memoryAdapter();
+		const t2 = memoryAdapter();
+		t2.save("k", "deep");
+
+		const storage = tieredStorage([t0, t1, t2]);
+		const store = storage.load("k");
+
+		expect(store.get()).toBe("deep");
+		// Auto-promoted to both faster tiers
+		expect(t0.load("k")).toBe("deep");
+		expect(t1.load("k")).toBe("deep");
 	});
 
-	// --- No maxHotSize (unlimited) ---
+	// --- No maxSize (unlimited) ---
 
-	it("no eviction without maxHotSize", () => {
+	it("no eviction without maxSize", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold);
+		const storage = tieredStorage([hot, cold]);
 
 		for (let i = 0; i < 100; i++) {
-			adapter.save(`key-${i}`, i);
+			storage.save(`key-${i}`, i);
 		}
 
-		// All should be in hot, nothing demoted
+		// All should be cached
 		for (let i = 0; i < 100; i++) {
-			expect(hot.load(`key-${i}`)).toBe(i);
-			expect(cold.load(`key-${i}`)).toBeUndefined();
+			expect(storage.load(`key-${i}`).get()).toBe(i);
 		}
 	});
 
-	// --- Edge: clear updates eviction policy ---
+	// --- Edge: delete updates eviction tracking ---
 
-	it("clear removes from eviction tracking", () => {
+	it("delete removes from eviction tracking", () => {
 		const hot = memoryAdapter();
 		const cold = memoryAdapter();
-		const adapter = tieredStorage(hot, cold, { maxHotSize: 2 });
+		const storage = tieredStorage([hot, cold], { maxSize: 2 });
 
-		adapter.save("a", 1);
-		adapter.save("b", 2);
-		adapter.clear("a"); // removes "a" from tracking
+		storage.save("a", 1);
+		storage.save("b", 2);
+		storage.delete("a"); // removes "a" from tracking
 
-		adapter.save("c", 3); // should NOT evict "b" since "a" was cleared
-		expect(hot.load("b")).toBe(2);
-		expect(hot.load("c")).toBe(3);
+		storage.save("c", 3); // should NOT evict "b" since "a" was deleted
+		expect(storage.has("b")).toBe(true);
+		expect(storage.has("c")).toBe(true);
+	});
+
+	// --- has() and size ---
+
+	it("has() and size track entries", () => {
+		const storage = tieredStorage([memoryAdapter()]);
+
+		expect(storage.has("k")).toBe(false);
+		expect(storage.size).toBe(0);
+
+		storage.save("k", 1);
+		expect(storage.has("k")).toBe(true);
+		expect(storage.size).toBe(1);
+
+		storage.delete("k");
+		expect(storage.has("k")).toBe(false);
+		expect(storage.size).toBe(0);
 	});
 });

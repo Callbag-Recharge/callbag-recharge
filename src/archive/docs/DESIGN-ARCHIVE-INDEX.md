@@ -328,7 +328,7 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session repo-audit-design-principles (March 20, 2026)
+**Archive Status:** Complete through Session worker-bridge-h2-design (March 22, 2026)
 
 ### Gemini Marketing Research (March 21) — Market Positioning & Growth Strategy
 **Topic:** Competitive landscape analysis, agentic AI trends, streaming durability gap, and developer marketing strategy for callbag-recharge
@@ -351,6 +351,21 @@ External deep research (via Gemini Voyager) covering: the 2025–2026 agentic en
 **Growth strategy:** "Reuse flywheel" via 90-9-1 community principle. Utility-first content (architecture deep-dives, durable stream blueprints). Compat wrappers as low-friction Trojan horse. Target niches: local-first AI, edge compute, TypeScript agentic frameworks.
 
 **Source:** `callbag-marketing-research-20260321-161450.md` (Gemini Voyager deep research export, ~1144 lines of iterative analysis across 100+ web sources)
+
+### Session worker-bridge-h2-design (March 22) — Worker Bridge + H2 AI Chat Design
+**Topic:** Reactive cross-thread communication — abstracting Web Workers, SharedWorkers, Service Workers behind callbag stores. H2 hero app architecture with three workers.
+
+Research into 8 major pain points with browser worker APIs (no streaming, no cancellation, no shared state, serialization overhead, lifecycle leaks), existing library landscape (Comlink, threads.js, observable-webworker), and WebLLM's built-in worker support.
+
+**Key insights:**
+- **The worker channel IS a stream** — Comlink/RPC fights this by modeling it as request/response. callbag stores embrace the streaming nature.
+- **Meet libraries at their boundary** — WebLLM already abstracts its worker communication. Don't re-wrap it. Bridge at the `AsyncIterable` boundary. Our bridge is for workers where WE own the communication (memory, embeddings, data processing).
+- **Three workers, three roles** — Web Worker for compute (WebGPU/inference), SharedWorker for shared state (cross-tab memory + IndexedDB), Service Worker for caching (model weights).
+- **Only settled values cross the wire** — DIRTY/RESOLVED stays local. `batch()` coalesces rapid `set()` calls into one `postMessage`.
+
+**Rejected:** Wrapping WebLLM's worker in our bridge (they already abstract it); SharedArrayBuffer as default (breaks COOP/COEP); sending DIRTY/RESOLVED across wire (doubles traffic); Comlink-style RPC (fights streaming nature).
+
+**Outcome:** Phase 5g (Worker Bridge) added to roadmap. H2 AI Chat updated with three-worker architecture. `workerBridge()`/`workerSelf()` API designed with `WorkerTransport` abstraction for all 4 transport types.
 
 ---
 

@@ -255,3 +255,132 @@ export interface RepeatHandle {
 	/** Whether the repeat is still active. */
 	readonly active: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Job Queue (5e-6)
+// ---------------------------------------------------------------------------
+
+/** Status of an individual job. */
+export type JobStatus = "waiting" | "active" | "completed" | "failed" | "stalled";
+
+/** Information about a job, exposed to event handlers and externally. */
+export interface JobInfo<T, R = unknown> {
+	/** Sequence number from the underlying topic. */
+	seq: number;
+	/** Original job data. */
+	data: T;
+	/** Job status. */
+	status: JobStatus;
+	/** Result value (if completed). */
+	result?: R;
+	/** Error (if failed). */
+	error?: unknown;
+	/** Duration in ms (if completed or failed). */
+	duration?: number;
+	/** Number of processing attempts. */
+	attempts: number;
+}
+
+/** Events emitted by the job queue. */
+export type JobEvent = "completed" | "failed" | "stalled";
+
+/** What to do when a job stalls (exceeds ackTimeout). */
+export type StallAction = "none" | "cancel" | "retry";
+
+/** Options for creating a job queue. */
+export interface JobQueueOptions<T> {
+	/** Maximum concurrent jobs. Default: 1. */
+	concurrency?: number;
+	/** Ack timeout in ms. Jobs exceeding this are marked stalled. Default: 30_000. */
+	ackTimeout?: number;
+	/** Stall check interval in ms. Default: 5_000. */
+	stallInterval?: number;
+	/**
+	 * Action to take when a job stalls. Default: `"none"` (event only).
+	 * - `"none"` — emit "stalled" event, no automatic recovery.
+	 * - `"cancel"` — abort the job's signal and mark as failed.
+	 * - `"retry"` — abort and re-enqueue for processing (respects retry limits).
+	 */
+	stalledJobAction?: StallAction;
+	/** Retry configuration for failed jobs. */
+	retry?: {
+		/** Max retry attempts. Default: 3. */
+		maxRetries?: number;
+		/** Backoff strategy. Default: exponential(). */
+		backoff?: BackoffStrategy;
+	};
+	/** Dead letter topic for terminally failed jobs. */
+	deadLetterTopic?: Topic<T>;
+	/** Topic options passed to the underlying topic. */
+	topicOptions?: Omit<TopicOptions<T>, "namespace">;
+}
+
+/** A job queue built on topic + subscription + task processing. */
+export interface JobQueue<T, R = void> {
+	/** Queue name. */
+	readonly name: string;
+
+	/** Add a job to the queue. Returns the sequence number. */
+	add(data: T, opts?: PublishOptions): number;
+
+	// --- Companion stores (5e-7) ---
+
+	/** Reactive count of currently processing jobs. */
+	readonly active: Store<number>;
+	/** Reactive count of completed jobs. */
+	readonly completed: Store<number>;
+	/** Reactive count of failed jobs. */
+	readonly failed: Store<number>;
+	/** Reactive count of delayed/waiting jobs (backlog). */
+	readonly waiting: Store<number>;
+
+	// --- Events (5e-7) ---
+
+	/** Subscribe to job events. Returns an unsubscribe function. */
+	on(event: JobEvent, fn: (job: JobInfo<T, R>) => void): () => void;
+
+	// --- Lifecycle ---
+
+	/** Pause job processing. New jobs can still be added. */
+	pause(): void;
+	/** Resume job processing. */
+	resume(): void;
+	/** Whether the queue is paused. */
+	readonly isPaused: boolean;
+	/** Destroy the queue and all internal resources. */
+	destroy(): void;
+}
+
+// ---------------------------------------------------------------------------
+// Job Flow (5e-8)
+// ---------------------------------------------------------------------------
+
+/** A single edge in a job flow wiring. */
+export interface JobFlowEdge<T = any, R = any, T2 = any> {
+	/** Source queue name. */
+	from: string;
+	/** Destination queue name. */
+	to: string;
+	/** Optional transform from source result to destination job data. */
+	transform?: (result: R) => T2;
+}
+
+/** Options for creating a job flow. */
+export interface JobFlowOptions {
+	/** Debug name. */
+	name?: string;
+}
+
+/** A multi-queue workflow that chains job queues via completion events. */
+export interface JobFlow {
+	/** Flow name. */
+	readonly name: string;
+	/** Named queues in the flow. */
+	readonly queues: Record<string, JobQueue<any, any>>;
+	/** Export the flow as a Mermaid diagram. */
+	toMermaid(): string;
+	/** Export the flow as a D2 diagram. */
+	toD2(): string;
+	/** Destroy all queues and wiring. */
+	destroy(): void;
+}

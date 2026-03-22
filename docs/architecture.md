@@ -38,6 +38,10 @@
 
 15. **Control flows through the graph, not around it.** Lifecycle events (reset, cancel, pause, resume) must propagate as TYPE 3 STATE signals through the reactive graph — never as imperative method calls that bypass the topology. When control bypasses the graph: new node types silently escape supervision, composition breaks (child pipelines miss parent resets), and the signal model has a hole where control and data diverge. AbortSignal bridges STATE signals to imperative async (fetch, setTimeout) but is never the primary control mechanism. **Litmus test:** if adding a new orchestrate node requires registering it in a flat list for lifecycle management, the design is wrong — the graph should carry the signal.
 
+16. **No raw `new Promise` — use callbag or library primitives.** Business logic must never create `Promise` objects directly. Async coordination (delays, waiting for state changes, bridging to `await`) must go through callbag-based primitives: `fromTimer` for delays, `firstValueFrom` for awaiting store changes, `producer` for wrapping async sources. The ONE acceptable `new Promise` lives inside `firstValueFrom` (`raw/`) — the canonical callbag → Promise bridge. Everything else composes on top.
+
+17. **Push/pull via callbag, never poll.** When code needs to wait for a condition (e.g. "wait until unpaused"), use a reactive store + `firstValueFrom` so the waiter is notified by push. Do not use `setInterval`/`setTimeout` polling loops to check conditions. Polling is acceptable only at true system boundaries (e.g. checking a pull-based subscription for new messages where no push notification exists).
+
 ---
 
 ## 2. Folder & Dependency Hierarchy
@@ -50,6 +54,7 @@
 ```
 src/
 ├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types + bitmask
+├── raw/             ← raw callbag ops/bridges (firstValueFrom, fromTimer) — cross-cutting, importable from any folder
 ├── extra/           ← operators, sources, sinks (tier 1 + tier 2)
 ├── utils/           ← resilience, async, tracking, strategies (withStatus, withBreaker, retry, backoff, …)
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
@@ -80,18 +85,21 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 
 `data/` is a **cross-cutting layer** — importable from any tier (core excluded).
 
+`raw/` is a **cross-cutting layer** — importable from any tier. Contains raw callbag operations and bridges (e.g. `firstValueFrom`, `fromTimer`). `raw/` itself imports only from `core/`.
+
 ### Strict import rules (the canonical reference)
 
 - `core/` never imports from any other folder
-- `extra/` imports from `core/` only
-- `utils/` imports from `core/` and `extra/` only
-- `data/` imports from `core/` and `utils/` only
-- `orchestrate/` imports from `core/`, `extra/`, `utils/`, and `data/`
-- `messaging/` imports from `core/`, `extra/`, `utils/`, `data/`, and `orchestrate/`
-- `memory/` imports from `core/`, `utils/`, and `data/`
-- `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
-- `adapters/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
-- `compat/` imports from `core/`, `extra/`, `orchestrate/`, and `memory/` only
+- `raw/` imports from `core/` only — cross-cutting, importable from any folder
+- `extra/` imports from `core/` and `raw/` only
+- `utils/` imports from `core/`, `raw/`, and `extra/` only
+- `data/` imports from `core/`, `raw/`, and `utils/` only
+- `orchestrate/` imports from `core/`, `raw/`, `extra/`, `utils/`, and `data/`
+- `messaging/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, and `orchestrate/`
+- `memory/` imports from `core/`, `raw/`, `utils/`, and `data/`
+- `patterns/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
+- `adapters/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
+- `compat/` imports from `core/`, `raw/`, `extra/`, `orchestrate/`, and `memory/` only
 - **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 

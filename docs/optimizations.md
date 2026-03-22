@@ -362,6 +362,60 @@ Extracted an internal `createTicker(tickMs, onTick)` helper in `utils/timer.ts` 
 
 Both `countdown` and `stopwatch` now delegate all timer mechanics to their `Ticker` instance. Public interfaces unchanged.
 
+### 25. `cascadingCache` — singleton reactive cache with N-tier cascading
+
+**Problem:** `tieredStorage` had complex sync/async branching (`instanceof Promise` checks at every tier boundary), a probe/double-load tradeoff for async dedup (see `keyedAsync`), and returned `T | Promise<T>` — forcing callers to handle both cases. Concurrent lookups for the same key could trigger duplicate async operations.
+
+**Solution:** `cascadingCache(tiers[], opts?)` — a reactive cache where each entry is a `state()` store. On miss, tiers are tried in order (index 0 = hottest). Hits auto-promote to all faster tiers. Concurrent lookups share the same state instance (natural dedup — no `keyedAsync` needed).
+
+```ts
+import { cascadingCache } from 'callbag-recharge/utils';
+import { subscribe } from 'callbag-recharge/extra';
+
+const cache = cascadingCache([
+  { load: k => memory.get(k), save: (k, v) => memory.set(k, v) },
+  { load: k => fetch(`/api/${k}`).then(r => r.json()) },
+]);
+
+const user = cache.load("user:42"); // WritableStore<User | undefined>
+user.get();                          // value (sync hit) or undefined (async pending)
+subscribe(user, v => console.log(v)); // reactive — notified when value arrives
+```
+
+**Key behaviors:**
+
+- **`load(key)`** — Returns `WritableStore<V | undefined>`. Singleton: same key = same store instance. On cache miss, cascades tiers synchronously/asynchronously. Sync tier hits set the store before `load()` returns. Async tier hits set the store in `.then()` — subscribers are notified.
+
+- **`save(key, value)`** — Writes to tier 0 (hottest), updates the cache store in-place (emits DIRTY + DATA like normal `state.set()`). Subscribers see the update.
+
+- **`invalidate(key)`** — Re-cascades tiers into the **same** state instance. Existing subscribers see the refreshed value. No reference breakage.
+
+- **`delete(key)`** — Clears from all tiers, removes cache entry.
+
+- **Auto-promote** — When tier N hits, the value is fire-and-forget written to tiers 0…N-1. This also updates the cache store in-place.
+
+- **Eviction** — When `maxSize` is set, evicted entries are demoted to the lowest tier with `save` before removal.
+
+- **Error tolerance** — Sync tier throws and async tier rejections skip to the next tier silently.
+
+**Why this eliminates the sync/async branching:**
+
+The old `tieredStorage.load()` returned `T | Promise<T>`, requiring `instanceof Promise` checks at every boundary. `cascadingCache.load()` always returns `WritableStore<V | undefined>`. The state store absorbs the sync/async difference internally:
+- Sync tier → `store.set(value)` called synchronously → `store.get()` has value immediately
+- Async tier → `store.set(value)` called in `.then()` → subscribers notified on resolution
+
+No probe, no double-load, no `instanceof Promise` branching at the API level.
+
+**Why this eliminates the dedup problem:**
+
+`keyedAsync` solved dedup by caching in-flight promises in a Map. `cascadingCache` solves it structurally: the Map holds `state()` stores (not promises). Concurrent `load("k")` calls return the **same store instance** — the cascade runs once, and all callers share the result. No separate dedup layer needed.
+
+**`tieredStorage` refactored:**
+
+`tieredStorage(adapters[], opts?)` now wraps `cascadingCache` — converting `CheckpointAdapter[]` to `CacheTier[]`. The 250-line implementation with manual sync/async branching reduced to ~15 lines of delegation. `tieredStorage` no longer extends `CheckpointAdapter` (they're different abstractions — see design notes). Supports N tiers (not just hot + cold).
+
+**`keyedAsync`** remains in utils/ as a standalone utility for general-purpose async call dedup outside the cache context.
+
 ---
 
 ## Potential optimizations
@@ -461,6 +515,8 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | SINGLE_DEP for dynamicDerived | Built-in | 50% fewer dispatches for single-dep dynamic deriveds | Conditional-dep nodes with one active dep |
 | `taskState` AbortController cancellation | Built-in | Proactive abort of in-flight tasks on reset/restart/destroy | Pipelines with long-running async tasks |
 | Shared timer runtime (`createTicker`) | Built-in | Deduplicated timer lifecycle code; lower maintenance risk | Timer utils |
+| `keyedAsync` (concurrent async dedup) | Built-in (utils) | Coalesces concurrent async calls per key | General-purpose async call dedup |
+| `cascadingCache` (singleton reactive cache) | Built-in (utils) | N-tier cascading, singleton state stores, natural dedup, no sync/async branching | tieredStorage, multi-tier caches |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
 
 | ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |
