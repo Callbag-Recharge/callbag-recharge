@@ -24,6 +24,7 @@ export { first } from "./first";
 export { flat } from "./flat";
 // Sinks
 export { forEach } from "./forEach";
+export { fromAny } from "./fromAny";
 export { fromAsyncIter } from "./fromAsyncIter";
 export type { FromCronOptions } from "./fromCron";
 export { fromCron } from "./fromCron";
@@ -42,6 +43,8 @@ export { never } from "./never";
 export { of } from "./of";
 export { pairwise } from "./pairwise";
 export { partition } from "./partition";
+export type { PausableStore } from "./pausable";
+export { pausable } from "./pausable";
 // Piping
 export { pipeRaw, SKIP } from "./pipeRaw";
 export { race } from "./race";

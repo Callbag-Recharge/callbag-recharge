@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { batchWriter } from "../../utils/batchWriter";
 
 // ---------------------------------------------------------------------------
@@ -156,12 +157,7 @@ describe("batchWriter", () => {
 			onFlush: () => {},
 		});
 
-		const sizes: number[] = [];
-		let talkback: any;
-		w.size.source(0, (t: number, d: any) => {
-			if (t === 0) talkback = d;
-			if (t === 1) sizes.push(d);
-		});
+		const obs = Inspector.observe(w.size);
 
 		w.add(1);
 		w.add(2);
@@ -169,9 +165,9 @@ describe("batchWriter", () => {
 		w.flush();
 
 		// 3 adds + flush resets to 0 (initial value not emitted on subscribe)
-		expect(sizes).toEqual([1, 2, 3, 0]);
+		expect(obs.values).toEqual([1, 2, 3, 0]);
 
-		if (talkback) talkback(2);
+		obs.dispose();
 	});
 
 	it("clears maxWaitMs timer when flushed by size", () => {

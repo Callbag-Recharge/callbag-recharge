@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { END, START } from "../../core/protocol";
 import { buffer } from "../../extra/buffer";
 import { empty } from "../../extra/empty";
 import { fromEvent } from "../../extra/fromEvent";
@@ -59,29 +58,21 @@ describe("fromIter", () => {
 
 	it("multiple subscribers each get full sequence", () => {
 		const s = fromIter([10, 20]);
-		const vals1: number[] = [];
-		const _vals2: number[] = [];
-		subscribe(s, (v) => vals1.push(v as number));
+		const obs1 = Inspector.observe(s);
 
 		// Second subscriber after first completed — should get END immediately
 		// because producer completed
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(vals1).toEqual([10, 20]);
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(s);
+		expect(obs1.values).toEqual([10, 20]);
+		expect(obs2.ended).toBe(true);
 	});
 
 	it("late subscriber after completion gets END immediately", () => {
 		const s = fromIter([1]);
 		subscribe(s, () => {}); // triggers and completes
 
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(s);
+		expect(obs.ended).toBe(true);
 	});
 });
 
@@ -138,11 +129,8 @@ describe("fromPromise", () => {
 		expect(vals1).toEqual([99]);
 
 		// Second subscriber after completion → END immediately
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(s);
+		expect(obs2.ended).toBe(true);
 	});
 
 	it("already-resolved promise → still emits (microtask)", async () => {

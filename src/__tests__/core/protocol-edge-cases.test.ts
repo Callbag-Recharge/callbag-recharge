@@ -108,24 +108,22 @@ describe("type 3 STATE protocol", () => {
 	it("type 3 signal forwarded through operator correctly", () => {
 		const s = state(0);
 
-		const signals: unknown[] = [];
 		const mapped = pipe(
 			s,
 			map((x: number) => x * 2),
 		);
 
 		// Observe type 3 signals on the mapped store
-		mapped.source(START, (type: number, data: unknown) => {
-			if (type === START) return;
-			if (type === STATE) signals.push(data);
-		});
+		const obs = Inspector.observe(mapped);
 
 		// Use batch() so DIRTY is still dispatched (Skip DIRTY only
 		// applies to the unbatched path for single-dep subscribers)
 		batch(() => s.set(1));
 
 		// Should have received DIRTY signal
-		expect(signals).toContain(DIRTY);
+		expect(obs.signals).toContain(DIRTY);
+
+		obs.dispose();
 	});
 
 	it("custom operator emitting DIRTY manually → downstream reacts", () => {
@@ -195,26 +193,22 @@ describe("type 3 STATE protocol", () => {
 describe("batch() interaction", () => {
 	it("batch() defers emissions but DIRTY flows immediately", () => {
 		const s = state(0);
-		const signals: unknown[] = [];
-		const values: number[] = [];
 
-		// Raw observation to see type 3
-		s.source(START, (type: number, data: unknown) => {
-			if (type === START) return;
-			if (type === STATE) signals.push(data);
-			if (type === DATA) values.push(data as number);
-		});
+		// Observe via Inspector to see type 3 signals and DATA
+		const obs = Inspector.observe(s);
 
 		batch(() => {
 			s.set(1);
 			// DIRTY should have been sent immediately
-			expect(signals).toContain(DIRTY);
+			expect(obs.signals).toContain(DIRTY);
 			// DATA should be deferred
-			expect(values).toEqual([]);
+			expect(obs.values).toEqual([]);
 		});
 
 		// After batch, DATA should be delivered
-		expect(values).toEqual([1]);
+		expect(obs.values).toEqual([1]);
+
+		obs.dispose();
 	});
 
 	it("nested batch() → only outermost flush triggers emissions", () => {
@@ -499,17 +493,14 @@ describe("connection deferral", () => {
 // ---------------------------------------------------------------------------
 
 describe("external interop", () => {
+	// Raw callbag sink — tests protocol interop, not Inspector
 	it("callbag-recharge source consumed by raw callbag sink", () => {
 		const s = state(0);
-		const values: number[] = [];
-		let talkback: any;
 
-		// Raw callbag sink
+		const values: number[] = [];
+		let talkback: (t: number) => void;
 		s.source(START, (type: number, data: any) => {
-			if (type === START) {
-				talkback = data;
-				return;
-			}
+			if (type === START) talkback = data;
 			if (type === DATA) values.push(data);
 		});
 
@@ -518,8 +509,8 @@ describe("external interop", () => {
 
 		expect(values).toEqual([1, 2]);
 
-		// Unsubscribe via talkback
-		talkback(END);
+		// Unsubscribe via raw talkback
+		talkback!(END);
 	});
 
 	it("raw callbag source consumed by callbag-recharge subscribe", () => {

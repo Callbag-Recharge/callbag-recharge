@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { constant } from "../../utils/backoff";
 import { connectionHealth } from "../../utils/connectionHealth";
 
@@ -238,17 +239,12 @@ describe("connectionHealth", () => {
 
 	it("status is connecting during connect attempt", async () => {
 		vi.useFakeTimers();
-		const statusLog: string[] = [];
 		let resolveConnect!: () => void;
 
 		const h = connectionHealth({ heartbeatMs: 10_000 });
 
 		// Subscribe to status changes
-		let talkback: any;
-		h.status.source(0, (t: number, d: any) => {
-			if (t === 0) talkback = d;
-			if (t === 1) statusLog.push(d);
-		});
+		const obs = Inspector.observe(h.status);
 
 		h.start({
 			heartbeat: async () => {},
@@ -261,13 +257,13 @@ describe("connectionHealth", () => {
 
 		// Immediately after start, status should be connecting
 		await vi.advanceTimersByTimeAsync(0);
-		expect(statusLog).toContain("connecting");
+		expect(obs.values).toContain("connecting");
 
 		resolveConnect();
 		await vi.advanceTimersByTimeAsync(0);
-		expect(statusLog).toContain("connected");
+		expect(obs.values).toContain("connected");
 
-		if (talkback) talkback(2);
+		obs.dispose();
 		h.stop();
 		vi.useRealTimers();
 	});

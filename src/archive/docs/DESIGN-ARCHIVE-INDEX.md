@@ -330,6 +330,28 @@ This format preserves the thinking process, not just conclusions.
 **Created:** March 16, 2026
 **Archive Status:** Complete through Session repo-audit-design-principles (March 20, 2026)
 
+### Gemini Marketing Research (March 21) — Market Positioning & Growth Strategy
+**Topic:** Competitive landscape analysis, agentic AI trends, streaming durability gap, and developer marketing strategy for callbag-recharge
+
+External deep research (via Gemini Voyager) covering: the 2025–2026 agentic enterprise surge (282% AI adoption growth), the "trust bottleneck" in autonomous agent systems, the streaming durability crisis in LLM implementations, and the signals-vs-streams debate in the TC39 era.
+
+**Key insights:**
+- **Agentic trust gap:** Every-node-is-inspectable architecture is a direct differentiator vs opaque frameworks (LangGraph, CrewAI, AutoGen).
+- **Streaming durability crisis:** Library-native checkpoint persistence + resumable streams fills a void between fragile UI streaming and heavy enterprise orchestrators (Temporal, Inngest, DBOS Transact).
+- **"Missing middle" positioning:** TC39 Signals handle UI state; RxJS/streams handle complex async. callbag-recharge bridges both paradigms with simple Store API + full stream power.
+- **Vibe coding safety rail:** Glitch-free two-phase push model provides verifiable state transitions for AI-generated code.
+- **Lightweight durable execution:** Zero-dependency, library-native durability for edge/local-first/on-device AI — a market niche underserved by server-dependent tools.
+
+**Competitor mapping:**
+- State management: Zustand, Jotai, Redux, TC39 Signals, Preact Signals, SolidJS
+- AI orchestration: LangGraph, Mastra, Vercel AI SDK, OpenAI Agents SDK, Google ADK
+- Durable execution: Temporal, Inngest, Trigger.dev, DBOS Transact
+- Workflow: n8n, Airflow, Prefect, XState
+
+**Growth strategy:** "Reuse flywheel" via 90-9-1 community principle. Utility-first content (architecture deep-dives, durable stream blueprints). Compat wrappers as low-friction Trojan horse. Target niches: local-first AI, edge compute, TypeScript agentic frameworks.
+
+**Source:** `callbag-marketing-research-20260321-161450.md` (Gemini Voyager deep research export, ~1144 lines of iterative analysis across 100+ web sources)
+
 ---
 
 ## Archived Documents (formerly in docs/)

@@ -141,18 +141,15 @@ describe("RESOLVED signal — subtree skipping", () => {
 		const parity = derived([s], () => s.get() % 2, {
 			equals: (a, b) => a === b,
 		});
-		const signals: Array<{ type: number; data: unknown }> = [];
-
-		parity.source(0, (type: number, data: unknown) => {
-			if (type === STATE) signals.push({ type: STATE, data });
-			if (type === 1) signals.push({ type: 1, data });
-		});
+		const obs = Inspector.observe(parity);
 
 		s.set(3); // parity: 1 % 2 = 1, same as cached
-		expect(signals).toEqual([
-			{ type: STATE, data: DIRTY },
-			{ type: STATE, data: RESOLVED },
-		]);
+		expect(obs.values).toEqual([]);
+		expect(obs.signals).toEqual([DIRTY, RESOLVED]);
+		expect(obs.dirtyCount).toBe(1);
+		expect(obs.resolvedCount).toBe(1);
+
+		obs.dispose();
 	});
 
 	it("RESOLVED propagates through chain — skips downstream fn()", () => {

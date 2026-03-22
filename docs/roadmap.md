@@ -6,7 +6,7 @@
 
 ## What's Shipped
 
-146 modules across 9 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
+149 modules across 10 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
 
 | Category | Count | Highlights |
 |----------|------:|------------|
@@ -14,6 +14,7 @@
 | Extra | 65 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, …), sources (`fromPromise`, `fromCron`, `fromEvent`, …), sinks (`subscribe`, `forEach`) |
 | Utils | 27 | `retry`, `withBreaker`, `withStatus`, `withSchema`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
+| Messaging | 3 | `topic`, `subscription`, `repeatPublish` — Pulsar-inspired topic/subscription system |
 | Memory | 3 | `collection`, `decay`, `node` |
 | Orchestrate | 13 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, … |
@@ -203,11 +204,11 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 5e-1 | `topic` | `topic<T>(name, opts?)` — persistent append-only stream. Backed by `reactiveLog` (sequence numbers, bounded buffer). `publish(msg, opts?)` with optional priority (5d-1), delay, dedup key, and schema validation (5d-2). Delayed messages use `wait` internally. Persistence via `tieredStorage` (5d-6) — hot in-memory, cold to adapter. Supports `compaction` (5d-5) mode. Namespaced via `namespace` (5d-3). | M |
-| 5e-2 | `subscription` | `subscription(topic, opts)` — cursor-based consumer on a topic. Tracks position (sequence number) with persistent cursor state. Subscription modes: **exclusive** (single consumer), **shared** (round-robin fan-out via `forEach`), **failover** (hot standby via `pipelineRunner` auto-restart), **key_shared** (partition by key via `branch`/`groupBy`). Pull-based backpressure — consumer controls read pace. `ack()` / `nack()` per message. | M |
-| 5e-3 | Topic lifecycle | `pause()`/`resume()`, `seek(sequenceId \| timestamp)` (cursor rewind/fast-forward), `peek()`, `backlog()` (unacked message count). Companion stores: `depth`, `throughput`, `oldestUnacked`. | S |
-| 5e-4 | Retry + dead letter topics | `nack()` routes to retry topic with configurable backoff. Terminal failures route to dead letter topic. Both are just topics — subscribe to DLQ for monitoring/reprocessing. Uses `retry` + `onFailure` internally. | S |
-| 5e-5 | Repeatable producers | `publish(msg, { repeat: { cron, every, limit } })` — scheduled message production via `fromCron`. Dedup by repeat key. | S |
+| 5e-1 | `topic` | **Shipped.** `topic<T>(name, opts?)` — persistent append-only stream. Backed by `reactiveLog` (sequence numbers, bounded buffer). `publish(msg, opts?)` with optional priority, delay, dedup key, and schema validation. Supports `compaction` mode. Namespaced via `namespace`. Companion stores: `depth`, `latest`, `publishCount`. | M |
+| 5e-2 | `subscription` | **Shipped.** `subscription(topic, opts)` — cursor-based consumer on a topic. Tracks position with persistent cursor state. Subscription modes: **exclusive**, **shared** (round-robin), **failover** (hot standby), **key_shared** (partition by key hash). Pull-based backpressure via `pull(count)`. `ack()` / `nack()` per message. Companion stores: `position`, `backlog`, `pending`. | M |
+| 5e-3 | Topic lifecycle | **Shipped.** `pause()`/`resume()`, `seek(position)` (cursor rewind/fast-forward), `peek()`. Companion stores: `depth`, `backlog`, `pending`. | S |
+| 5e-4 | Retry + dead letter topics | **Shipped.** `nack()` routes to retry queue with configurable backoff (`exponential`/`linear`/custom). Terminal failures route to dead letter topic with original headers preserved. | S |
+| 5e-5 | Repeatable producers | **Shipped.** `repeatPublish(topic, valueOrFactory, opts)` — scheduled message production via interval or cron. Dedup by repeat key. Reactive `count` store. | S |
 
 #### Layer 2: Job Queue (processing on top of topics)
 
@@ -287,6 +288,24 @@ changes:
 | 7c | Kafka adapter | `fromKafka(consumer, topic)` / `toKafka(producer, topic)`. Peer dep: kafkajs. | M |
 | 7d | gRPC stream adapter | `fromGrpcStream(call)` / `toGrpcStream(call)`. Peer dep: @grpc/grpc-js. | M |
 | 7e | NATS adapter | `fromNats(nc, subject)` / `toNats(nc, subject)`. Peer dep: nats. | S |
+
+### Phase 7.5: Pre-Launch Positioning
+
+> **Goal:** Establish callbag-recharge's market position before v1.0 publish. Build the
+> artifacts that drive organic discovery and the "reuse flywheel."
+>
+> **Depends on:** Demo suite (at least H1 + D1), Phase 5c (framework bindings shipped).
+>
+> **Informed by:** Gemini marketing research (March 2026) — competitor landscape analysis,
+> agentic AI trust gap, streaming durability crisis, signals-vs-streams positioning.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 7.5-1 | Killer README | "State that flows" tagline, 10-line example, comparison table (vs Zustand/Jotai/Signals/LangGraph), bundle size, Inspector screenshot. | S |
+| 7.5-2 | `llms.txt` | Machine-readable library summary at repo/site root for AI agent discovery. | S |
+| 7.5-3 | Positioning blog posts | Top 3 from blog-strategy §Market-Positioning: "Missing Middle" (#10), "Durable Reactive Streams" (#11), "Trust Bottleneck" (#12). | M |
+| 7.5-4 | npm publish prep | Keywords (reactive, state, signals, callbag, orchestration, agentic, durable), description, package.json metadata audit. | S |
+| 7.5-5 | Community launch | HN Show, Reddit r/javascript + r/typescript + r/AI_Agents, dev.to cross-post. | S |
 
 ### Phase 8: Persistence + Distribution
 

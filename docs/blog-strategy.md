@@ -85,6 +85,17 @@ Each "engineering evolution" post follows this pattern:
 | 8 | **"The Cost of Correctness"** | Session 88e9bd81 — 9.8M ops/sec vs Preact 34M, but correct diamonds | Honest benchmarking builds trust |
 | 9 | **"Callbag-Recharge vs Zustand/Jotai/SolidJS"** | Session 47f1a07f, `src/archive/docs/state-management.md` | Maps mental models across libraries |
 
+#### Market-Positioning Posts (from Gemini marketing research, March 2026)
+
+| # | Topic | Source Material | Why It Matters |
+|---|-------|----------------|----------------|
+| 10 | **"The Missing Middle: Why Signals Aren't Enough for AI Streaming"** | TC39 Signals debate, Gemini research §Signals vs Streams | Positions callbag-recharge as the bridge between simple UI signals and full stream power — the most common question developers are asking in 2025 |
+| 11 | **"Durable Reactive Streams: LLM Responses That Survive Network Failures"** | Gemini research §Durability Crisis, Upstash resumable streams, checkpoint adapters | Solves an acute pain point (fragile LLM streams) with concrete code — high viral potential in AI dev communities |
+| 12 | **"The Trust Bottleneck: Observable State for Agentic AI"** | Gemini research §Agentic Trust, McKinsey/IBM/Salesforce agentic reports, Inspector architecture | Positions inspectable-node architecture against "black box" agent frameworks (LangGraph, CrewAI) — thought leadership for the agentic enterprise wave |
+| 13 | **"Zero-Dependency Orchestration: callbag-recharge vs Temporal/Inngest/DBOS"** | Gemini research §Lightweight Durability, DBOS Transact HN threads, orchestrate layer | Direct comparison post targeting developers frustrated with infrastructure-heavy durable execution — high search intent topic |
+| 14 | **"Vibe Coding Safety Rails: Why Your AI-Generated Code Needs Verifiable State"** | Gemini research §Vibe Coding Risks, glitch-free two-phase push, architecture §1.15 | Timely hook into the vibe coding trend — positions library as the reliability layer for AI-generated reactive logic |
+| 15 | **"From Zustand to Reactive Orchestration: The Compatibility Wrapper Strategy"** | Gemini research §Trojan Horse, compat layer (Zustand/Jotai/Signals), createStore pattern | Migration guide that doubles as adoption content — shows existing Zustand/Jotai users how to upgrade without rewriting |
+
 ### Bonus Topics (from bugs & discoveries)
 
 | Topic | Source |
@@ -104,6 +115,24 @@ Each "engineering evolution" post follows this pattern:
 2. **GitHub** — README, stars, topics
 3. **Dev communities** — dev.to, Reddit r/javascript, HN
 4. **Word of mouth** — blog posts shared in relevant discussions
+
+### Niche communities (high-intent, from Gemini research)
+
+Target these specific sub-communities where our differentiators resonate most:
+
+- **r/AI_Agents, r/LangChain, r/LocalLLaMA** — agentic AI developers frustrated with opaque frameworks
+- **r/typescript** — TypeScript-native AI tooling demand (LangGraph.js TS-native design thread)
+- **HN "durable execution" threads** — DBOS/Temporal/Inngest comparisons draw our exact audience
+- **Dev.to AI agent architecture posts** — high engagement on "building AI agents with TS" content
+- **Edge/local-first communities** — Heavybit, local-first.dev, Offline First community
+
+### Growth model: "Reuse Flywheel" (90-9-1 principle)
+
+1. **Solve one acute pain point** — durable LLM streams that survive network failures
+2. **Syndicate blueprints** — architecture deep-dives on high-authority platforms
+3. **Compat wrappers as Trojan horse** — Zustand/Jotai users upgrade without rewriting
+4. **Core dependency adoption** — tool becomes standard in production repos
+5. **Contributors emerge** — 9% create content, 1% contribute code
 
 ### Secondary (Phase 2+)
 

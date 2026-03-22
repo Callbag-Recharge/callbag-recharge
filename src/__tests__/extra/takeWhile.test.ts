@@ -20,8 +20,7 @@ describe("takeWhile", () => {
 		s.set(6); // should not reach
 
 		expect(obs.values).toEqual([1, 3]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("does not emit the failing value", () => {
@@ -89,7 +88,7 @@ describe("takeWhile", () => {
 		(s as any).error(new Error("fail"));
 
 		expect(obs.values).toEqual([1]);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
@@ -106,8 +105,7 @@ describe("takeWhile", () => {
 		(s as any).complete();
 
 		expect(obs.values).toEqual([1]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	// After completion, late subscribers get immediate END (operator-based behavior)
@@ -172,7 +170,7 @@ describe("takeWhile", () => {
 			s,
 			takeWhile((v) => v < 5),
 		);
-		const _obs = Inspector.observe(t);
+		Inspector.activate(t);
 
 		s.set(3);
 		expect(t.get()).toBe(3);

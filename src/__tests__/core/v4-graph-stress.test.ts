@@ -34,7 +34,6 @@ import {
 	operator,
 	pipe,
 	producer,
-	START,
 	STATE,
 	state,
 } from "../../index";
@@ -600,15 +599,10 @@ describe("dynamic graph topology changes", () => {
 		subscribe(p, (v) => vals.push(v));
 
 		// Now subscribe again after completion
-		const lateVals: number[] = [];
-		let ended = false;
-		p.source(START, (type: number, data: any) => {
-			if (type === DATA) lateVals.push(data);
-			if (type === END) ended = true;
-		});
+		const obs = Inspector.observe(p);
 
-		expect(lateVals).toEqual([]); // no data
-		expect(ended).toBe(true); // immediate END
+		expect(obs.values).toEqual([]); // no data
+		expect(obs.ended).toBe(true); // immediate END
 	});
 });
 

@@ -243,10 +243,18 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 		destroy(): void {
 			if (destroyed) return;
 			destroyed = true;
-			_entries.length = 0;
-			_count = 0;
-			teardown(_version);
-			teardown(_events);
+			batch(() => {
+				// ECH-4: Tear down leaves (derived stores) before roots (_version, _events)
+				for (const t of _tails.values()) teardown(t);
+				_tails.clear();
+				teardown(log.lengthStore);
+				teardown(log.latest);
+				teardown(_events);
+				teardown(_version);
+				// Clear storage after teardowns to avoid spurious emissions
+				_entries.length = 0;
+				_count = 0;
+			});
 		},
 	};
 

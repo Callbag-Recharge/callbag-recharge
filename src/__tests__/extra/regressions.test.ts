@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { START } from "../../core/protocol";
+
 import { combine } from "../../extra/combine";
 import { concatMap } from "../../extra/concatMap";
 import { debounce } from "../../extra/debounce";
@@ -34,18 +34,6 @@ afterEach(() => {
 // Regression tests for issues discovered during operator() refactor
 // ===========================================================================
 
-// Helper: observe raw DATA emissions at callbag protocol level, bypassing
-// subscribe()'s Object.is dedup. This is essential for verifying tier-2
-// extras don't add their own dedup layer.
-function observeRaw<T>(store: { source: (type: number, payload?: any) => void }) {
-	const data: T[] = [];
-	store.source(START, (type: number, d: any) => {
-		if (type === START) return;
-		if (type === 1) data.push(d);
-	});
-	return data;
-}
-
 // ---------------------------------------------------------------------------
 // 1. Tier-2 extras must NOT dedup (removed equals: Object.is)
 //    These operators are cycle boundaries — every emit must propagate.
@@ -59,7 +47,7 @@ describe("tier-2: no built-in dedup", () => {
 		// Sequence: emit(1) → timer → output=1, emit(2) → emit(1) → timer → output=1
 		const s = producer<number>();
 		const d = pipe(s, debounce(50));
-		const data = observeRaw<number>(d);
+		const obs = Inspector.observe(d);
 
 		s.emit(1);
 		vi.advanceTimersByTime(50); // output: 1
@@ -69,13 +57,13 @@ describe("tier-2: no built-in dedup", () => {
 		s.emit(1); // resets timer again (subscribe sees 2→1, not deduped)
 		vi.advanceTimersByTime(50); // output: 1 again — must not be suppressed
 
-		expect(data).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("throttle: same output value from different inputs is not suppressed", () => {
 		const s = producer<number>();
 		const t = pipe(s, throttle(50));
-		const data = observeRaw<number>(t);
+		const obs = Inspector.observe(t);
 
 		s.emit(1); // passes — first in window
 		vi.advanceTimersByTime(50); // window expires
@@ -85,20 +73,20 @@ describe("tier-2: no built-in dedup", () => {
 
 		s.emit(1); // passes — first in new window (same as first output, must not dedup)
 
-		expect(data).toEqual([1, 2, 1]);
+		expect(obs.values).toEqual([1, 2, 1]);
 	});
 
 	it("sample: emits same latestInput when notifier fires twice", () => {
 		const s = producer<number>();
 		const notifier = state(0);
 		const sampled = pipe(s, sample(notifier));
-		const data = observeRaw<number>(sampled);
+		const obs = Inspector.observe(sampled);
 
 		s.emit(5);
 		notifier.set(1); // emit latestInput=5
 		notifier.set(2); // emit latestInput=5 again
 
-		expect(data).toEqual([5, 5]);
+		expect(obs.values).toEqual([5, 5]);
 	});
 
 	it("switchMap: re-switch to inner with same value emits at protocol level", () => {
@@ -109,11 +97,11 @@ describe("tier-2: no built-in dedup", () => {
 			outer,
 			switchMap((v) => (v === "a" ? innerA : innerB)),
 		);
-		const data = observeRaw<number | undefined>(mapped);
+		const obs = Inspector.observe(mapped);
 
 		outer.set("b"); // switch to innerB (get()=10) — must emit even though same
 
-		expect(data).toContain(10);
+		expect(obs.values).toContain(10);
 	});
 
 	it("flat: switch to new inner with same value emits at protocol level", () => {
@@ -121,11 +109,11 @@ describe("tier-2: no built-in dedup", () => {
 		const inner2 = state(5); // same value
 		const outer = state<ReturnType<typeof state<number>>>(inner1);
 		const f = pipe(outer, flat());
-		const data = observeRaw<number | undefined>(f);
+		const obs = Inspector.observe(f);
 
 		outer.set(inner2); // switch — emit(inner2.get()=5)
 
-		expect(data).toContain(5);
+		expect(obs.values).toContain(5);
 	});
 
 	it("rescue: fallback with same initial value as src emits at protocol level", () => {
@@ -150,13 +138,13 @@ describe("tier-2: no built-in dedup", () => {
 			src,
 			rescue(() => fallback),
 		);
-		const data = observeRaw<number>(r);
+		const obs = Inspector.observe(r);
 
 		// Error on src → switch to fallback which has same value 42
 		errorSink?.(2, new Error("boom"));
 
 		// rescue must emit 42 from fallback even though src had 42
-		expect(data).toContain(42);
+		expect(obs.values).toContain(42);
 	});
 
 	it("retry: reconnect emits same value at protocol level", () => {
@@ -179,14 +167,14 @@ describe("tier-2: no built-in dedup", () => {
 		};
 
 		const r = pipe(src, retry(2));
-		const data = observeRaw<number>(r);
+		const obs = Inspector.observe(r);
 
 		// Initial connect: skipped (producer's { initial } already has the value).
 		// Error → retry reconnects, calls emit(src.get()) = emit(10).
 		errorSink?.(2, new Error("fail"));
 
 		expect(connectCount).toBe(2);
-		expect(data.filter((v) => v === 10).length).toBeGreaterThanOrEqual(1);
+		expect(obs.values.filter((v) => v === 10).length).toBeGreaterThanOrEqual(1);
 	});
 
 	it("concatMap: sequential inners with same value both emit", () => {
@@ -200,14 +188,14 @@ describe("tier-2: no built-in dedup", () => {
 			outer,
 			concatMap((v) => (v === "a" ? innerA : innerB)),
 		);
-		const data = observeRaw<number | undefined>(mapped);
+		const obs = Inspector.observe(mapped);
 
 		// Trigger outer emission to create initial inner
 		outer.set("a");
 		outer.set("b");
 		innerA.complete(); // innerA completes → process "b" → innerB emits 42
 
-		expect(data.filter((v) => v === 42).length).toBeGreaterThanOrEqual(2);
+		expect(obs.values.filter((v) => v === 42).length).toBeGreaterThanOrEqual(2);
 	});
 
 	it("exhaustMap: sequential inners with same value both emit", () => {
@@ -221,14 +209,14 @@ describe("tier-2: no built-in dedup", () => {
 			outer,
 			exhaustMap((v) => (v === 0 ? innerA : innerB)),
 		);
-		const data = observeRaw<number | undefined>(mapped);
+		const obs = Inspector.observe(mapped);
 
 		// Trigger outer emission to create initial inner
 		outer.set(0);
 		innerA.complete();
 		outer.set(1); // now accepted → innerB emits 42
 
-		expect(data.filter((v) => v === 42).length).toBeGreaterThanOrEqual(2);
+		expect(obs.values.filter((v) => v === 42).length).toBeGreaterThanOrEqual(2);
 	});
 });
 
@@ -546,17 +534,13 @@ describe("subject conditional dedup regression", () => {
 	it("dedup at protocol level: same value suppresses DIRTY+DATA", () => {
 		// Verify subject dedup prevents DIRTY/DATA signals entirely
 		const s = subject<number>();
-		const signals: Array<{ type: number; data: any }> = [];
-		s.source(START, (type: number, data?: any) => {
-			if (type === START) return;
-			signals.push({ type, data });
-		});
+		const obs = Inspector.observe(s);
 
 		s.next(1);
-		const countAfterFirst = signals.length;
+		const countAfterFirst = obs.events.length;
 		s.next(1); // same value with sinks — should produce NO signals
 
-		expect(signals.length).toBe(countAfterFirst);
+		expect(obs.events.length).toBe(countAfterFirst);
 	});
 });
 
@@ -585,11 +569,11 @@ describe("operator seed regression", () => {
 		// not push DATA during initialization
 		const s = state(10);
 		const op = pipe(s, remember());
-		const data = observeRaw(op);
+		const obs = Inspector.observe(op);
 
 		// After connecting, remember seed(input.get()) runs but should not
 		// appear as DATA emission
-		expect(data).toEqual([]);
+		expect(obs.values).toEqual([]);
 		expect(op.get()).toBe(10);
 	});
 });

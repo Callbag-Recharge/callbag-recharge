@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { DATA, END, START, STATE } from "../../core/protocol";
+import { DATA, STATE } from "../../core/protocol";
 import { subscribe } from "../../extra/subscribe";
 import { batch, derived, effect, Inspector, operator, producer, state } from "../../index";
 
@@ -169,11 +169,8 @@ describe("producer edge cases", () => {
 		p.emit(42);
 		p.complete();
 
-		let gotEnd = false;
-		p.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(p);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("late subscriber to errored producer gets END immediately", () => {
@@ -181,11 +178,8 @@ describe("producer edge cases", () => {
 		subscribe(p, () => {}, { onEnd: () => {} });
 		p.error("boom");
 
-		let gotEnd = false;
-		p.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(p);
+		expect(obs.ended).toBe(true);
 	});
 });
 
@@ -857,11 +851,9 @@ describe("operator edge cases", () => {
 		s.set(1); // triggers error
 
 		// Late subscriber
-		let endData: unknown = "not-called";
-		op.source(START, (type: number, data: any) => {
-			if (type === END) endData = data;
-		});
-		expect(endData).toBe("op-err");
+		const obs = Inspector.observe(op);
+		expect(obs.errored).toBe(true);
+		expect(obs.endError).toBe("op-err");
 	});
 
 	it("late subscriber to completed operator gets END immediately", () => {
@@ -882,10 +874,7 @@ describe("operator edge cases", () => {
 		subscribe(op, () => {}, { onEnd: () => {} });
 		s.set(1); // triggers complete
 
-		let gotEnd = false;
-		op.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(op);
+		expect(obs.ended).toBe(true);
 	});
 });

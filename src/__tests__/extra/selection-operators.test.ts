@@ -1,5 +1,4 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { END, START } from "../../core/protocol";
 import { elementAt } from "../../extra/elementAt";
 import { find } from "../../extra/find";
 import { first } from "../../extra/first";
@@ -105,15 +104,8 @@ describe("first", () => {
 		subscribe(f, () => {});
 		s.set(1); // completes first
 
-		let gotStart = false;
-		let gotEnd = false;
-		f.source(START, (type: number) => {
-			if (type === START) gotStart = true;
-			if (type === END) gotEnd = true;
-		});
-
-		expect(gotStart).toBe(true);
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(f);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() retains value after completion", () => {
@@ -220,11 +212,8 @@ describe("last", () => {
 		p.emit(1);
 		p.complete();
 
-		let gotEnd = false;
-		l.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(l);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() retains last value after completion", () => {
@@ -368,11 +357,8 @@ describe("find", () => {
 		subscribe(f, () => {});
 		s.set(1); // completes
 
-		let gotEnd = false;
-		f.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(f);
+		expect(obs.ended).toBe(true);
 	});
 });
 
@@ -481,11 +467,8 @@ describe("elementAt", () => {
 		subscribe(e, () => {});
 		p.emit(1); // completes
 
-		let gotEnd = false;
-		e.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(e);
+		expect(obs.ended).toBe(true);
 	});
 });
 
@@ -614,11 +597,8 @@ describe("partition", () => {
 		subscribe(a, () => {});
 		p.complete();
 
-		let gotEnd = false;
-		a.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(a);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns last value for each branch", () => {

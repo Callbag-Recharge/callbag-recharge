@@ -45,14 +45,27 @@ export interface ObserveResult<T> {
 	ended: boolean;
 	/** Error payload from END, if any */
 	endError: unknown;
+	/** True when ended without error (clean completion) */
+	readonly completedCleanly: boolean;
+	/** True when ended with an error */
+	readonly errored: boolean;
 	/** Count of DIRTY signals received */
 	dirtyCount: number;
 	/** Count of RESOLVED signals received */
 	resolvedCount: number;
 	/** Store name (from Inspector, if registered) */
 	name: string | undefined;
+	/**
+	 * Compact event log: `["DIRTY", value, "RESOLVED", ...]`
+	 *
+	 * Signals become their string name, DATA becomes the value, END becomes `"END"` or `["END", error]`.
+	 * Note: when `T` is `string`, DATA values may collide with signal labels. Use `events` for unambiguous checks.
+	 */
+	readonly eventLog: Array<T | string | [string, unknown]>;
 	/** Disconnect the observer */
 	dispose: () => void;
+	/** Disconnect and return a fresh observation on the same store */
+	reconnect: () => ObserveResult<T>;
 }
 
 // Static-only class is intentional API for Inspector namespace
@@ -280,6 +293,13 @@ export class Inspector {
 		return [header, ...lines].join("\n");
 	}
 
+	/** Map a STATE signal to its string name for eventLog */
+	private static _signalLabel(sig: Signal): string {
+		if (sig === DIRTY) return "DIRTY";
+		if (sig === RESOLVED) return "RESOLVED";
+		return typeof sig === "symbol" ? (sig.description ?? String(sig)) : String(sig);
+	}
+
 	/**
 	 * Internal observe implementation shared by observe() and spy().
 	 */
@@ -289,17 +309,32 @@ export class Inspector {
 		log?: (...args: any[]) => void,
 	): ObserveResult<T> {
 		let talkback: ((type: number) => void) | null = null;
+		let _hasError = false;
 		const name = label ?? Inspector.getName(store);
+		const _eventLog: Array<T | string | [string, unknown]> = [];
 		const result: ObserveResult<T> = {
 			values: [],
 			signals: [],
 			events: [],
 			ended: false,
 			endError: undefined,
+			get completedCleanly() {
+				return result.ended && !_hasError;
+			},
+			get errored() {
+				return result.ended && _hasError;
+			},
 			dirtyCount: 0,
 			resolvedCount: 0,
 			name,
+			get eventLog() {
+				return _eventLog;
+			},
 			dispose: () => talkback?.(END),
+			reconnect: () => {
+				talkback?.(END);
+				return Inspector._observe(store, label, log);
+			},
 		};
 
 		store.source(START, (type: number, data: any) => {
@@ -310,17 +345,21 @@ export class Inspector {
 			if (type === DATA) {
 				result.values.push(data);
 				result.events.push({ type: "data", data });
+				_eventLog.push(data as T);
 				if (log) log(`[${name}] DATA:`, data);
 			} else if (type === STATE) {
 				result.signals.push(data);
 				result.events.push({ type: "signal", data });
+				_eventLog.push(Inspector._signalLabel(data));
 				if (data === DIRTY) result.dirtyCount++;
 				else if (data === RESOLVED) result.resolvedCount++;
 				if (log) log(`[${name}] STATE:`, data);
 			} else if (type === END) {
 				result.ended = true;
 				result.endError = data;
+				_hasError = data !== undefined;
 				result.events.push({ type: "end", data });
+				_eventLog.push(_hasError ? ["END", data] : "END");
 				if (log) log(`[${name}] END`, data !== undefined ? data : "");
 				talkback = null;
 			}
@@ -348,6 +387,26 @@ export class Inspector {
 	 */
 	static observe<T>(store: Store<T>): ObserveResult<T> {
 		return Inspector._observe(store);
+	}
+
+	/**
+	 * Subscribe to a store just to activate it. Returns a dispose function.
+	 * Use when the test doesn't need to inspect values — just trigger
+	 * the subscription lifecycle.
+	 *
+	 * ```ts
+	 * const dispose = Inspector.activate(myStore);
+	 * // ... store is now connected
+	 * dispose();
+	 * ```
+	 */
+	static activate<T>(store: Store<T>): () => void {
+		let talkback: ((type: number) => void) | null = null;
+		store.source(START, (type: number, data: any) => {
+			if (type === START) talkback = data;
+			if (type === END) talkback = null;
+		});
+		return () => talkback?.(END);
 	}
 
 	/**

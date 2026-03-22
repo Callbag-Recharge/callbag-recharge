@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { DIRTY, END, RESOLVED, START, STATE } from "../../core/protocol";
+import { DIRTY, END, RESOLVED, START } from "../../core/protocol";
 import { elementAt } from "../../extra/elementAt";
 import { empty } from "../../extra/empty";
 import { find } from "../../extra/find";
@@ -24,58 +24,38 @@ beforeEach(() => {
 
 describe("of", () => {
 	it("emits all values synchronously then completes", () => {
-		const values: number[] = [];
-		let ended = false;
 		const s = of(1, 2, 3);
+		const obs = Inspector.observe(s);
 
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([1, 2, 3]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([1, 2, 3]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns last emitted value after subscription", () => {
 		const s = of(10, 20, 30);
-		s.source(START, () => {});
+		Inspector.activate(s);
 		expect(s.get()).toBe(30);
 	});
 
 	it("emits single value", () => {
-		const values: string[] = [];
 		const s = of("hello");
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-		expect(values).toEqual(["hello"]);
+		const obs = Inspector.observe(s);
+		expect(obs.values).toEqual(["hello"]);
 	});
 
 	it("completes immediately with no values when called with no args", () => {
-		let ended = false;
-		const values: unknown[] = [];
 		const s = of();
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		const obs = Inspector.observe(s);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("new subscriber after completion receives END immediately", () => {
 		const s = of(1);
-		s.source(START, () => {}); // first subscriber triggers completion
+		Inspector.activate(s); // first subscriber triggers completion
 
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(s);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -85,18 +65,11 @@ describe("of", () => {
 
 describe("empty", () => {
 	it("completes immediately without emitting any values", () => {
-		const values: unknown[] = [];
-		let ended = false;
 		const s = empty();
+		const obs = Inspector.observe(s);
 
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns undefined", () => {
@@ -106,13 +79,10 @@ describe("empty", () => {
 
 	it("new subscriber after completion receives END immediately", () => {
 		const s = empty();
-		s.source(START, () => {});
+		Inspector.activate(s);
 
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(s);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -122,33 +92,19 @@ describe("empty", () => {
 
 describe("throwError", () => {
 	it("errors immediately with the given value", () => {
-		let errorData: unknown;
-		let ended = false;
 		const s = throwError(new Error("boom"));
+		const obs = Inspector.observe(s);
 
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === END) {
-				ended = true;
-				errorData = data;
-			}
-		});
-
-		expect(ended).toBe(true);
-		expect(errorData).toBeInstanceOf(Error);
-		expect((errorData as Error).message).toBe("boom");
+		expect(obs.errored).toBe(true);
+		expect(obs.endError).toBeInstanceOf(Error);
+		expect((obs.endError as Error).message).toBe("boom");
 	});
 
 	it("emits no values before erroring", () => {
-		const values: unknown[] = [];
 		const s = throwError("fail");
+		const obs = Inspector.observe(s);
 
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([]);
+		expect(obs.values).toEqual([]);
 	});
 
 	it("get() returns undefined", () => {
@@ -158,13 +114,10 @@ describe("throwError", () => {
 
 	it("new subscriber after error receives END immediately", () => {
 		const s = throwError("oops");
-		s.source(START, () => {});
+		Inspector.activate(s);
 
-		let gotEnd = false;
-		s.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(s);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -174,18 +127,11 @@ describe("throwError", () => {
 
 describe("never", () => {
 	it("never emits, errors, or completes", () => {
-		const values: unknown[] = [];
-		let ended = false;
 		const s = never();
+		const obs = Inspector.observe(s);
 
-		s.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(false);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(false);
 	});
 
 	it("get() returns undefined", () => {
@@ -193,6 +139,7 @@ describe("never", () => {
 		expect(s.get()).toBeUndefined();
 	});
 
+	// Raw sink acceptable: testing callbag protocol talkback handshake
 	it("can be unsubscribed without error", () => {
 		const s = never();
 		let talkback: any;
@@ -213,21 +160,14 @@ describe("first", () => {
 	it("emits only the first value then completes", () => {
 		const s = state(1);
 		const f = pipe(s, first());
-		const values: number[] = [];
-		let ended = false;
-
-		f.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
+		const obs = Inspector.observe(f);
 
 		s.set(2);
 		s.set(3);
 
 		// first() should emit only the first change (2), then complete
-		expect(values).toEqual([2]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([2]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns first value after completion", () => {
@@ -248,37 +188,24 @@ describe("first", () => {
 		subscribe(f, () => {});
 		s.set(1); // triggers first, completes
 
-		let gotEnd = false;
-		f.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(f);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("works with fromIter source", () => {
 		const s = fromIter([10, 20, 30]);
 		const f = pipe(s, first());
-		const values: number[] = [];
+		const obs = Inspector.observe(f);
 
-		f.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([10]);
+		expect(obs.values).toEqual([10]);
 	});
 
 	it("completes if upstream completes without emitting", () => {
 		const s = empty();
 		const f = pipe(s, first());
-		let ended = false;
+		const obs = Inspector.observe(f);
 
-		f.source(START, (type: number) => {
-			if (type === START) return;
-			if (type === END) ended = true;
-		});
-
-		expect(ended).toBe(true);
+		expect(obs.ended).toBe(true);
 		expect(f.get()).toBeUndefined();
 	});
 
@@ -304,20 +231,15 @@ describe("last", () => {
 	it("emits only the final value when upstream completes", () => {
 		const s = fromIter([1, 2, 3]);
 		const l = pipe(s, last());
-		const values: number[] = [];
+		const obs = Inspector.observe(l);
 
-		l.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([3]);
+		expect(obs.values).toEqual([3]);
 	});
 
 	it("get() returns last value after completion", () => {
 		const s = fromIter([10, 20, 30]);
 		const l = pipe(s, last());
-		l.source(START, () => {});
+		Inspector.activate(l);
 
 		expect(l.get()).toBe(30);
 	});
@@ -325,17 +247,10 @@ describe("last", () => {
 	it("completes with END when upstream completes without values", () => {
 		const s = empty();
 		const l = pipe(s, last());
-		let ended = false;
-		const values: unknown[] = [];
+		const obs = Inspector.observe(l);
 
-		l.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 		expect(l.get()).toBeUndefined();
 	});
 
@@ -349,14 +264,9 @@ describe("last", () => {
 		});
 
 		const l = pipe(p, last());
-		const values: number[] = [];
+		const obs = Inspector.observe(l);
 
-		l.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([15]);
+		expect(obs.values).toEqual([15]);
 	});
 
 	it("tears down upstream on unsubscribe before completion", () => {
@@ -369,13 +279,10 @@ describe("last", () => {
 	it("new subscriber after completion receives END immediately", () => {
 		const s = fromIter([1, 2]);
 		const l = pipe(s, last());
-		l.source(START, () => {}); // activate
+		Inspector.activate(l); // activate
 
-		let gotEnd = false;
-		l.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(l);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -390,17 +297,10 @@ describe("find", () => {
 			s,
 			find((v) => v > 3),
 		);
-		const values: number[] = [];
-		let ended = false;
+		const obs = Inspector.observe(f);
 
-		f.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([4]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([4]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns matched value after completion", () => {
@@ -409,7 +309,7 @@ describe("find", () => {
 			s,
 			find((v) => v === 2),
 		);
-		f.source(START, () => {});
+		Inspector.activate(f);
 
 		expect(f.get()).toBe(2);
 	});
@@ -420,17 +320,10 @@ describe("find", () => {
 			s,
 			find((v) => v > 10),
 		);
-		const values: unknown[] = [];
-		let ended = false;
+		const obs = Inspector.observe(f);
 
-		f.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 		expect(f.get()).toBeUndefined();
 	});
 
@@ -471,13 +364,10 @@ describe("find", () => {
 			s,
 			find((v) => v === 2),
 		);
-		f.source(START, () => {});
+		Inspector.activate(f);
 
-		let gotEnd = false;
-		f.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(f);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -489,53 +379,34 @@ describe("elementAt", () => {
 	it("emits value at index 0", () => {
 		const s = fromIter([10, 20, 30]);
 		const e = pipe(s, elementAt(0));
-		const values: number[] = [];
+		const obs = Inspector.observe(e);
 
-		e.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([10]);
+		expect(obs.values).toEqual([10]);
 	});
 
 	it("emits value at index 2", () => {
 		const s = fromIter([10, 20, 30]);
 		const e = pipe(s, elementAt(2));
-		const values: number[] = [];
-		let ended = false;
+		const obs = Inspector.observe(e);
 
-		e.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([30]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([30]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("completes without emitting if index is out of range", () => {
 		const s = fromIter([1, 2]);
 		const e = pipe(s, elementAt(5));
-		const values: unknown[] = [];
-		let ended = false;
+		const obs = Inspector.observe(e);
 
-		e.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 		expect(e.get()).toBeUndefined();
 	});
 
 	it("get() returns the value at the given index", () => {
 		const s = fromIter(["a", "b", "c"]);
 		const e = pipe(s, elementAt(1));
-		e.source(START, () => {});
+		Inspector.activate(e);
 
 		expect(e.get()).toBe("b");
 	});
@@ -570,13 +441,10 @@ describe("elementAt", () => {
 	it("new subscriber after completion receives END immediately", () => {
 		const s = fromIter([1, 2, 3]);
 		const e = pipe(s, elementAt(0));
-		e.source(START, () => {});
+		Inspector.activate(e);
 
-		let gotEnd = false;
-		e.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(e);
+		expect(obs2.ended).toBe(true);
 	});
 });
 
@@ -666,18 +534,11 @@ describe("partition", () => {
 		});
 
 		const [trues, falses] = partition<number>((v) => v > 1)(p);
-		let trueEnded = false;
-		let falseEnded = false;
+		const obsTrue = Inspector.observe(trues);
+		const obsFalse = Inspector.observe(falses);
 
-		trues.source(START, (type: number) => {
-			if (type === END) trueEnded = true;
-		});
-		falses.source(START, (type: number) => {
-			if (type === END) falseEnded = true;
-		});
-
-		expect(trueEnded).toBe(true);
-		expect(falseEnded).toBe(true);
+		expect(obsTrue.ended).toBe(true);
+		expect(obsFalse.ended).toBe(true);
 	});
 });
 
@@ -688,63 +549,39 @@ describe("partition", () => {
 describe("repeat", () => {
 	it("re-subscribes to source on completion", () => {
 		const r = repeat(() => fromIter([1, 2]), 3);
-		const values: number[] = [];
+		const obs = Inspector.observe(r);
 
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([1, 2, 1, 2, 1, 2]);
+		expect(obs.values).toEqual([1, 2, 1, 2, 1, 2]);
 	});
 
 	it("completes after specified number of subscriptions", () => {
 		const r = repeat(() => fromIter([1]), 2);
-		const values: number[] = [];
-		let ended = false;
+		const obs = Inspector.observe(r);
 
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([1, 1]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([1, 1]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("get() returns last emitted value from any round", () => {
 		const r = repeat(() => fromIter([10, 20]), 2);
-		r.source(START, () => {});
+		Inspector.activate(r);
 
 		expect(r.get()).toBe(20);
 	});
 
 	it("repeat with count=1 behaves like no repeat", () => {
 		const r = repeat(() => fromIter([1, 2, 3]), 1);
-		const values: number[] = [];
+		const obs = Inspector.observe(r);
 
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([1, 2, 3]);
+		expect(obs.values).toEqual([1, 2, 3]);
 	});
 
 	it("handles empty source (repeats the completion)", () => {
 		const r = repeat(() => empty(), 3);
-		let ended = false;
-		const values: unknown[] = [];
+		const obs = Inspector.observe(r);
 
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) ended = true;
-		});
-
-		expect(values).toEqual([]);
-		expect(ended).toBe(true);
+		expect(obs.values).toEqual([]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("cleans up current subscription on unsubscribe", () => {
@@ -765,26 +602,18 @@ describe("repeat", () => {
 				}),
 			3,
 		);
-		const values: number[] = [];
+		const obs = Inspector.observe(r);
 
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-		});
-
-		expect(values).toEqual([1, 2, 3]);
+		expect(obs.values).toEqual([1, 2, 3]);
 		expect(callCount).toBe(3);
 	});
 
 	it("new subscriber after all repetitions receives END immediately", () => {
 		const r = repeat(() => fromIter([1]), 1);
-		r.source(START, () => {}); // activate — completes
+		Inspector.activate(r); // activate — completes
 
-		let gotEnd = false;
-		r.source(START, (type: number) => {
-			if (type === END) gotEnd = true;
-		});
-		expect(gotEnd).toBe(true);
+		const obs2 = Inspector.observe(r);
+		expect(obs2.ended).toBe(true);
 	});
 
 	it("propagates upstream errors instead of retrying", () => {
@@ -797,19 +626,12 @@ describe("repeat", () => {
 				}),
 			3,
 		);
-		const values: number[] = [];
-		let errorData: unknown;
-
-		r.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) errorData = data;
-		});
+		const obs = Inspector.observe(r);
 
 		// Should emit 1 then error — NOT retry
-		expect(values).toEqual([1]);
-		expect(errorData).toBeInstanceOf(Error);
-		expect((errorData as Error).message).toBe("boom");
+		expect(obs.values).toEqual([1]);
+		expect(obs.endError).toBeInstanceOf(Error);
+		expect((obs.endError as Error).message).toBe("boom");
 	});
 
 	it("does not stack overflow with infinite repeat of sync-completing source", () => {
@@ -825,7 +647,7 @@ describe("repeat", () => {
 			return empty();
 		});
 
-		r.source(START, () => {});
+		Inspector.activate(r);
 
 		expect(iterations).toBeGreaterThan(10000);
 	});
@@ -839,23 +661,18 @@ describe("partition (RESOLVED signals)", () => {
 	it("sends RESOLVED to non-matching branch when DATA arrives", () => {
 		const s = state(0);
 		const [evens, odds] = partition<number>((v) => v % 2 === 0)(s);
-		const evenSignals: unknown[] = [];
-		const oddSignals: unknown[] = [];
-
-		evens.source(START, (type: number, data: any) => {
-			if (type === STATE) evenSignals.push(data);
-		});
-		odds.source(START, (type: number, data: any) => {
-			if (type === STATE) oddSignals.push(data);
-		});
+		const obsEven = Inspector.observe(evens);
+		const obsOdd = Inspector.observe(odds);
 
 		s.set(2); // even — true branch gets DATA, false branch should get RESOLVED
 
 		// Both branches got DIRTY, then:
 		// - evens got DATA (via its sink)
+		expect(obsEven.signals).toContain(DIRTY);
+		expect(obsEven.values).toContain(2);
 		// - odds got RESOLVED (non-matching)
-		expect(oddSignals).toContain(DIRTY);
-		expect(oddSignals).toContain(RESOLVED);
+		expect(obsOdd.signals).toContain(DIRTY);
+		expect(obsOdd.signals).toContain(RESOLVED);
 	});
 
 	it("late subscriber after upstream completion receives END", () => {
@@ -867,21 +684,15 @@ describe("partition (RESOLVED signals)", () => {
 
 		const [trues, falses] = partition<number>((v) => v > 0)(p);
 		// First activate both branches
-		trues.source(START, () => {});
-		falses.source(START, () => {});
+		Inspector.activate(trues);
+		Inspector.activate(falses);
 
 		// Now try subscribing after completion
-		let trueGotEnd = false;
-		let falseGotEnd = false;
-		trues.source(START, (type: number) => {
-			if (type === END) trueGotEnd = true;
-		});
-		falses.source(START, (type: number) => {
-			if (type === END) falseGotEnd = true;
-		});
+		const obsTrue2 = Inspector.observe(trues);
+		const obsFalse2 = Inspector.observe(falses);
 
-		expect(trueGotEnd).toBe(true);
-		expect(falseGotEnd).toBe(true);
+		expect(obsTrue2.ended).toBe(true);
+		expect(obsFalse2.ended).toBe(true);
 	});
 });
 
@@ -896,18 +707,14 @@ describe("find (RESOLVED signals)", () => {
 			s,
 			find((v: number) => v > 5),
 		);
-		const signals: unknown[] = [];
-
-		f.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-		});
+		const obs = Inspector.observe(f);
 
 		// Use batch() so DIRTY is dispatched (Skip DIRTY optimization
 		// skips DIRTY for single-dep subscribers in unbatched paths)
 		batch(() => s.set(3)); // non-matching — should get DIRTY then RESOLVED
 
-		expect(signals).toContain(DIRTY);
-		expect(signals).toContain(RESOLVED);
+		expect(obs.signals).toContain(DIRTY);
+		expect(obs.signals).toContain(RESOLVED);
 	});
 });
 
@@ -925,18 +732,11 @@ describe("last (error handling)", () => {
 		});
 
 		const l = pipe(p, last());
-		const values: number[] = [];
-		let errorData: unknown;
-
-		l.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === 1) values.push(data);
-			if (type === END) errorData = data;
-		});
+		const obs = Inspector.observe(l);
 
 		// Should NOT emit buffered value (10) — just forward the error
-		expect(values).toEqual([]);
-		expect(errorData).toBeInstanceOf(Error);
-		expect((errorData as Error).message).toBe("fail");
+		expect(obs.values).toEqual([]);
+		expect(obs.endError).toBeInstanceOf(Error);
+		expect((obs.endError as Error).message).toBe("fail");
 	});
 });

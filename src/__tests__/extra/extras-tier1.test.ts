@@ -190,15 +190,8 @@ describe("takeUntil", () => {
 		subscribe(t, () => {}); // activate
 		stop.set(true); // complete
 
-		let gotStart = false;
-		let gotEnd = false;
-		t.source(0, (type: number) => {
-			if (type === 0) gotStart = true;
-			if (type === 2) gotEnd = true;
-		});
-
-		expect(gotStart).toBe(true);
-		expect(gotEnd).toBe(true);
+		const obs = Inspector.observe(t);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("tears down upstream subscription when notifier fires", () => {

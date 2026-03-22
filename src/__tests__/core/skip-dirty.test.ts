@@ -9,20 +9,10 @@
 // ---------------------------------------------------------------------------
 
 import { describe, expect, it } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { P_SKIP_DIRTY } from "../../core/producer";
 import { map } from "../../extra/map";
-import {
-	batch,
-	DATA,
-	DIRTY,
-	derived,
-	effect,
-	pipe,
-	producer,
-	START,
-	STATE,
-	state,
-} from "../../index";
+import { batch, DIRTY, derived, effect, pipe, producer, state } from "../../index";
 
 describe("Skip DIRTY optimization", () => {
 	// -----------------------------------------------------------------------
@@ -34,9 +24,10 @@ describe("Skip DIRTY optimization", () => {
 		const d = derived([s], () => s.get() * 2);
 
 		// Subscribe to trigger connection
-		d.source(START, () => {});
+		const dispose = Inspector.activate(d);
 
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
+		dispose();
 	});
 
 	it("state clears P_SKIP_DIRTY on SINGLE→MULTI transition", () => {
@@ -44,26 +35,25 @@ describe("Skip DIRTY optimization", () => {
 		const d1 = derived([s], () => s.get() * 2);
 		const d2 = derived([s], () => s.get() + 1);
 
-		d1.source(START, () => {});
+		const dispose1 = Inspector.activate(d1);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
-		d2.source(START, () => {});
+		const dispose2 = Inspector.activate(d2);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
+		dispose1();
+		dispose2();
 	});
 
 	it("state clears P_SKIP_DIRTY when subscriber disconnects", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get() * 2);
 
-		let talkback: (t: number) => void;
-		d.source(START, (type: number, data: any) => {
-			if (type === START) talkback = data;
-		});
+		const dispose = Inspector.activate(d);
 
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Disconnect derived from state
-		talkback!(2); // END
+		dispose();
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 	});
 
@@ -73,9 +63,10 @@ describe("Skip DIRTY optimization", () => {
 		});
 
 		const d = derived([p], () => p.get());
-		d.source(START, () => {});
+		const dispose = Inspector.activate(d);
 
 		expect((p as any)._flags & P_SKIP_DIRTY).toBeTruthy();
+		dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -86,18 +77,15 @@ describe("Skip DIRTY optimization", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get() * 2);
 
-		// Observe signals at the derived sink
-		const derivedSignals: Array<{ type: number; data: unknown }> = [];
-		d.source(START, (type: number, data: unknown) => {
-			if (type !== START) derivedSignals.push({ type, data });
-		});
+		const obs = Inspector.observe(d);
 
 		s.set(5);
 
 		// Derived receives DATA and synthesizes DIRTY for its own downstream
-		expect(derivedSignals.some((s) => s.type === STATE && s.data === DIRTY)).toBe(true);
-		expect(derivedSignals.some((s) => s.type === DATA && s.data === 10)).toBe(true);
+		expect(obs.signals.some((sig) => sig === DIRTY)).toBe(true);
+		expect(obs.values.some((v) => v === 10)).toBe(true);
 		expect(d.get()).toBe(10);
+		obs.dispose();
 	});
 
 	it("state → single-dep effect: runs fn on DATA without DIRTY", () => {
@@ -123,16 +111,14 @@ describe("Skip DIRTY optimization", () => {
 			map((x: number) => x * 10),
 		);
 
-		const values: number[] = [];
-		mapped.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(mapped);
 
 		s.set(3);
 		s.set(7);
 
-		expect(values).toEqual([30, 70]);
+		expect(obs.values).toEqual([30, 70]);
 		expect(mapped.get()).toBe(70);
+		obs.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -143,14 +129,12 @@ describe("Skip DIRTY optimization", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get() * 2);
 
-		const signals: unknown[] = [];
-		d.source(START, (type: number, data: unknown) => {
-			if (type === STATE) signals.push(data);
-		});
+		const obs = Inspector.observe(d);
 
 		batch(() => s.set(5));
 
-		expect(signals).toContain(DIRTY);
+		expect(obs.signals).toContain(DIRTY);
+		obs.dispose();
 	});
 
 	it("state → single-dep operator: DIRTY forwarded during batch", () => {
@@ -160,14 +144,12 @@ describe("Skip DIRTY optimization", () => {
 			map((x: number) => x * 10),
 		);
 
-		const signals: unknown[] = [];
-		mapped.source(START, (type: number, data: unknown) => {
-			if (type === STATE) signals.push(data);
-		});
+		const obs = Inspector.observe(mapped);
 
 		batch(() => s.set(5));
 
-		expect(signals).toContain(DIRTY);
+		expect(obs.signals).toContain(DIRTY);
+		obs.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -184,10 +166,7 @@ describe("Skip DIRTY optimization", () => {
 		// Multi-dep derived depending on doubled and b
 		const combined = derived([doubled, b], () => doubled.get() + b.get());
 
-		const values: number[] = [];
-		combined.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const dispose = Inspector.activate(combined);
 
 		// Change only a (unbatched) — derived synthesizes DIRTY for combined
 		a.set(5);
@@ -203,6 +182,7 @@ describe("Skip DIRTY optimization", () => {
 			b.set(50);
 		});
 		expect(combined.get()).toBe(56); // 3*2 + 50
+		dispose();
 	});
 
 	it("state → operator → multi-dep derived: no glitch in unbatched mode", () => {
@@ -216,17 +196,15 @@ describe("Skip DIRTY optimization", () => {
 
 		const combined = derived([mapped, b], () => mapped.get() + b.get());
 
-		const values: number[] = [];
-		combined.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(combined);
 
 		// Each set is independent in unbatched mode
 		a.set(5);
-		expect(values).toContain(20); // 5*2 + 10
+		expect(obs.values).toContain(20); // 5*2 + 10
 
 		b.set(100);
 		expect(combined.get()).toBe(110);
+		obs.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -237,21 +215,20 @@ describe("Skip DIRTY optimization", () => {
 		const s = state(0);
 		const d1 = derived([s], () => s.get());
 
-		d1.source(START, () => {});
+		const dispose1 = Inspector.activate(d1);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Add second subscriber directly to state
-		const signals: unknown[] = [];
-		s.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-		});
+		const obs2 = Inspector.observe(s);
 
 		// Now MULTI — P_SKIP_DIRTY should be cleared
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 
 		s.set(1);
 		// DIRTY should be dispatched again
-		expect(signals).toContain(DIRTY);
+		expect(obs2.signals).toContain(DIRTY);
+		dispose1();
+		obs2.dispose();
 	});
 
 	// -----------------------------------------------------------------------
@@ -263,23 +240,21 @@ describe("Skip DIRTY optimization", () => {
 		const d = derived([s], () => s.get() * 2);
 
 		// First subscription
-		let talkback1: (t: number) => void;
-		d.source(START, (type: number, data: any) => {
-			if (type === START) talkback1 = data;
-		});
+		const dispose1 = Inspector.activate(d);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Disconnect
-		talkback1!(2);
+		dispose1();
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 
 		// Reconnect
-		d.source(START, () => {});
+		const dispose2 = Inspector.activate(d);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Values still correct
 		s.set(7);
 		expect(d.get()).toBe(14);
+		dispose2();
 	});
 
 	// -----------------------------------------------------------------------
@@ -291,11 +266,12 @@ describe("Skip DIRTY optimization", () => {
 		const b = state(0);
 		const d = derived([a, b], () => a.get() + b.get());
 
-		d.source(START, () => {});
+		const dispose = Inspector.activate(d);
 
 		// Multi-dep derived doesn't send SINGLE_DEP
 		expect((a as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 		expect((b as any)._flags & P_SKIP_DIRTY).toBeFalsy();
+		dispose();
 	});
 
 	it("multi-dep effect does not set P_SKIP_DIRTY on its deps", () => {
@@ -316,29 +292,25 @@ describe("Skip DIRTY optimization", () => {
 		const s = state(0);
 		const d = derived([s], () => s.get());
 
-		d.source(START, () => {});
+		const dispose1 = Inspector.activate(d);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Add raw subscriber — MULTI, P_SKIP_DIRTY cleared
-		let rawTb: (t: number) => void;
-		s.source(START, (type: number, data: any) => {
-			if (type === START) rawTb = data;
-		});
+		const dispose2 = Inspector.activate(s);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 
 		// Raw subscriber disconnects — back to SINGLE, P_SKIP_DIRTY restored
-		rawTb!(2); // END
+		dispose2();
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Optimization works again
-		const signals: unknown[] = [];
-		d.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-		});
+		const dispose3 = Inspector.activate(d);
 
 		s.set(1);
 		// Derived synthesizes DIRTY, but state didn't dispatch DIRTY
 		expect(d.get()).toBe(1);
+		dispose1();
+		dispose3();
 	});
 
 	it("P_SKIP_DIRTY NOT restored when non-single-dep subscriber remains", () => {
@@ -346,19 +318,17 @@ describe("Skip DIRTY optimization", () => {
 		const d = derived([s], () => s.get());
 
 		// Single-dep subscriber
-		let dTb: (t: number) => void;
-		d.source(START, (type: number, data: any) => {
-			if (type === START) dTb = data;
-		});
+		const dispose1 = Inspector.activate(d);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Raw subscriber (not single-dep)
-		s.source(START, () => {});
+		const dispose2 = Inspector.activate(s);
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
 
 		// Single-dep subscriber disconnects — raw remains, P_SKIP_DIRTY stays off
-		dTb!(2); // END
+		dispose1();
 		expect((s as any)._flags & P_SKIP_DIRTY).toBeFalsy();
+		dispose2();
 	});
 
 	// -----------------------------------------------------------------------
@@ -375,12 +345,13 @@ describe("Skip DIRTY optimization", () => {
 		);
 
 		const d = derived([p], () => p.get());
-		d.source(START, () => {});
+		const dispose = Inspector.activate(d);
 		expect((p as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Complete the producer
 		(p as any).complete();
 		expect((p as any)._flags & P_SKIP_DIRTY).toBeFalsy();
+		dispose();
 	});
 
 	it("P_SKIP_DIRTY cleared on producer error()", () => {
@@ -392,11 +363,12 @@ describe("Skip DIRTY optimization", () => {
 		);
 
 		const d = derived([p], () => p.get());
-		d.source(START, () => {});
+		const dispose = Inspector.activate(d);
 		expect((p as any)._flags & P_SKIP_DIRTY).toBeTruthy();
 
 		// Error the producer
 		(p as any).error(new Error("test"));
 		expect((p as any)._flags & P_SKIP_DIRTY).toBeFalsy();
+		dispose();
 	});
 });

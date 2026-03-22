@@ -132,8 +132,7 @@ describe("Example 4: observe() — completion and error", () => {
 		p.complete();
 
 		expect(obs.values).toEqual([1, 2]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("captures END with error payload on producer.error()", () => {
@@ -144,7 +143,7 @@ describe("Example 4: observe() — completion and error", () => {
 		p.error("boom");
 
 		expect(obs.values).toEqual([1]);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("boom");
 	});
 });

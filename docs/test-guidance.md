@@ -21,7 +21,9 @@ Guidelines for writing, organizing, and maintaining tests in callbag-recharge. R
 
 5. **One concern per test.** Each `it()` should verify one specific behavior. Do not bundle "happy path + error + completion + reconnect" into one test.
 
-6. **Authority hierarchy for expected behavior:**
+6. **Inspector-first for assertions.** Use `Inspector.observe()` for collecting emitted values and signals in tests — never wire raw callbag sinks (`store.source(0, ...)`) or ad-hoc `observeRaw()` helpers. Raw sinks are only acceptable when testing the callbag protocol itself (e.g., `callbag.test.ts`).
+
+7. **Authority hierarchy for expected behavior:**
    - `docs/architecture.md` → primary. Defines correct behavior for this library.
    - RxJS documentation → for operator semantics when not explicitly covered above.
    - TC39 Signals spec → for `state` equality and reactivity semantics.
@@ -165,7 +167,24 @@ expect(cCount).toBe(0); // c did not run
 
 ## Inspector Debugging Tools
 
-Inspector provides static methods for test assertions and debugging. Use these instead of ad-hoc raw callbag observation code. See `src/core/inspector.ts` for the full API.
+Inspector provides static methods for test assertions and debugging. **This is the mandatory tool for observing store output in tests** — do not use raw callbag sinks or ad-hoc helpers. See `src/core/inspector.ts` for the full API.
+
+### Anti-patterns (do NOT use in tests)
+
+```ts
+// ❌ Raw callbag sink — hard to read, easy to get wrong
+const values: number[] = [];
+store.source(0, (t: number, d: any) => {
+  if (t === 1) values.push(d);
+});
+
+// ❌ Ad-hoc helper that reimplements observe()
+function observeRaw(store) { /* ... */ }
+
+// ✅ Inspector.observe() — typed, complete, standard
+const obs = Inspector.observe(store);
+expect(obs.values).toEqual([1, 2, 3]);
+```
 
 ### `Inspector.observe(store)` — primary test utility
 
@@ -173,14 +192,28 @@ Returns a live observation object. Replaces ad-hoc `observeRaw()` and raw `store
 
 ```ts
 const obs = Inspector.observe(s);
-obs.values        // DATA payloads only
-obs.signals       // STATE payloads
-obs.events        // full protocol order: [{ type, data }, ...]
-obs.dirtyCount    // DIRTY signal count
-obs.resolvedCount // RESOLVED signal count
-obs.ended         // true after END
-obs.endError      // error payload if END(error)
-obs.dispose()     // unsubscribe
+obs.values          // DATA payloads only
+obs.signals         // STATE payloads
+obs.events          // full protocol order: [{ type, data }, ...]
+obs.eventLog        // compact: ["DIRTY", 5, "DIRTY", 10, "END"]
+obs.dirtyCount      // DIRTY signal count
+obs.resolvedCount   // RESOLVED signal count
+obs.ended           // true after END
+obs.endError        // error payload if END(error)
+obs.completedCleanly // ended && no error
+obs.errored         // ended && has error
+obs.dispose()       // unsubscribe
+obs.reconnect()     // dispose + fresh observe on same store
+```
+
+### `Inspector.activate(store)` — subscribe without observing
+
+When you only need to trigger the subscription lifecycle (no assertions on values/signals):
+
+```ts
+Inspector.activate(s);                  // fire-and-forget
+const dispose = Inspector.activate(s);  // with cleanup
+dispose();
 ```
 
 ### When to use which tool
@@ -188,10 +221,13 @@ obs.dispose()     // unsubscribe
 | Use case | Best tool |
 |---|---|
 | **"Did it recompute once?"** | Inline counter in `fn()` |
-| **"What values were emitted?"** | `Inspector.observe(store).values` |
-| **"Was DIRTY sent before DATA?"** | `Inspector.observe(store).events` |
-| **"Did RESOLVED skip downstream?"** | `Inspector.observe(store).resolvedCount` |
-| **"Did it complete/error?"** | `Inspector.observe(store).ended` / `.endError` |
+| **"What values were emitted?"** | `obs.values` |
+| **"Was DIRTY sent before DATA?"** | `obs.eventLog` → `["DIRTY", 5, ...]` |
+| **"Did RESOLVED skip downstream?"** | `obs.resolvedCount` |
+| **"Did it complete cleanly?"** | `obs.completedCleanly` |
+| **"Did it error?"** | `obs.errored` + `obs.endError` |
+| **"Disconnect and re-subscribe"** | `obs.reconnect()` |
+| **"Just activate, no assertions"** | `Inspector.activate(store)` |
 | **"What's the full graph state?"** | `Inspector.snapshot()` or `Inspector.dumpGraph()` |
 | **"Graph as Mermaid/D2 for docs"** | `Inspector.toMermaid()` or `Inspector.toD2()` |
 | **"Trace one store's value changes"** | `Inspector.trace(store, cb)` |

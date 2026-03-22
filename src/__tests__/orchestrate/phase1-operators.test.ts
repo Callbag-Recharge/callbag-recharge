@@ -192,9 +192,9 @@ describe("route", () => {
 		p.emit(1);
 		p.error(new Error("fail"));
 
-		expect(obs1.ended).toBe(true);
+		expect(obs1.errored).toBe(true);
 		expect(obs1.endError).toBeInstanceOf(Error);
-		expect(obs2.ended).toBe(true);
+		expect(obs2.errored).toBe(true);
 		expect(obs2.endError).toBeInstanceOf(Error);
 	});
 
@@ -212,10 +212,8 @@ describe("route", () => {
 		const obs1 = Inspector.observe(match);
 		const obs2 = Inspector.observe(miss);
 
-		expect(obs1.ended).toBe(true);
-		expect(obs1.endError).toBeUndefined();
-		expect(obs2.ended).toBe(true);
-		expect(obs2.endError).toBeUndefined();
+		expect(obs1.completedCleanly).toBe(true);
+		expect(obs2.completedCleanly).toBe(true);
 	});
 
 	it("reconnect resets state", () => {
@@ -273,7 +271,7 @@ describe("timeout", () => {
 
 		vi.advanceTimersByTime(100);
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(Error);
 		expect((obs.endError as Error).name).toBe("TimeoutError");
 	});
@@ -290,8 +288,7 @@ describe("timeout", () => {
 		const guarded = pipe(p, timeout(100));
 		const obs = Inspector.observe(guarded);
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 
 		// Timer should be cleaned up — no TimeoutError
 		vi.advanceTimersByTime(200);
@@ -545,8 +542,7 @@ describe("retry", () => {
 		const retried = pipe(source, retry(3));
 		const obs = Inspector.observe(retried);
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 		expect(obs.values).toContain(1);
 	});
 });
@@ -665,7 +661,7 @@ describe("track", () => {
 		);
 
 		const tracked = pipe(source, track()) as any;
-		const _obs = Inspector.observe(tracked);
+		Inspector.activate(tracked);
 
 		expect(tracked.meta.get().duration).toBeDefined();
 		expect(tracked.meta.get().duration).toBeGreaterThanOrEqual(0);
@@ -841,7 +837,7 @@ describe("gate", () => {
 		const gated = pipe(p, gate()) as any;
 		const obs = Inspector.observe(gated);
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
@@ -857,8 +853,7 @@ describe("gate", () => {
 		const gated = pipe(p, gate()) as any;
 		const obs = Inspector.observe(gated);
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("pending store is reactive", () => {

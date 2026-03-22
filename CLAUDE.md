@@ -42,3 +42,4 @@ callbag-recharge is a reactive state management library where **every store is a
 - Biome: tabs, 100 char line width, `noExplicitAny: off`
 - Completion signaling uses standard callbag END (type 2)
 - Integer `_status` packed into `_flags` (bits 7-9) for V8 optimization; string exposed via getter
+- **Testing:** Always use `Inspector.observe()` for test assertions, not raw callbag sinks — see [docs/test-guidance.md](docs/test-guidance.md)

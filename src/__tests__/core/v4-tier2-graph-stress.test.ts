@@ -29,20 +29,7 @@ import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { take } from "../../extra/take";
 import { throttle } from "../../extra/throttle";
-import {
-	batch,
-	DATA,
-	DIRTY,
-	derived,
-	END,
-	effect,
-	Inspector,
-	pipe,
-	producer,
-	START,
-	STATE,
-	state,
-} from "../../index";
+import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
 import { retry } from "../../utils/retry";
 
 beforeEach(() => {
@@ -717,11 +704,7 @@ describe("wide bitmask with merge/combine", () => {
 		const sources = Array.from({ length: 50 }, (_, i) => state(i));
 		const merged = merge(...sources);
 
-		const dirtyCount: number[] = [];
-		// Observe type 3 signals
-		merged.source(START, (type: number, data: any) => {
-			if (type === STATE && data === DIRTY) dirtyCount.push(1);
-		});
+		const obs = Inspector.observe(merged);
 
 		batch(() => {
 			for (let i = 0; i < 50; i++) {
@@ -730,7 +713,7 @@ describe("wide bitmask with merge/combine", () => {
 		});
 
 		// Only one DIRTY signal should have been sent
-		expect(dirtyCount.length).toBe(1);
+		expect(obs.dirtyCount).toBe(1);
 	});
 });
 
@@ -883,19 +866,13 @@ describe("completion propagation through tier 2", () => {
 			switchMap((n: number) => of(n * 10)),
 		);
 
-		const vals: any[] = [];
-		let completed = false;
-
-		mapped.source(START, (type: number, data: any) => {
-			if (type === DATA) vals.push(data);
-			if (type === END && data === undefined) completed = true;
-		});
+		const obs = Inspector.observe(mapped);
 
 		// switchMap resets between inner completions, emitting undefined.
 		// Filter to verify the real mapped values flow correctly.
-		const realValues = vals.filter((v) => v !== undefined);
+		const realValues = obs.values.filter((v) => v !== undefined);
 		expect(realValues).toEqual([10, 20, 30]);
-		expect(completed).toBe(true);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("take(n) after tier 2: limits emissions and completes", () => {
@@ -903,12 +880,7 @@ describe("completion propagation through tier 2", () => {
 		const debounced = pipe(source, debounce(50));
 		const limited = pipe(debounced, take(2));
 
-		const vals: number[] = [];
-		let completed = false;
-		limited.source(START, (type: number, data: any) => {
-			if (type === DATA) vals.push(data);
-			if (type === END && data === undefined) completed = true;
-		});
+		const obs = Inspector.observe(limited);
 
 		source.set(1);
 		vi.advanceTimersByTime(50);
@@ -917,8 +889,8 @@ describe("completion propagation through tier 2", () => {
 		source.set(3);
 		vi.advanceTimersByTime(50);
 
-		expect(vals).toEqual([1, 2]);
-		expect(completed).toBe(true);
+		expect(obs.values).toEqual([1, 2]);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("concat of tier 2 sources: sequential completion", () => {
@@ -953,13 +925,10 @@ describe("error propagation through tier 2", () => {
 			}),
 		);
 
-		let errorSeen: unknown = null;
-		mapped.source(START, (type: number, data: any) => {
-			if (type === END && data !== undefined) errorSeen = data;
-		});
+		const obs = Inspector.observe(mapped);
 
 		trigger.set(5);
-		expect(errorSeen).toBeInstanceOf(Error);
+		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
 	it("rescue after switchMap error: graph recovers", () => {

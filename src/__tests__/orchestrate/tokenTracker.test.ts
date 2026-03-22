@@ -133,7 +133,7 @@ describe("tokenTracker", () => {
 
 		const obs = Inspector.observe(tracked);
 		expect(obs.values).toEqual(["hello"]);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
@@ -150,8 +150,7 @@ describe("tokenTracker", () => {
 
 		const obs = Inspector.observe(tracked);
 		expect(obs.values).toEqual(["done"]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("handles countTokens throwing gracefully", () => {

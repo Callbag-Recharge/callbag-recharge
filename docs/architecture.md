@@ -54,6 +54,7 @@ src/
 ├── utils/           ← resilience, async, tracking, strategies (withStatus, withBreaker, retry, backoff, …)
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
 ├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval, gate, taskState, executionLog)
+├── messaging/       ← Pulsar-inspired topic/subscription system (topic, subscription, repeatPublish)
 ├── memory/          ← agent memory primitives (collection, decay, node)
 ├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
 ├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
@@ -72,8 +73,8 @@ Tier 1 (operators)    extra/
                         ↓
 Tier 2 (utilities)    utils/
                         ↓
-Tier 3 (domains)      orchestrate/    memory/
-                        ↓                ↓
+Tier 3 (domains)      orchestrate/    messaging/    memory/
+                        ↓                ↓              ↓
 Tier 4 (surface)      patterns/    adapters/    compat/
 ```
 
@@ -86,9 +87,10 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 - `utils/` imports from `core/` and `extra/` only
 - `data/` imports from `core/` and `utils/` only
 - `orchestrate/` imports from `core/`, `extra/`, `utils/`, and `data/`
+- `messaging/` imports from `core/`, `extra/`, `utils/`, `data/`, and `orchestrate/`
 - `memory/` imports from `core/`, `utils/`, and `data/`
-- `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
-- `adapters/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, and `memory/`
+- `patterns/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
+- `adapters/` imports from `core/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
 - `compat/` imports from `core/`, `extra/`, `orchestrate/`, and `memory/` only
 - **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
@@ -388,8 +390,9 @@ if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 ### Direction
 
 - **DIRTY, RESOLVED, DATA, END** → downstream (source → sink)
+- **PAUSE, RESUME** → bidirectional (downstream via `signal()`, upstream via talkback)
 - **talkback(END)** → upstream (unsubscribe)
-- **talkback(STATE, lifecycleSignal)** → upstream (RESET, PAUSE, RESUME, TEARDOWN)
+- **talkback(STATE, lifecycleSignal)** → upstream (RESET, TEARDOWN)
 
 ### What each node does with each signal
 
@@ -405,9 +408,9 @@ if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 | RESOLVED sent | `signal(RESOLVED)` when equals guard | `signal(RESOLVED)` when suppressing or all-RESOLVED bitmask | N/A |
 | DATA sent | `emit(value)` | emit computed value downstream | N/A |
 
-### Lifecycle signals (upstream direction)
+### Lifecycle signals (bidirectional)
 
-Lifecycle signals flow **upstream** via `talkback(STATE, signal)`. Each node handles the signal locally, then forwards upstream to its deps. This is the inverse of DIRTY/RESOLVED which flow downstream.
+Lifecycle signals flow **upstream** via `talkback(STATE, signal)` and can also flow **downstream** via `actions.signal()` or `producer.signal()`. Upstream: each node handles the signal locally, then forwards to its deps. Downstream: PAUSE/RESUME propagate through the graph naturally since unknown STATE signals are forwarded unchanged (rule 6). The `pausable()` extra operator uses downstream PAUSE/RESUME to gate DATA flow.
 
 | Signal | producer | state | operator | derived | effect |
 |--------|----------|-------|----------|---------|--------|
@@ -484,10 +487,10 @@ Order: idempotency guard → set terminal status → store error (derived: `_cac
 
 ### Lifecycle signal control
 
-Lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) provide graph-native control without imperative method calls (§1.15). They propagate upstream via `talkback(STATE, signal)`:
+Lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) provide graph-native control without imperative method calls (§1.15). They propagate upstream via `talkback(STATE, signal)` and PAUSE/RESUME can also propagate downstream:
 
 - **RESET**: Resets state to initial values, re-initializes operator handlers (generation counter invalidates stale closures), re-runs effects. Producer emits initial value after reset.
-- **PAUSE/RESUME**: Forwarded upstream. Tier 2 operators with timers/polling handle locally (e.g., timer pauses ticking, HTTP adapter pauses polling).
+- **PAUSE/RESUME**: Bidirectional. Upstream: forwarded via talkback. Tier 2 operators with timers/polling handle locally (e.g., timer pauses ticking). Downstream: `pausable()` operator dispatches PAUSE/RESUME via `signal()`, gating DATA flow. Messaging layer dispatches PAUSE/RESUME through companion stores when topic/subscription pauses.
 - **TEARDOWN**: Terminal signal. Each node handles cleanup then completes (cascades END downstream). Replaces imperative `destroy()` calls on individual nodes.
 
 Orchestrate's `pipeline.reset()` and `pipeline.destroy()` send RESET/TEARDOWN via step subscriptions. The `task()` operator intercepts these signals and delegates to `taskState` (ts.reset()/ts.destroy()) — no flat task list iteration needed.

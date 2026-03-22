@@ -6,6 +6,7 @@
  * _flags bitmask and snapshot-free completion optimizations.
  */
 import { describe, expect, it, vi } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { DATA, END, START, STATE } from "../../core/protocol";
 import { subscribe } from "../../extra/subscribe";
 import { derived, effect, operator, producer, state } from "../../index";
@@ -46,14 +47,13 @@ describe("operator complete/error disconnects upstream", () => {
 			{ initial: 0 },
 		);
 
-		const values: number[] = [];
-		subscribe(op, (v) => values.push(v));
+		const obs = Inspector.observe(op);
 
 		// Trigger a value that causes complete
 		s.set(42);
 
 		expect(upstreamTalkbackEnd).toHaveBeenCalledTimes(1);
-		expect(values).toEqual([42]);
+		expect(obs.values).toEqual([42]);
 	});
 
 	it("error() sends END to upstream deps", () => {
@@ -89,20 +89,13 @@ describe("operator complete/error disconnects upstream", () => {
 			{ initial: "" },
 		);
 
-		let ended = false;
-		let endError: unknown;
-		subscribe(op, () => {}, {
-			onEnd: (e) => {
-				ended = true;
-				endError = e;
-			},
-		});
+		const obs = Inspector.observe(op);
 
 		s.set(1);
 
 		expect(upstreamTalkbackEnd).toHaveBeenCalledTimes(1);
-		expect(ended).toBe(true);
-		expect(endError).toBeInstanceOf(Error);
+		expect(obs.errored).toBe(true);
+		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
 	it("complete() disconnects multiple upstream deps", () => {
@@ -141,7 +134,7 @@ describe("operator complete/error disconnects upstream", () => {
 			{ initial: 0 },
 		);
 
-		subscribe(op, () => {});
+		Inspector.activate(op);
 
 		// Trigger completion from dep 0
 		s1.set(1);
@@ -171,18 +164,17 @@ describe("operator complete/error disconnects upstream", () => {
 			{ initial: 0 },
 		);
 
-		const emitted: number[] = [];
-		subscribe(op, (v) => emitted.push(v));
+		const obs = Inspector.observe(op);
 
 		s.set(1);
-		expect(emitted).toEqual([1]);
+		expect(obs.values).toEqual([1]);
 
 		shouldComplete = true;
 		s.set(999); // triggers complete
 
 		s.set(2); // should be ignored — handler is null, operator is completed
 
-		expect(emitted).toEqual([1]);
+		expect(obs.values).toEqual([1]);
 	});
 });
 
@@ -370,7 +362,7 @@ describe("operator resetOnTeardown on complete/error", () => {
 			{ initial: -1, resetOnTeardown: true },
 		);
 
-		subscribe(op, () => {});
+		Inspector.activate(op);
 		s.set(42);
 		expect(op.get()).toBe(42);
 
@@ -395,7 +387,7 @@ describe("operator resetOnTeardown on complete/error", () => {
 			{ initial: -1, resetOnTeardown: true },
 		);
 
-		subscribe(op, () => {});
+		Inspector.activate(op);
 		s.set(42);
 		expect(op.get()).toBe(42);
 
@@ -419,7 +411,7 @@ describe("operator resetOnTeardown on complete/error", () => {
 			{ initial: -1 },
 		);
 
-		subscribe(op, () => {});
+		Inspector.activate(op);
 		s.set(42);
 		completeFn!();
 		// Without resetOnTeardown, value should be preserved
@@ -441,12 +433,11 @@ describe("derived handles upstream END", () => {
 		);
 
 		const d = derived([p], () => p.get()! * 2);
-		let ended = false;
-		subscribe(d, () => {}, { onEnd: () => (ended = true) });
+		const obs = Inspector.observe(d);
 
-		expect(ended).toBe(false);
+		expect(obs.ended).toBe(false);
 		completeFn!();
-		expect(ended).toBe(true);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("dep error → derived sends END with error to sinks", () => {
@@ -462,12 +453,11 @@ describe("derived handles upstream END", () => {
 		);
 
 		const d = derived([p], () => p.get()! * 2);
-		let endError: unknown;
-		subscribe(d, () => {}, { onEnd: (e) => (endError = e) });
+		const obs = Inspector.observe(d);
 
 		errorFn!(new Error("upstream failed"));
-		expect(endError).toBeInstanceOf(Error);
-		expect((endError as Error).message).toBe("upstream failed");
+		expect(obs.endError).toBeInstanceOf(Error);
+		expect((obs.endError as Error).message).toBe("upstream failed");
 	});
 
 	it("after dep END, get() returns cached value (recomputes from dep cache)", () => {
@@ -484,7 +474,7 @@ describe("derived handles upstream END", () => {
 		);
 
 		const d = derived([p], () => p.get()! * 2);
-		subscribe(d, () => {});
+		Inspector.activate(d);
 
 		emitFn!(10);
 		expect(d.get()).toBe(20);
@@ -507,14 +497,13 @@ describe("derived handles upstream END", () => {
 		);
 
 		const d = derived([p], () => p.get()!);
-		subscribe(d, () => {});
+		Inspector.activate(d);
 
 		completeFn!();
 
 		// New subscription after derived completed
-		let ended = false;
-		subscribe(d, () => {}, { onEnd: () => (ended = true) });
-		expect(ended).toBe(true);
+		const obs2 = Inspector.observe(d);
+		expect(obs2.ended).toBe(true);
 	});
 
 	it("dep END disconnects all deps", () => {
@@ -572,7 +561,7 @@ describe("derived handles upstream END", () => {
 		};
 
 		const d = derived([trackedS1 as any, trackedP as any], () => (s1.get() ?? 0) + (p.get() ?? 0));
-		subscribe(d, () => {});
+		Inspector.activate(d);
 
 		// Complete p → derived should disconnect both deps
 		completeFn!();
@@ -591,7 +580,7 @@ describe("derived handles upstream END", () => {
 			{ initial: 0 },
 		);
 		// Subscribe and complete immediately
-		const _unsub = subscribe(p, () => {});
+		Inspector.activate(p);
 		completeFn!();
 
 		// Now p is completed. Derived from p should get END during connection.
@@ -842,7 +831,7 @@ describe("operator source() protocol ordering", () => {
 			{ initial: 0 },
 		);
 
-		subscribe(op, () => {});
+		Inspector.activate(op);
 
 		// Dep should never have been subscribed (loop broke at i=0)
 		expect(subscribeCount).toBe(0);

@@ -413,14 +413,12 @@ describe("timeout", () => {
 	it("sends END with TimeoutError when source is idle too long", () => {
 		const s = state(0);
 		const t = pipe(s, timeout(100));
-		let endData: unknown;
-		t.source(0, (type: number, data?: unknown) => {
-			if (type === 2) endData = data;
-		});
+		const obs = Inspector.observe(t);
 
 		vi.advanceTimersByTime(100);
 
-		expect(endData).toBeInstanceOf(TimeoutError);
+		expect(obs.errored).toBe(true);
+		expect(obs.endError).toBeInstanceOf(TimeoutError);
 	});
 
 	it("resets timer on each emission", () => {
@@ -461,20 +459,16 @@ describe("timeout", () => {
 	it("all sinks receive TimeoutError", () => {
 		const s = state(0);
 		const t = pipe(s, timeout(100));
-		const errors: unknown[] = [];
 
-		t.source(0, (type: number, data?: unknown) => {
-			if (type === 2) errors.push(data);
-		});
-		t.source(0, (type: number, data?: unknown) => {
-			if (type === 2) errors.push(data);
-		});
+		const obs1 = Inspector.observe(t);
+		const obs2 = Inspector.observe(t);
 
 		vi.advanceTimersByTime(100);
 
-		expect(errors).toHaveLength(2);
-		expect(errors[0]).toBeInstanceOf(TimeoutError);
-		expect(errors[1]).toBeInstanceOf(TimeoutError);
+		expect(obs1.errored).toBe(true);
+		expect(obs1.endError).toBeInstanceOf(TimeoutError);
+		expect(obs2.errored).toBe(true);
+		expect(obs2.endError).toBeInstanceOf(TimeoutError);
 	});
 });
 
@@ -506,13 +500,10 @@ describe("subject", () => {
 
 	it("complete() sends END to all sinks", () => {
 		const s = subject<number>();
-		let gotEnd = false;
-		s.source(0, (type: number) => {
-			if (type === 2) gotEnd = true;
-		});
+		const obs = Inspector.observe(s);
 
 		s.complete();
-		expect(gotEnd).toBe(true);
+		expect(obs.ended).toBe(true);
 	});
 
 	it("ignores next() after complete()", () => {
@@ -544,14 +535,12 @@ describe("subject", () => {
 
 	it("error() sends END with error data to all sinks", () => {
 		const s = subject<number>();
-		let endData: unknown;
-		s.source(0, (type: number, data?: unknown) => {
-			if (type === 2) endData = data;
-		});
+		const obs = Inspector.observe(s);
 
 		const err = new Error("boom");
 		s.error(err);
-		expect(endData).toBe(err);
+		expect(obs.errored).toBe(true);
+		expect(obs.endError).toBe(err);
 	});
 
 	it("suppresses duplicate values via Object.is", () => {
@@ -568,15 +557,12 @@ describe("subject", () => {
 
 	it("error() after complete() is a no-op", () => {
 		const s = subject<number>();
-		let endCount = 0;
-		s.source(0, (type: number) => {
-			if (type === 2) endCount++;
-		});
+		const obs = Inspector.observe(s);
 
 		s.complete();
 		s.error(new Error("late"));
 
-		expect(endCount).toBe(1); // only one END from complete()
+		expect(obs.completedCleanly).toBe(true); // complete(), not error()
 	});
 
 	it("next(undefined) as first call sets value", () => {
@@ -732,10 +718,7 @@ describe("retry", () => {
 		};
 
 		const r = pipe(src, retry(2));
-		let endData: unknown;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2) endData = data;
-		});
+		const obs = Inspector.observe(r);
 
 		expect(producerCount).toBe(1);
 
@@ -751,7 +734,7 @@ describe("retry", () => {
 		const finalErr = new Error("fail-3");
 		errorSink?.(2, finalErr);
 		expect(producerCount).toBe(3); // no more retries
-		expect(endData).toBe(finalErr);
+		expect(obs.endError).toBe(finalErr);
 	});
 
 	it("forwards normal completion downstream", () => {
@@ -760,13 +743,10 @@ describe("retry", () => {
 		});
 
 		const r = pipe(src, retry(3));
-		let gotEnd = false;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2 && data === undefined) gotEnd = true;
-		});
+		const obs = Inspector.observe(r);
 
 		src.complete(); // normal completion — no error
-		expect(gotEnd).toBe(true);
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	// --- Enhanced retry with options ---
@@ -791,10 +771,7 @@ describe("retry", () => {
 		};
 
 		const r = pipe(src, retry({ count: 2 }));
-		let endData: unknown;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2) endData = data;
-		});
+		const obs = Inspector.observe(r);
 
 		errorSink?.(2, new Error("fail"));
 		expect(producerCount).toBe(2); // retried once
@@ -804,7 +781,7 @@ describe("retry", () => {
 
 		errorSink?.(2, new Error("final"));
 		expect(producerCount).toBe(3); // no more
-		expect(endData).toBeInstanceOf(Error);
+		expect(obs.endError).toBeInstanceOf(Error);
 	});
 
 	it("retry({ delay: constant }) delays before reconnect", () => {
@@ -827,7 +804,7 @@ describe("retry", () => {
 		};
 
 		const r = pipe(src, retry({ count: 3, delay: backoffConstant(1000) }));
-		r.source(0, () => {});
+		Inspector.activate(r);
 
 		expect(producerCount).toBe(1);
 		errorSink?.(2, new Error("fail"));
@@ -863,17 +840,14 @@ describe("retry", () => {
 				while: (err) => (err as Error).message !== "fatal",
 			}),
 		);
-		let endData: unknown;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2) endData = data;
-		});
+		const obs = Inspector.observe(r);
 
 		errorSink?.(2, new Error("transient"));
 		expect(producerCount).toBe(2); // retried
 
 		errorSink?.(2, new Error("fatal"));
 		expect(producerCount).toBe(2); // NOT retried
-		expect((endData as Error).message).toBe("fatal");
+		expect((obs.endError as Error).message).toBe("fatal");
 	});
 
 	it("retry cleans up timer on teardown", () => {
@@ -894,14 +868,11 @@ describe("retry", () => {
 		};
 
 		const r = pipe(src, retry({ count: 3, delay: backoffConstant(5000) }));
-		let talkback: ((type: number) => void) | null = null;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 0) talkback = data as (type: number) => void;
-		});
+		const dispose = Inspector.activate(r);
 
 		errorSink?.(2, new Error("fail"));
 		// Timer is pending — unsubscribe should clean it up
-		talkback?.(2);
+		dispose();
 		// No errors should occur when timer fires
 		vi.advanceTimersByTime(10_000);
 	});
@@ -1000,13 +971,10 @@ describe("rescue", () => {
 			src,
 			rescue(() => state(0)),
 		);
-		let gotEnd = false;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2 && data === undefined) gotEnd = true;
-		});
+		const obs = Inspector.observe(r);
 
 		src.complete();
-		expect(gotEnd).toBe(true);
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("forwards normal completion from fallback", () => {
@@ -1034,15 +1002,12 @@ describe("rescue", () => {
 			src,
 			rescue(() => fallback),
 		);
-		let gotEnd = false;
-		r.source(0, (type: number, data?: unknown) => {
-			if (type === 2 && data === undefined) gotEnd = true;
-		});
+		const obs = Inspector.observe(r);
 
 		// Error on src → switch to fallback
 		errorSink?.(2, new Error("fail"));
 		// Normal completion on fallback → should forward
 		fallback.complete();
-		expect(gotEnd).toBe(true);
+		expect(obs.completedCleanly).toBe(true);
 	});
 });

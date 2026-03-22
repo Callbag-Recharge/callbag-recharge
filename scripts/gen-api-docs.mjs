@@ -144,9 +144,20 @@ const REGISTRY = {
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",
 
+	// Extras — control flow
+	pausable: "src/extra/pausable.ts",
+
+	// Extras — universal source
+	fromAny: "src/extra/fromAny.ts",
+
 	// Extras — interop
 	subject: "src/extra/subject.ts",
 	wrap: "src/extra/wrap.ts",
+
+	// Messaging
+	topic: "src/messaging/topic.ts",
+	subscription: "src/messaging/subscription.ts",
+	repeatPublish: "src/messaging/repeatPublish.ts",
 
 	// Patterns
 	textBuffer: "src/patterns/textBuffer/index.ts",

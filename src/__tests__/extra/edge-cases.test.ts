@@ -70,7 +70,7 @@ describe("merge: error propagation", () => {
 
 		a.error("boom");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("boom");
 	});
 
@@ -84,8 +84,7 @@ describe("merge: error propagation", () => {
 		a.complete();
 		expect(obs.ended).toBe(false); // one source still active
 		b.complete();
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("merge emits from each source independently", () => {
@@ -119,7 +118,7 @@ describe("tier-2: inner error forwarding", () => {
 
 		outer.set(2);
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("inner-err");
 	});
 
@@ -135,7 +134,7 @@ describe("tier-2: inner error forwarding", () => {
 
 		// Trigger outer emission to create inner (throwError)
 		outer.set(1);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("err-1");
 	});
 
@@ -151,7 +150,7 @@ describe("tier-2: inner error forwarding", () => {
 
 		// Trigger outer emission to create inner (throwError)
 		outer.set(1);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("err-1");
 	});
 
@@ -166,7 +165,7 @@ describe("tier-2: inner error forwarding", () => {
 		outer.set(inner2.store);
 		inner2.error("inner-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("inner-err");
 	});
 });
@@ -182,8 +181,7 @@ describe("take(0)", () => {
 		const obs = Inspector.observe(t);
 
 		expect(obs.values).toEqual([]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("take(0) should not forward STATE signals", () => {
@@ -205,8 +203,7 @@ describe("take(0)", () => {
 
 		s.set(2);
 		expect(obs.values).toContain(2);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 });
 
@@ -340,8 +337,7 @@ describe("tier-2: completion forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("throttle forwards upstream completion", () => {
@@ -352,8 +348,7 @@ describe("tier-2: completion forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("switchMap completes when outer completes and no active inner", () => {
@@ -375,8 +370,7 @@ describe("tier-2: completion forwarding", () => {
 
 		// Inner completes — now switchMap should complete
 		inner.complete();
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("debounce flushes pending value on upstream completion", () => {
@@ -405,7 +399,7 @@ describe("tier-2: completion forwarding", () => {
 
 		// Error cancels pending timer — value is NOT flushed
 		expect(values).toEqual([]);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("fail");
 	});
 
@@ -417,7 +411,7 @@ describe("tier-2: completion forwarding", () => {
 
 		s.error("fail");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("fail");
 	});
 });
@@ -608,7 +602,7 @@ describe("combine: error from any source", () => {
 
 		b.error("combine-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("combine-err");
 	});
 
@@ -622,8 +616,7 @@ describe("combine: error from any source", () => {
 
 		a.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("combine emits last tuple before completion", () => {
@@ -658,7 +651,7 @@ describe("distinctUntilChanged: completion/error forwarding", () => {
 
 		s.error("duc-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("duc-err");
 	});
 
@@ -671,8 +664,7 @@ describe("distinctUntilChanged: completion/error forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 });
 
@@ -813,7 +805,7 @@ describe("skip: upstream completion/error", () => {
 		const obs = Inspector.observe(sk);
 
 		s.error("oops");
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("oops");
 	});
 });
@@ -829,7 +821,7 @@ describe("take: error forwarding", () => {
 		const obs = Inspector.observe(t);
 
 		s.error("take-err");
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("take-err");
 	});
 });
@@ -1036,7 +1028,7 @@ describe("map: error forwarding", () => {
 		const obs = Inspector.observe(m);
 
 		s.error("map-err");
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("map-err");
 	});
 });
@@ -1057,7 +1049,7 @@ describe("concat: error forwarding", () => {
 
 		a.error("concat-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("concat-err");
 		// Should NOT have subscribed to b
 		expect(obs.values).toEqual([]);
@@ -1076,8 +1068,7 @@ describe("concat: error forwarding", () => {
 		b.emit(20);
 		b.complete(); // all done
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("error from second source after first completes is forwarded", () => {
@@ -1090,7 +1081,7 @@ describe("concat: error forwarding", () => {
 		a.complete(); // moves to b
 		b.error("second-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("second-err");
 	});
 });
@@ -1113,7 +1104,7 @@ describe("bufferTime: error/completion forwarding", () => {
 		s.emit(2);
 		s.error("buf-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("buf-err");
 		// Buffer was NOT flushed on error
 		expect(obs.values).toEqual([]);
@@ -1132,8 +1123,7 @@ describe("bufferTime: error/completion forwarding", () => {
 
 		// Buffer should be flushed synchronously on completion
 		expect(values).toEqual([[1, 2]]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("completes immediately if buffer is empty on upstream completion", () => {
@@ -1144,8 +1134,7 @@ describe("bufferTime: error/completion forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 		expect(obs.values).toEqual([]);
 	});
 });
@@ -1172,7 +1161,7 @@ describe("delay: error/completion forwarding", () => {
 		// Error cancels pending timers — values are NOT emitted
 		vi.advanceTimersByTime(200);
 		expect(values).toEqual([]);
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("delay-err");
 	});
 
@@ -1194,8 +1183,7 @@ describe("delay: error/completion forwarding", () => {
 		// After delay, values flush and then completion fires
 		vi.advanceTimersByTime(100);
 		expect(values).toEqual([1, 2]);
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("completes immediately if no pending timers on upstream completion", () => {
@@ -1206,8 +1194,7 @@ describe("delay: error/completion forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 });
 
@@ -1226,8 +1213,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 
 		s.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 
 		// Timeout timer should be cleared — advancing time should NOT error
 		vi.advanceTimersByTime(1000);
@@ -1242,7 +1228,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 
 		s.error("upstream-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("upstream-err");
 	});
 
@@ -1254,7 +1240,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 
 		vi.advanceTimersByTime(101);
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(TimeoutError);
 	});
 
@@ -1272,7 +1258,7 @@ describe("timeout: upstream error/completion forwarding", () => {
 
 		vi.advanceTimersByTime(30);
 		// 110ms since last emit — timeout fires
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBeInstanceOf(TimeoutError);
 	});
 });
@@ -1294,7 +1280,7 @@ describe("sample: notifier error/completion forwarding", () => {
 
 		notifier.error("notifier-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("notifier-err");
 	});
 
@@ -1307,8 +1293,7 @@ describe("sample: notifier error/completion forwarding", () => {
 
 		notifier.complete();
 
-		expect(obs.ended).toBe(true);
-		expect(obs.endError).toBeUndefined();
+		expect(obs.completedCleanly).toBe(true);
 	});
 
 	it("forwards error from input source", () => {
@@ -1320,7 +1305,7 @@ describe("sample: notifier error/completion forwarding", () => {
 
 		input.error("input-err");
 
-		expect(obs.ended).toBe(true);
+		expect(obs.errored).toBe(true);
 		expect(obs.endError).toBe("input-err");
 	});
 

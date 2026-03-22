@@ -178,6 +178,16 @@
 				"default": "./dist/orchestrate/index.cjs"
 			}
 		},
+		"./messaging": {
+			"import": {
+				"types": "./dist/messaging/index.d.ts",
+				"default": "./dist/messaging/index.js"
+			},
+			"require": {
+				"types": "./dist/messaging/index.d.cts",
+				"default": "./dist/messaging/index.cjs"
+			}
+		},
 		"./utils": {
 			"import": {
 				"types": "./dist/utils/index.d.ts",

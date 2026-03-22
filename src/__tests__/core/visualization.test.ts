@@ -9,7 +9,7 @@ describe("Inspector.toMermaid", () => {
 		const b = derived([a], () => a.get() * 2, { name: "doubled" });
 
 		// Force subscription to register edges
-		const obs = Inspector.observe(b);
+		const dispose = Inspector.activate(b);
 
 		const mermaid = Inspector.toMermaid();
 
@@ -19,7 +19,7 @@ describe("Inspector.toMermaid", () => {
 		// Should have an edge
 		expect(mermaid).toContain("-->");
 
-		obs.dispose();
+		dispose();
 	});
 
 	it("respects direction option", () => {
@@ -49,7 +49,7 @@ describe("Inspector.toD2", () => {
 		const a = state(1, { name: "count" });
 		const b = derived([a], () => a.get() * 2, { name: "doubled" });
 
-		const obs = Inspector.observe(b);
+		const dispose = Inspector.activate(b);
 
 		const d2 = Inspector.toD2();
 
@@ -60,7 +60,7 @@ describe("Inspector.toD2", () => {
 		expect(d2).toContain("shape: hexagon"); // derived shape
 		expect(d2).toContain("->");
 
-		obs.dispose();
+		dispose();
 	});
 
 	it("respects direction option", () => {

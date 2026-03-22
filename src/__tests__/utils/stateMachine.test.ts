@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { stateMachine } from "../../utils/stateMachine";
 
 // ---------------------------------------------------------------------------
@@ -223,21 +224,15 @@ describe("stateMachine", () => {
 
 	it("current and context are reactive stores", () => {
 		const m = createTrafficLight();
-		const states: string[] = [];
 
 		// Subscribe to current store
-		let talkback: any;
-		m.current.source(0, (t: number, d: any) => {
-			if (t === 0) talkback = d;
-			if (t === 1) states.push(d);
-		});
+		const obs = Inspector.observe(m.current);
 
 		m.send("NEXT" as any); // red → green
 		m.send("NEXT" as any); // green → yellow
 
-		expect(states).toEqual(["green", "yellow"]);
+		expect(obs.values).toEqual(["green", "yellow"]);
 
-		// Disconnect
-		if (talkback) talkback(2);
+		obs.dispose();
 	});
 });

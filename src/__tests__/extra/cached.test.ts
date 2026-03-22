@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
+import { Inspector } from "../../core/inspector";
 import { cached } from "../../extra/cached";
-import { batch, DATA, DIRTY, derived, pipe, RESOLVED, START, STATE, state } from "../../index";
+import { batch, DIRTY, derived, pipe, RESOLVED, state } from "../../index";
 
 // ---------------------------------------------------------------------------
 // Factory form: cached([deps], fn, opts?)
@@ -18,15 +19,12 @@ describe("cached() factory form", () => {
 		const a = state(1);
 		const c = cached([a], () => a.get() * 2);
 
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		a.set(5);
 		a.set(10);
 
-		expect(values).toEqual([10, 20]);
+		expect(obs.values).toEqual([10, 20]);
 		expect(c.get()).toBe(20);
 	});
 
@@ -86,21 +84,16 @@ describe("cached() factory form", () => {
 			equals: Object.is,
 		});
 
-		const signals: unknown[] = [];
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		// floor(1/10) = 0, floor(5/10) = 0 → same → RESOLVED
 		batch(() => a.set(5));
-		expect(signals).toContain(RESOLVED);
-		expect(values).toEqual([]); // no new DATA
+		expect(obs.signals).toContain(RESOLVED);
+		expect(obs.values).toEqual([]); // no new DATA
 
 		// floor(15/10) = 1 → different → DATA
 		a.set(15);
-		expect(values).toContain(1);
+		expect(obs.values).toContain(1);
 	});
 
 	it("reconnection after disconnect", () => {
@@ -108,31 +101,23 @@ describe("cached() factory form", () => {
 		const c = cached([a], () => a.get() * 3);
 
 		// First subscription
-		let talkback: (t: number) => void;
-		const values1: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === START) talkback = data;
-			if (type === DATA) values1.push(data);
-		});
+		const obs1 = Inspector.observe(c);
 
 		a.set(5);
-		expect(values1).toEqual([15]);
+		expect(obs1.values).toEqual([15]);
 
 		// Disconnect
-		talkback!(2);
+		obs1.dispose();
 
 		// Disconnected get() should still work
 		a.set(10);
 		expect(c.get()).toBe(30);
 
 		// Reconnect
-		const values2: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values2.push(data);
-		});
+		const obs2 = Inspector.observe(c);
 
 		a.set(20);
-		expect(values2).toEqual([60]);
+		expect(obs2.values).toEqual([60]);
 	});
 
 	it("forwards type 3 signals (diamond resolution)", () => {
@@ -143,10 +128,7 @@ describe("cached() factory form", () => {
 		// Multi-dep derived depending on cached and b
 		const combined = derived([expensiveA, b], () => expensiveA.get() + b.get());
 
-		const values: number[] = [];
-		combined.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(combined);
 
 		// Batch both changes — diamond resolution via type 3
 		batch(() => {
@@ -155,7 +137,7 @@ describe("cached() factory form", () => {
 		});
 		expect(combined.get()).toBe(220); // 2*100 + 20
 		// Should recompute only once
-		expect(values.filter((v) => v === 220).length).toBe(1);
+		expect(obs.values.filter((v) => v === 220).length).toBe(1);
 	});
 
 	it("multi-dep cached: no glitch in batched diamond", () => {
@@ -163,10 +145,7 @@ describe("cached() factory form", () => {
 		const b = state(10);
 		const c = cached([a, b], () => a.get() * 100 + b.get());
 
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		// Both deps change in a batch — should recompute only ONCE
 		batch(() => {
@@ -175,7 +154,7 @@ describe("cached() factory form", () => {
 		});
 
 		// Only the final correct value, no glitchy intermediate
-		expect(values).toEqual([220]);
+		expect(obs.values).toEqual([220]);
 		expect(c.get()).toBe(220);
 	});
 
@@ -186,12 +165,7 @@ describe("cached() factory form", () => {
 			equals: Object.is,
 		});
 
-		const signals: unknown[] = [];
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		// Change both deps but result stays 0 (floor((2+20)/100) = 0)
 		batch(() => {
@@ -199,8 +173,8 @@ describe("cached() factory form", () => {
 			b.set(20);
 		});
 
-		expect(values).toEqual([]); // no new DATA
-		expect(signals).toContain(RESOLVED);
+		expect(obs.values).toEqual([]); // no new DATA
+		expect(obs.signals).toContain(RESOLVED);
 	});
 });
 
@@ -213,17 +187,14 @@ describe("cached() pipe form", () => {
 		const s = state(1);
 		const c = pipe(s, cached<number>());
 
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		s.set(1); // same value — deduped
 		s.set(2); // different — emitted
 		s.set(2); // same — deduped
 		s.set(3); // different — emitted
 
-		expect(values).toEqual([2, 3]);
+		expect(obs.values).toEqual([2, 3]);
 	});
 
 	it("deduplicates with custom equality", () => {
@@ -233,15 +204,12 @@ describe("cached() pipe form", () => {
 			cached<{ x: number }>((a, b) => a.x === b.x),
 		);
 
-		const values: Array<{ x: number }> = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		s.set({ x: 1 }); // same by custom eq — deduped
 		s.set({ x: 2 }); // different — emitted
 
-		expect(values).toEqual([{ x: 2 }]);
+		expect(obs.values).toEqual([{ x: 2 }]);
 	});
 
 	it("sends RESOLVED on duplicate (type 3)", () => {
@@ -250,16 +218,13 @@ describe("cached() pipe form", () => {
 		const floored = derived([s], () => Math.floor(s.get() / 10));
 		const c = pipe(floored, cached<number>());
 
-		const signals: unknown[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push(data);
-		});
+		const obs = Inspector.observe(c);
 
 		// floor(1/10)=0, floor(5/10)=0 → same → RESOLVED
 		batch(() => s.set(5));
 
-		expect(signals).toContain(DIRTY);
-		expect(signals).toContain(RESOLVED);
+		expect(obs.signals).toContain(DIRTY);
+		expect(obs.signals).toContain(RESOLVED);
 	});
 
 	it("cached getter on disconnected reads", () => {
@@ -280,27 +245,17 @@ describe("cached() pipe form", () => {
 		const s = state(1);
 		const c = pipe(s, cached<number>());
 
-		let talkback: (t: number) => void;
-		const values: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === START) talkback = data;
-			if (type === DATA) values.push(data);
-		});
+		const obs1 = Inspector.observe(c);
 
 		s.set(2);
-		expect(values).toEqual([2]);
+		expect(obs1.values).toEqual([2]);
 
 		// Disconnect and reconnect
-		talkback!(2);
-
-		const values2: number[] = [];
-		c.source(START, (type: number, data: any) => {
-			if (type === DATA) values2.push(data);
-		});
+		const obs2 = obs1.reconnect();
 
 		s.set(2); // same as last — deduped
 		s.set(3); // different — emitted
 
-		expect(values2).toEqual([3]);
+		expect(obs2.values).toEqual([3]);
 	});
 });

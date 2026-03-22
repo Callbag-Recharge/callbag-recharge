@@ -70,6 +70,7 @@ export default defineConfig({
 		"src/data/index.ts",
 		"src/memory/index.ts",
 		"src/orchestrate/index.ts",
+		"src/messaging/index.ts",
 		"src/patterns/toolCallState/index.ts",
 		"src/patterns/hybridRoute/index.ts",
 		"src/patterns/agentLoop/index.ts",

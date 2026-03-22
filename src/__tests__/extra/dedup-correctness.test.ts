@@ -11,7 +11,7 @@ import { scan } from "../../extra/scan";
 import { subscribe } from "../../extra/subscribe";
 import { switchMap } from "../../extra/switchMap";
 import { throttle } from "../../extra/throttle";
-import { batch, derived, effect, Inspector, pipe, producer, START, state } from "../../index";
+import { batch, derived, effect, Inspector, pipe, producer, state } from "../../index";
 
 beforeEach(() => {
 	Inspector._reset();
@@ -21,20 +21,6 @@ beforeEach(() => {
 afterEach(() => {
 	vi.useRealTimers();
 });
-
-// ===========================================================================
-// Helpers
-// ===========================================================================
-
-/** Observe raw DATA emissions at callbag protocol level, bypassing subscribe's dedup. */
-function observeRaw<T>(store: { source: (type: number, payload?: any) => void }) {
-	const data: T[] = [];
-	store.source(START, (type: number, d: any) => {
-		if (type === START) return;
-		if (type === 1) data.push(d);
-	});
-	return data;
-}
 
 // ===========================================================================
 // 1. Diamond resolution + RESOLVED propagation
@@ -172,12 +158,12 @@ describe("filter: no default dedup (rxjs/callbag semantics)", () => {
 			s,
 			filter((v: number) => v > 0),
 		);
-		const data = observeRaw<number | undefined>(f);
+		const obs = Inspector.observe(f);
 
 		s.emit(1);
 		s.emit(1); // same value, passes predicate → should emit (no dedup!)
 
-		expect(data).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("filter re-emits value after fail→pass with same value", () => {
@@ -187,13 +173,13 @@ describe("filter: no default dedup (rxjs/callbag semantics)", () => {
 			s,
 			filter((v: number) => v % 2 === 0),
 		);
-		const data = observeRaw<number | undefined>(f);
+		const obs = Inspector.observe(f);
 
 		s.set(3); // fails predicate
 		s.set(2); // passes — same as initial, but downstream may have missed it
 
 		// After removing default dedup, this should emit 2 again
-		expect(data).toEqual([2]);
+		expect(obs.values).toEqual([2]);
 	});
 
 	it("filter with explicit equals still deduplicates (opt-in)", () => {
@@ -202,12 +188,12 @@ describe("filter: no default dedup (rxjs/callbag semantics)", () => {
 			s,
 			filter((v: number) => v > 0, { equals: Object.is }),
 		);
-		const data = observeRaw<number | undefined>(f);
+		const obs = Inspector.observe(f);
 
 		s.emit(1);
 		s.emit(1); // equals: Object.is → deduplicated
 
-		expect(data).toEqual([1]);
+		expect(obs.values).toEqual([1]);
 	});
 });
 
@@ -256,12 +242,12 @@ describe("subscribe: no built-in dedup (rxjs/callbag semantics)", () => {
 
 	it("raw callbag sink sees all DATA including duplicates", () => {
 		const s = producer<number>();
-		const raw = observeRaw<number>(s);
+		const obs = Inspector.observe(s);
 
 		s.emit(1);
 		s.emit(1); // producer has no equals → raw DATA is sent
 
-		expect(raw).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("state's dedup is in state, not subscribe — subscribe is transparent", () => {
@@ -295,19 +281,19 @@ describe("tier-2 internal subscribe must not dedup input", () => {
 		// throttle's callback, silently dropping the second value.
 		const s = producer<number>();
 		const t = pipe(s, throttle(50));
-		const data = observeRaw<number | undefined>(t);
+		const obs = Inspector.observe(t);
 
 		s.emit(1); // window opens, passes
 		vi.advanceTimersByTime(50); // window closes
 		s.emit(1); // new window — must reach throttle callback
 
-		expect(data).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("debounce: re-emitting same value resets timer and emits", () => {
 		const s = producer<number>();
 		const d = pipe(s, debounce(50));
-		const data = observeRaw<number | undefined>(d);
+		const obs = Inspector.observe(d);
 
 		s.emit(1);
 		vi.advanceTimersByTime(50); // output: 1
@@ -315,20 +301,20 @@ describe("tier-2 internal subscribe must not dedup input", () => {
 		s.emit(1); // same value — subscribe should NOT suppress this
 		vi.advanceTimersByTime(50); // output: 1 again
 
-		expect(data).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("sample: same input value sampled twice should emit both times", () => {
 		const s = producer<number>(undefined, { initial: 5 });
 		const notifier = state(0);
 		const sampled = pipe(s, sample(notifier));
-		const data = observeRaw<number | undefined>(sampled);
+		const obs = Inspector.observe(sampled);
 
 		// input is 5, notifier fires twice
 		notifier.set(1); // sample emits 5
 		notifier.set(2); // sample emits 5 again — must not be suppressed
 
-		expect(data).toEqual([5, 5]);
+		expect(obs.values).toEqual([5, 5]);
 	});
 });
 
@@ -552,13 +538,13 @@ describe("multi-operator chains", () => {
 			map((v: number) => v % 3), // 1→1, 2→2, 3→0, 4→1
 			distinctUntilChanged(),
 		);
-		const data = observeRaw<number>(chain);
+		const obs = Inspector.observe(chain);
 
 		s.set(2); // map→2, distinct: 1→2 (emit)
 		s.set(4); // map→1, distinct: 2→1 (emit)
 		s.set(7); // map→1, distinct: 1→1 (RESOLVED)
 
-		expect(data).toEqual([2, 1]);
+		expect(obs.values).toEqual([2, 1]);
 	});
 
 	it("pipeRaw fused pipeline handles SKIP + repeated values", () => {
@@ -568,14 +554,14 @@ describe("multi-operator chains", () => {
 			(v: number) => (v > 0 ? v : SKIP),
 			(v: number) => v * 10,
 		);
-		const data = observeRaw<unknown>(p);
+		const obs = Inspector.observe(p);
 
 		s.set(-1); // SKIP
 		s.set(2); // 20
 		s.set(-5); // SKIP
 		s.set(2); // 20 again — pipeRaw doesn't dedup, so this emits
 
-		expect(data).toEqual([20, 20]);
+		expect(obs.values).toEqual([20, 20]);
 	});
 
 	it("merge → scan: accumulates from independent sources", () => {
@@ -600,12 +586,12 @@ describe("multi-operator chains", () => {
 		const a = state(0);
 		const b = state(0);
 		const merged = merge(a, b);
-		const data = observeRaw<number | undefined>(merged);
+		const obs = Inspector.observe(merged);
 
 		a.set(5); // merged emits 5
 		b.set(5); // merged emits 5 (different source, no dedup)
 
-		expect(data).toEqual([5, 5]);
+		expect(obs.values).toEqual([5, 5]);
 	});
 
 	it("combine → map with equals: RESOLVED propagates through", () => {
@@ -652,7 +638,7 @@ describe("tier-2 chain dedup isolation", () => {
 		// subscribe dedup: prev=10, next=10 → suppressed
 		// This is subscribe's layer, NOT operator dedup. Correct behavior.
 		// To verify map itself didn't dedup, check raw:
-		const rawData = observeRaw<number>(mapped);
+		const obs = Inspector.observe(mapped);
 		s.emit(3);
 		vi.advanceTimersByTime(50); // debounce→3, map→30
 		s.emit(4);
@@ -660,13 +646,13 @@ describe("tier-2 chain dedup isolation", () => {
 		vi.advanceTimersByTime(50); // debounce→3, map→30
 
 		// map has no equals → emits both 30s at protocol level
-		expect(rawData).toEqual([30, 30]);
+		expect(obs.values).toEqual([30, 30]);
 	});
 
 	it("debounce itself does not dedup repeated values", () => {
 		const s = producer<number>();
 		const d = pipe(s, debounce(50));
-		const data = observeRaw<number | undefined>(d);
+		const obs = Inspector.observe(d);
 
 		s.emit(1);
 		vi.advanceTimersByTime(50); // output: 1
@@ -675,7 +661,7 @@ describe("tier-2 chain dedup isolation", () => {
 		s.emit(1); // overwrite with 1
 		vi.advanceTimersByTime(50); // output: 1 again
 
-		expect(data).toEqual([1, 1]);
+		expect(obs.values).toEqual([1, 1]);
 	});
 
 	it("throttle does not dedup repeated output values from different inputs", () => {
@@ -683,7 +669,7 @@ describe("tier-2 chain dedup isolation", () => {
 		// so we use different intermediate values to produce same output
 		const s = producer<number>();
 		const t = pipe(s, throttle(50));
-		const data = observeRaw<number | undefined>(t);
+		const obs = Inspector.observe(t);
 
 		s.emit(1); // passes (first in window) → output: 1
 		vi.advanceTimersByTime(50);
@@ -692,7 +678,7 @@ describe("tier-2 chain dedup isolation", () => {
 		s.emit(1); // passes (new window, same as first output) → output: 1
 
 		// throttle producer has no equals → 1 appears again
-		expect(data).toEqual([1, 2, 1]);
+		expect(obs.values).toEqual([1, 2, 1]);
 	});
 
 	it("switchMap → distinctUntilChanged: dedup only in distinctUntilChanged", () => {
@@ -776,14 +762,14 @@ describe("dedup edge cases", () => {
 				equals: (a, b) => a.doubled === b.doubled,
 			}),
 		);
-		const data = observeRaw<{ doubled: number }>(m);
+		const obs = Inspector.observe(m);
 
 		s.set({ x: 1 }); // map→{doubled:2}, equals prev → RESOLVED
 
-		expect(data).toEqual([]);
+		expect(obs.values).toEqual([]);
 
 		s.set({ x: 2 }); // map→{doubled:4}, different → emits
-		expect(data).toEqual([{ doubled: 4 }]);
+		expect(obs.values).toEqual([{ doubled: 4 }]);
 	});
 });
 

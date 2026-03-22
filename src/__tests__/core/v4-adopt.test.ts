@@ -6,7 +6,8 @@
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
 import { effect } from "../../core/effect";
-import { START, STATE } from "../../core/protocol";
+import { Inspector } from "../../core/inspector";
+import { START } from "../../core/protocol";
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 
@@ -92,18 +93,12 @@ describe("Output slot transitions", () => {
 		const a = state(1);
 		const b = derived([a], () => a.get());
 
-		const received: any[] = [];
-
-		// Subscribe via raw callbag to see STATE signals
-		b.source(START, (type: number, data: any) => {
-			if (type === START) return;
-			if (type === STATE) received.push(data);
-		});
+		const obs = Inspector.observe(b);
 
 		// When a sends STATE signals, they should forward through b
 		a.set(2); // sends DIRTY then DATA through b
 		// b should have forwarded DIRTY
-		expect(received.some((s) => s === Symbol.for("DIRTY") || typeof s === "symbol")).toBe(true);
+		expect(obs.dirtyCount).toBeGreaterThan(0);
 	});
 
 	it("Raw callbag sink: receives only type 0, 1, 2 (no type 3)", () => {

@@ -17,7 +17,6 @@ import {
 	Inspector,
 	producer,
 	RESOLVED,
-	START,
 	STATE,
 	state,
 } from "../../index";
@@ -403,17 +402,14 @@ describe("wrap() — source wrapping (tier 2)", () => {
 		const raw = rawCbSource<number>();
 		const store = wrap<number>(raw.source);
 
-		const signals: Array<{ type: number; data: unknown }> = [];
-		store.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push({ type: STATE, data });
-			if (type === 1) signals.push({ type: 1, data });
-		});
+		const obs = Inspector.observe(store);
 
 		raw.push(5);
-		expect(signals).toEqual([
-			{ type: STATE, data: DIRTY },
-			{ type: 1, data: 5 },
+		expect(obs.events).toEqual([
+			{ type: "signal", data: DIRTY },
+			{ type: "data", data: 5 },
 		]);
+		obs.dispose();
 	});
 
 	it("cleans up raw source on last subscriber disconnect", () => {
@@ -487,19 +483,16 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 			rawCbMap((n) => n * 2),
 		);
 
-		const signals: Array<{ type: number; data: unknown }> = [];
-		wrapped.source(START, (type: number, data: any) => {
-			if (type === STATE) signals.push({ type: STATE, data });
-			if (type === 1) signals.push({ type: 1, data });
-		});
+		const obs = Inspector.observe(wrapped);
 
 		// Use batch() so DIRTY is dispatched (Skip DIRTY optimization
 		// skips DIRTY for single-dep subscribers in unbatched paths)
 		batch(() => s.set(5));
-		expect(signals).toEqual([
-			{ type: STATE, data: DIRTY },
-			{ type: 1, data: 10 },
+		expect(obs.events).toEqual([
+			{ type: "signal", data: DIRTY },
+			{ type: "data", data: 10 },
 		]);
+		obs.dispose();
 	});
 
 	it("supports multicast — multiple subscribers", () => {
