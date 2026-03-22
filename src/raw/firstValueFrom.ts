@@ -5,17 +5,19 @@
 // should never create Promises directly — use this bridge instead.
 // ---------------------------------------------------------------------------
 
-import { subscribe } from "../core/subscribe";
-import type { Store } from "../core/types";
+import type { CallbagSource } from "./subscribe";
+import { rawSubscribe } from "./subscribe";
 
 /**
- * Subscribes to a store and resolves with the first value matching the
- * optional predicate. Checks the current value immediately before waiting.
+ * Subscribes to a raw callbag source and resolves with the first value
+ * matching the optional predicate. Pure callbag — no Store dependency.
+ *
+ * For Store objects (which need a `.get()` fast path), use `extra/firstValueFrom`.
  *
  * This is the canonical callbag → Promise bridge. Business logic should
  * use this instead of `new Promise`.
  *
- * @param store - The store to observe.
+ * @param source - A raw callbag source function.
  * @param predicate - Optional filter. If omitted, resolves with the first emission.
  *
  * @returns Promise that resolves with the matching value, or rejects if
@@ -23,17 +25,13 @@ import type { Store } from "../core/types";
  *
  * @category raw
  */
-export function firstValueFrom<T>(store: Store<T>, predicate?: (value: T) => boolean): Promise<T> {
+export function firstValueFrom<T>(
+	source: CallbagSource,
+	predicate?: (value: T) => boolean,
+): Promise<T> {
 	return new Promise<T>((resolve, reject) => {
-		// Fast path: current value already matches
-		const current = store.get();
-		if (!predicate || predicate(current)) {
-			resolve(current);
-			return;
-		}
-
-		const sub = subscribe(
-			store,
+		const sub = rawSubscribe<T>(
+			source,
 			(value) => {
 				if (!predicate || predicate(value)) {
 					sub.unsubscribe();

@@ -20,9 +20,9 @@
 
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
+import { firstValueFrom } from "../extra/firstValueFrom";
 import { switchMap } from "../extra/switchMap";
 import type { PipelineResult, StepDef } from "./pipeline";
 import { pipeline } from "./pipeline";
@@ -160,8 +160,6 @@ export function loop<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
-					let statusUnsub: { unsubscribe(): void } | undefined;
-					let pendingReject: ((reason: unknown) => void) | undefined;
 
 					const safeEmit = (v: T | null) => {
 						if (!stopped && !emitted) {
@@ -175,14 +173,6 @@ export function loop<T>(
 
 					const cleanup = () => {
 						stopped = true;
-						if (statusUnsub) {
-							statusUnsub.unsubscribe();
-							statusUnsub = undefined;
-						}
-						if (pendingReject) {
-							pendingReject(new Error("loop: cancelled"));
-							pendingReject = undefined;
-						}
 						if (childPipeline) {
 							childPipeline.destroy();
 							childPipeline = null;
@@ -216,35 +206,17 @@ export function loop<T>(
 								throw new Error(`loop: output step "${outputName}" not found in child pipeline`);
 							}
 
-							// Wait for child pipeline to complete
-							const result = await new Promise<T>((resolve, reject) => {
-								pendingReject = reject;
+							// Wait for child pipeline to reach a terminal status
+							const terminalStatus = await firstValueFrom<string>(
+								child.status,
+								(s) => s === "completed" || s === "errored",
+							);
 
-								let settled = false;
-								statusUnsub = subscribe(child.status, (status) => {
-									if (stopped || settled) return;
-									if (status === "completed") {
-										settled = true;
-										statusUnsub?.unsubscribe();
-										statusUnsub = undefined;
-										pendingReject = undefined;
-										resolve(outputStore.get() as T);
-									} else if (status === "errored") {
-										settled = true;
-										statusUnsub?.unsubscribe();
-										statusUnsub = undefined;
-										pendingReject = undefined;
-										reject(new Error("loop: child pipeline errored"));
-									}
-								});
-								// If subscribe delivered terminal status synchronously,
-								// statusUnsub wasn't assigned yet when the callback ran.
-								// Clean it up now to prevent subscription leak.
-								if (settled && statusUnsub) {
-									statusUnsub.unsubscribe();
-									statusUnsub = undefined;
-								}
-							});
+							if (terminalStatus === "errored") {
+								throw new Error("loop: child pipeline errored");
+							}
+
+							const result = outputStore.get() as T;
 
 							// Destroy child pipeline
 							child.destroy();

@@ -14,8 +14,15 @@
 
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
+import { teardown } from "../core/protocol";
+import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { firstValueFrom } from "../extra/firstValueFrom";
+import { interval } from "../extra/interval";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
+import { firstValueFrom as rawFirstValueFrom } from "../raw/firstValueFrom";
+import { fromTimer } from "../raw/fromTimer";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
 import type { TaskState } from "./types";
@@ -91,7 +98,7 @@ export function sensor<T>(
 	poll: (signal: AbortSignal, value: T) => boolean | Promise<boolean>,
 	opts?: SensorOpts,
 ): SensorStepDef<T> {
-	const interval = opts?.interval ?? 5000;
+	const pollInterval = opts?.interval ?? 5000;
 	const timeout = opts?.timeout;
 	const ts = taskState<T>({ id: opts?.name });
 
@@ -114,27 +121,16 @@ export function sensor<T>(
 					let stopped = false;
 					let emitted = false;
 					let polling = false;
-					let pollTimer: ReturnType<typeof setInterval> | null = null;
-					let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-					let pendingReject: ((reason: unknown) => void) | undefined;
-
-					const clearTimers = () => {
-						if (pollTimer !== null) {
-							clearInterval(pollTimer);
-							pollTimer = null;
-						}
-						if (timeoutTimer !== null) {
-							clearTimeout(timeoutTimer);
-							timeoutTimer = null;
-						}
-					};
+					let tickSub: { unsubscribe(): void } | null = null;
+					let doneStore: Store<any> | null = null;
 
 					const cleanup = () => {
 						stopped = true;
-						clearTimers();
-						if (pendingReject) {
-							pendingReject(new Error("sensor: cancelled"));
-							pendingReject = undefined;
+						tickSub?.unsubscribe();
+						tickSub = null;
+						if (doneStore) {
+							teardown(doneStore);
+							doneStore = null;
 						}
 					};
 
@@ -158,51 +154,70 @@ export function sensor<T>(
 							return value;
 						}
 
-						// Set up timeout if configured
-						return new Promise<T>((resolve, reject) => {
-							pendingReject = reject;
+						if (stopped) throw new Error("sensor: cancelled");
 
-							if (stopped) {
-								pendingReject = undefined;
-								reject(new Error("sensor: cancelled"));
-								return;
-							}
+						// Poll on interval, signal result via state store
+						const done$ = state<{ ok: boolean; err?: unknown } | null>(null);
+						doneStore = done$;
+						const tick$ = interval(pollInterval);
 
-							if (timeout !== undefined) {
-								timeoutTimer = setTimeout(() => {
-									timeoutTimer = null;
-									clearTimers();
-									pendingReject = undefined;
-									reject(new Error(`sensor: timed out after ${timeout}ms`));
-								}, timeout);
-							}
+						tickSub = subscribe(tick$, () => {
+							if (stopped || polling) return;
+							polling = true;
 
-							pollTimer = setInterval(() => {
-								if (stopped || polling) return;
-								polling = true;
-
-								Promise.resolve(poll(signal, value))
-									.then((result) => {
-										polling = false;
-										if (stopped) return;
-										if (result) {
-											clearTimers();
-											pendingReject = undefined;
-											safeEmit(value);
-											safeComplete();
-											stopped = true;
-											resolve(value);
-										}
-									})
-									.catch((err) => {
-										polling = false;
-										if (stopped) return;
-										clearTimers();
-										pendingReject = undefined;
-										reject(err);
-									});
-							}, interval);
+							Promise.resolve(poll(signal, value))
+								.then((result) => {
+									polling = false;
+									if (stopped) return;
+									if (result) {
+										tickSub?.unsubscribe();
+										tickSub = null;
+										done$.set({ ok: true });
+									}
+								})
+								.catch((err) => {
+									polling = false;
+									if (stopped) return;
+									tickSub?.unsubscribe();
+									tickSub = null;
+									done$.set({ ok: false, err });
+								});
 						});
+
+						// Race: poll success vs timeout
+						const waitForPoll = firstValueFrom<{ ok: boolean; err?: unknown } | null>(
+							done$,
+							(v) => v !== null,
+						);
+
+						let timedOut = false;
+						let result: { ok: boolean; err?: unknown } | null;
+						if (timeout !== undefined) {
+							const timeoutRace = rawFirstValueFrom(fromTimer(timeout, signal)).then(
+								(): null => {
+									timedOut = true;
+									return null;
+								},
+							);
+							result = await Promise.race([waitForPoll, timeoutRace]);
+						} else {
+							result = await waitForPoll;
+						}
+
+						// Clean up done$ store
+						teardown(done$);
+
+						if (timedOut) {
+							throw new Error(`sensor: timed out after ${timeout}ms`);
+						}
+
+						if (result && !result.ok) {
+							throw result.err;
+						}
+
+						safeEmit(value);
+						safeComplete();
+						return value;
 					}).catch(() => {
 						// Error tracked by taskState
 						if (!stopped) {

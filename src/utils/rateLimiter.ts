@@ -10,6 +10,9 @@
 // Pure utilities — no reactive dependencies.
 // ---------------------------------------------------------------------------
 
+import { firstValueFrom } from "../raw/firstValueFrom";
+import { fromTimer } from "../raw/fromTimer";
+
 export interface RateLimiter {
 	/** Non-blocking check: try to acquire a token. Returns true if allowed. */
 	tryAcquire(tokens?: number): boolean;
@@ -174,19 +177,11 @@ export function slidingWindow(opts: SlidingWindowOptions): RateLimiter {
 // ---------------------------------------------------------------------------
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	return new Promise((resolve, reject) => {
-		if (signal?.aborted) {
-			reject(signal.reason);
-			return;
-		}
-		const timer = setTimeout(resolve, Math.ceil(ms));
-		signal?.addEventListener(
-			"abort",
-			() => {
-				clearTimeout(timer);
-				reject(signal.reason);
-			},
-			{ once: true },
-		);
+	if (signal?.aborted) {
+		return Promise.reject(signal.reason);
+	}
+	return firstValueFrom(fromTimer(Math.ceil(ms), signal)).then(() => {
+		// fromTimer emits on abort instead of rejecting — restore abort semantics
+		if (signal?.aborted) throw signal.reason;
 	});
 }

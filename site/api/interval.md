@@ -5,7 +5,7 @@ Emits increasing integers `0, 1, 2, …` every `ms` milliseconds (Tier 2 source)
 ## Signature
 
 ```ts
-function interval(ms: number): ProducerStore<number>
+function interval(ms: number, opts?: IntervalOptions): ProducerStore<number>
 ```
 
 ## Parameters
@@ -13,6 +13,7 @@ function interval(ms: number): ProducerStore<number>
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `ms` | `number` | Tick interval. |
+| `opts` | `IntervalOptions` | Optional configuration. |
 
 ## Returns
 

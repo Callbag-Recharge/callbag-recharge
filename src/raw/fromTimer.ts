@@ -1,65 +1,60 @@
 // ---------------------------------------------------------------------------
-// fromTimer — callbag source from setTimeout
+// fromTimer — raw callbag source from setTimeout
 // ---------------------------------------------------------------------------
-// Creates a producer store that emits once after `ms` milliseconds, then
-// completes. Respects an optional AbortSignal — emits immediately on abort.
+// Returns a raw callbag source that emits `undefined` once after `ms`
+// milliseconds, then sends END. No core primitives — pure callbag protocol.
 // ---------------------------------------------------------------------------
 
-import { producer } from "../core/producer";
-import type { ProducerStore } from "../core/types";
+import type { CallbagSource } from "./subscribe";
 
 /**
- * Creates a callbag source that emits `undefined` once after a delay,
- * then completes. If the signal is already aborted or aborts during the
- * delay, emits immediately.
+ * Creates a raw callbag source that emits `undefined` once after a delay,
+ * then completes (END). If the signal is already aborted or aborts during
+ * the delay, emits immediately.
  *
  * Use with `firstValueFrom` to replace raw `new Promise` + `setTimeout`.
  *
  * @param ms - Delay in milliseconds.
  * @param signal - Optional AbortSignal to cancel the delay early.
  *
- * @returns `ProducerStore<void>` — emits once, completes.
+ * @returns A raw callbag source function.
  *
  * @category raw
  */
-export function fromTimer(ms: number, signal?: AbortSignal): ProducerStore<void> {
-	return producer<void>(({ emit, complete }) => {
-		if (signal?.aborted) {
-			emit(undefined as undefined);
-			complete();
-			return;
-		}
+export function fromTimer(ms: number, signal?: AbortSignal): CallbagSource {
+	return (type: number, sink?: any) => {
+		if (type !== 0 /* START */) return;
 
 		let done = false;
 
-		const timer = setTimeout(() => {
-			if (done) return;
-			done = true;
-			cleanup();
-			emit(undefined as undefined);
-			complete();
-		}, ms);
-
-		function onAbort() {
+		function finish() {
 			if (done) return;
 			done = true;
 			clearTimeout(timer);
-			emit(undefined as undefined);
-			complete();
-		}
-
-		signal?.addEventListener("abort", onAbort, { once: true });
-
-		function cleanup() {
 			signal?.removeEventListener("abort", onAbort);
+			sink(1 /* DATA */, undefined);
+			sink(2 /* END */);
 		}
 
-		return () => {
-			if (!done) {
+		function onAbort() {
+			finish();
+		}
+
+		// Talkback: sink can send END to cancel
+		sink(0 /* START */, (t: number) => {
+			if (t === 2 /* END */ && !done) {
 				done = true;
 				clearTimeout(timer);
-				cleanup();
+				signal?.removeEventListener("abort", onAbort);
 			}
-		};
-	});
+		});
+
+		if (signal?.aborted) {
+			finish();
+			return;
+		}
+
+		const timer = setTimeout(finish, ms);
+		signal?.addEventListener("abort", onAbort, { once: true });
+	};
 }

@@ -8,9 +8,11 @@
 
 import { teardown } from "../core/protocol";
 import { state } from "../core/state";
+import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import type { CronSchedule } from "../extra/cron";
 import { matchesCron, parseCron } from "../extra/cron";
+import { interval } from "../extra/interval";
 import type { PublishOptions, RepeatHandle, RepeatPublishOptions, Topic } from "./types";
 
 let repeatCounter = 0;
@@ -57,7 +59,7 @@ export function repeatPublish<T>(
 	const id = `repeat-${++repeatCounter}`;
 	const limit = opts.limit ?? 0;
 	let _active = true;
-	let _timer: ReturnType<typeof setInterval> | undefined;
+	let _sub: { unsubscribe(): void } | undefined;
 	const _countStore = state<number>(0, { name: `${id}:count` });
 
 	const publishOpts: PublishOptions = {
@@ -99,22 +101,22 @@ export function repeatPublish<T>(
 	function cancel(): void {
 		if (!_active) return;
 		_active = false;
-		if (_timer !== undefined) {
-			clearInterval(_timer);
-			_timer = undefined;
+		if (_sub) {
+			_sub.unsubscribe();
+			_sub = undefined;
 		}
 		teardown(_countStore);
 	}
 
 	// --- Start scheduling ---
 	if (opts.every && opts.every > 0) {
-		// Interval mode
-		_timer = setInterval(doPublish, opts.every);
-		if (_timer && typeof _timer === "object" && "unref" in _timer) {
-			_timer.unref();
-		}
+		// Interval mode — use interval() producer (unref to not block process exit)
+		const tick$ = interval(opts.every, { unref: true });
+		_sub = subscribe(tick$, () => {
+			doPublish();
+		});
 	} else if (opts.cron) {
-		// Cron mode — check every 60s
+		// Cron mode — check every 60s using interval() producer
 		const schedule: CronSchedule = parseCron(opts.cron);
 		let lastFiredKey = 0; // YYYYMMDDHHII packed decimal
 
@@ -133,10 +135,10 @@ export function repeatPublish<T>(
 			}
 		}
 
-		_timer = setInterval(checkCron, 60_000);
-		if (_timer && typeof _timer === "object" && "unref" in _timer) {
-			_timer.unref();
-		}
+		const cronTick$ = interval(60_000, { unref: true });
+		_sub = subscribe(cronTick$, () => {
+			checkCron();
+		});
 		// Immediate check
 		checkCron();
 	}

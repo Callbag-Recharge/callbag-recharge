@@ -20,9 +20,9 @@
 
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
+import { firstValueFrom } from "../extra/firstValueFrom";
 import { switchMap } from "../extra/switchMap";
 import type { PipelineResult, StepDef } from "./pipeline";
 import { pipeline } from "./pipeline";
@@ -149,8 +149,6 @@ export function subPipeline<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
-					let statusUnsub: { unsubscribe(): void } | undefined;
-					let pendingReject: ((reason: unknown) => void) | undefined;
 
 					const safeEmit = (v: T | null) => {
 						if (!stopped && !emitted) {
@@ -164,15 +162,6 @@ export function subPipeline<T>(
 
 					const cleanup = () => {
 						stopped = true;
-						if (statusUnsub) {
-							statusUnsub.unsubscribe();
-							statusUnsub = undefined;
-						}
-						// Reject pending Promise so it settles and frees closures
-						if (pendingReject) {
-							pendingReject(new Error("subPipeline: cancelled"));
-							pendingReject = undefined;
-						}
 						if (childPipeline) {
 							childPipeline.destroy();
 							childPipeline = null;
@@ -205,34 +194,20 @@ export function subPipeline<T>(
 							);
 						}
 
-						// Wait for child pipeline to complete and collect output value
-						return new Promise<T>((resolve, reject) => {
-							pendingReject = reject;
+						// Wait for child pipeline to reach a terminal status
+						const terminalStatus = await firstValueFrom<string>(
+							child.status,
+							(s) => s === "completed" || s === "errored",
+						);
 
-							// Use settled flag to guard against subscribe delivering
-							// terminal status synchronously (statusUnsub not assigned yet)
-							let settled = false;
-							statusUnsub = subscribe(child.status, (status) => {
-								if (stopped || settled) return;
-								if (status === "completed") {
-									settled = true;
-									statusUnsub?.unsubscribe();
-									const result = outputStore.get() as T;
-									// Clear pendingReject BEFORE safeComplete — complete()
-									// synchronously triggers switchMap teardown → cleanup(),
-									// which would call pendingReject if still set.
-									pendingReject = undefined;
-									safeEmit(result);
-									safeComplete();
-									resolve(result);
-								} else if (status === "errored") {
-									settled = true;
-									statusUnsub?.unsubscribe();
-									pendingReject = undefined;
-									reject(new Error("subPipeline: child pipeline errored"));
-								}
-							});
-						});
+						if (terminalStatus === "errored") {
+							throw new Error("subPipeline: child pipeline errored");
+						}
+
+						const result = outputStore.get() as T;
+						safeEmit(result);
+						safeComplete();
+						return result;
 					}).catch(() => {
 						// Error tracked by taskState
 						if (!stopped && !emitted) {

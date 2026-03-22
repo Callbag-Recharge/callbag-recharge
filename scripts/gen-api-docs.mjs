@@ -45,9 +45,11 @@ const REGISTRY = {
 	teardown: "src/core/protocol.ts",
 	subscribe: "src/core/subscribe.ts",
 
-	// Raw — cross-cutting callbag bridges
+	// Raw — pure callbag primitives (no core deps)
+	rawSubscribe: "src/raw/subscribe.ts",
 	firstValueFrom: "src/raw/firstValueFrom.ts",
 	fromTimer: "src/raw/fromTimer.ts",
+	fromNodeCallback: "src/raw/fromNodeCallback.ts",
 
 	// Extras — operators
 	map: "src/extra/map.ts",

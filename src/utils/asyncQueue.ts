@@ -6,11 +6,13 @@
 //
 // Use cases: tool call execution, file uploads, API batching, LLM requests
 //
-// Built on: state
+// Built on: state, firstValueFrom (no raw new Promise)
 // ---------------------------------------------------------------------------
 
+import { teardown } from "../core/protocol";
 import { state } from "../core/state";
-import type { Store } from "../core/types";
+import type { Store, WritableStore } from "../core/types";
+import { firstValueFrom } from "../extra/firstValueFrom";
 
 export interface AsyncQueueOptions {
 	/** Max concurrent tasks. Default: 1 */
@@ -46,8 +48,7 @@ export interface AsyncQueueResult<T, R> {
 
 interface QueueEntry<T, R> {
 	task: T;
-	resolve: (result: R) => void;
-	reject: (error: unknown) => void;
+	done$: WritableStore<{ ok: true; result: R } | { ok: false; error: unknown } | null>;
 }
 
 /**
@@ -107,7 +108,7 @@ export function asyncQueue<T, R>(
 		activeCount--;
 		runningStore.set(activeCount);
 		completedStore.update((n) => n + 1);
-		entry.resolve(result);
+		entry.done$.set({ ok: true, result });
 		drain();
 	}
 
@@ -116,7 +117,7 @@ export function asyncQueue<T, R>(
 		activeCount--;
 		runningStore.set(activeCount);
 		failedStore.update((n) => n + 1);
-		entry.reject(err);
+		entry.done$.set({ ok: false, error: err });
 		drain();
 	}
 
@@ -146,11 +147,28 @@ export function asyncQueue<T, R>(
 			return Promise.reject(new Error("Queue is disposed"));
 		}
 
-		return new Promise<R>((resolve, reject) => {
-			queue.push({ task, resolve, reject });
-			sizeStore.set(queue.length);
-			drain();
+		const done$ = state<{ ok: true; result: R } | { ok: false; error: unknown } | null>(null, {
+			name: `${name}.task`,
 		});
+
+		queue.push({ task, done$ });
+		sizeStore.set(queue.length);
+		drain();
+
+		return firstValueFrom<{ ok: true; result: R } | { ok: false; error: unknown } | null>(
+			done$,
+			(v) => v !== null,
+		).then(
+			(v) => {
+				teardown(done$);
+				if (v!.ok) return v!.result;
+				throw v!.error;
+			},
+			(err) => {
+				teardown(done$);
+				throw err;
+			},
+		);
 	}
 
 	function pause(): void {
@@ -166,7 +184,7 @@ export function asyncQueue<T, R>(
 		const pending = queue.splice(0, queue.length);
 		sizeStore.set(0);
 		for (const entry of pending) {
-			entry.reject(new Error("Queue cleared"));
+			entry.done$.set({ ok: false, error: new Error("Queue cleared") });
 		}
 	}
 

@@ -3,6 +3,7 @@ import { producer } from "../core/producer";
 import { RESET } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, StoreOperator, WritableStore } from "../core/types";
+import { interval } from "./interval";
 import { subscribe } from "./subscribe";
 
 /**
@@ -22,10 +23,11 @@ export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined
 			// Emit the initial window
 			emit(currentWindow as Store<A>);
 
-			const timer = setInterval(() => {
+			const tick$ = interval(ms);
+			const tickUnsub = subscribe(tick$, () => {
 				currentWindow = state<A | undefined>(undefined) as WritableStore<A>;
 				emit(currentWindow as Store<A>);
-			}, ms);
+			});
 
 			const unsub = subscribe(
 				input,
@@ -36,7 +38,7 @@ export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined
 				},
 				{
 					onEnd: (err) => {
-						clearInterval(timer);
+						tickUnsub.unsubscribe();
 						currentWindow = null;
 						if (err !== undefined) {
 							error(err);
@@ -51,12 +53,12 @@ export function windowTime<A>(ms: number): StoreOperator<A, Store<A> | undefined
 				unsub.signal(s);
 				if (s === RESET) {
 					currentWindow = null;
-					clearInterval(timer);
+					tickUnsub.unsubscribe();
 				}
 			});
 
 			return () => {
-				clearInterval(timer);
+				tickUnsub.unsubscribe();
 				currentWindow = null;
 				unsub.unsubscribe();
 			};

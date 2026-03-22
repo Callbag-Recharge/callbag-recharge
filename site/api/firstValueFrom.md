@@ -1,7 +1,9 @@
 # firstValueFrom()
 
-Subscribes to a store and resolves with the first value matching the
-optional predicate. Checks the current value immediately before waiting.
+Subscribes to a raw callbag source and resolves with the first value
+matching the optional predicate. Pure callbag — no Store dependency.
+
+For Store objects (which need a `.get()` fast path), use `extra/firstValueFrom`.
 
 This is the canonical callbag → Promise bridge. Business logic should
 use this instead of `new Promise`.
@@ -9,14 +11,17 @@ use this instead of `new Promise`.
 ## Signature
 
 ```ts
-function firstValueFrom<T>(store: Store<T>, predicate?: (value: T) => boolean): Promise<T>
+function firstValueFrom<T>(
+	source: CallbagSource,
+	predicate?: (value: T) => boolean,
+): Promise<T>
 ```
 
 ## Parameters
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `store` | `Store&lt;T&gt;` | The store to observe. |
+| `source` | `CallbagSource` | A raw callbag source function. |
 | `predicate` | `(value: T) =&gt; boolean` | Optional filter. If omitted, resolves with the first emission. |
 
 ## Returns

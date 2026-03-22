@@ -20,6 +20,8 @@ import type { LifecycleSignal } from "../core/protocol";
 import { PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { firstValueFrom } from "../raw/firstValueFrom";
+import { fromNodeCallback } from "../raw/fromNodeCallback";
 import type { WithStatusStatus } from "../utils/withStatus";
 import { withStatus } from "../utils/withStatus";
 
@@ -252,21 +254,23 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 		if (server) {
 			return Promise.reject(new Error("fromWebhook: already listening. Call close() first."));
 		}
-		return new Promise((resolve, reject) => {
-			try {
-				// Dynamic import to avoid bundling node:http in browser builds
-				const http = require("node:http");
-				server = http.createServer(handler);
-				server.once("listening", () => resolve());
-				server.once("error", (err: unknown) => {
-					server = null;
+		return firstValueFrom(
+			fromNodeCallback((resolve, reject) => {
+				try {
+					// Dynamic import to avoid bundling node:http in browser builds
+					const http = require("node:http");
+					server = http.createServer(handler);
+					server.once("listening", () => resolve());
+					server.once("error", (err: unknown) => {
+						server = null;
+						reject(err);
+					});
+					server.listen(opts!.port, hostname);
+				} catch (err) {
 					reject(err);
-				});
-				server.listen(opts!.port, hostname);
-			} catch (err) {
-				reject(err);
-			}
-		});
+				}
+			}),
+		);
 	}
 
 	function close() {

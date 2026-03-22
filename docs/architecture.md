@@ -38,7 +38,7 @@
 
 15. **Control flows through the graph, not around it.** Lifecycle events (reset, cancel, pause, resume) must propagate as TYPE 3 STATE signals through the reactive graph — never as imperative method calls that bypass the topology. When control bypasses the graph: new node types silently escape supervision, composition breaks (child pipelines miss parent resets), and the signal model has a hole where control and data diverge. AbortSignal bridges STATE signals to imperative async (fetch, setTimeout) but is never the primary control mechanism. **Litmus test:** if adding a new orchestrate node requires registering it in a flat list for lifecycle management, the design is wrong — the graph should carry the signal.
 
-16. **No raw `new Promise` — use callbag or library primitives.** Business logic must never create `Promise` objects directly. Async coordination (delays, waiting for state changes, bridging to `await`) must go through callbag-based primitives: `fromTimer` for delays, `firstValueFrom` for awaiting store changes, `producer` for wrapping async sources. The ONE acceptable `new Promise` lives inside `firstValueFrom` (`raw/`) — the canonical callbag → Promise bridge. Everything else composes on top.
+16. **No raw `new Promise` — use callbag or library primitives.** Business logic must never create `Promise` objects directly. Async coordination (delays, waiting for state changes, bridging to `await`) must go through callbag-based primitives: `raw/fromTimer` for delays (pure callbag source, no core deps), `raw/firstValueFrom` for awaiting callbag sources, `extra/fromTimer` when a full `ProducerStore` is needed, `producer` for wrapping async sources. The ONE acceptable `new Promise` lives inside `firstValueFrom` (`raw/`) — the canonical callbag → Promise bridge. `raw/` is the foundation layer with zero core dependencies; it uses only the callbag protocol directly. Everything else composes on top.
 
 17. **Push/pull via callbag, never poll.** When code needs to wait for a condition (e.g. "wait until unpaused"), use a reactive store + `firstValueFrom` so the waiter is notified by push. Do not use `setInterval`/`setTimeout` polling loops to check conditions. Polling is acceptable only at true system boundaries (e.g. checking a pull-based subscription for new messages where no push notification exists).
 
@@ -54,7 +54,7 @@
 ```
 src/
 ├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types + bitmask
-├── raw/             ← raw callbag ops/bridges (firstValueFrom, fromTimer) — cross-cutting, importable from any folder
+├── raw/             ← pure callbag primitives (rawSubscribe, fromTimer, firstValueFrom) — no core deps, foundation layer
 ├── extra/           ← operators, sources, sinks (tier 1 + tier 2)
 ├── utils/           ← resilience, async, tracking, strategies (withStatus, withBreaker, retry, backoff, …)
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
@@ -72,6 +72,8 @@ src/
 The import hierarchy flows strictly downward. Each tier can import from its own level and below.
 
 ```
+Tier -1 (raw callbag) raw/
+                        ↓
 Tier 0 (foundation)   core/
                         ↓
 Tier 1 (operators)    extra/
@@ -85,12 +87,12 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 
 `data/` is a **cross-cutting layer** — importable from any tier (core excluded).
 
-`raw/` is a **cross-cutting layer** — importable from any tier. Contains raw callbag operations and bridges (e.g. `firstValueFrom`, `fromTimer`). `raw/` itself imports only from `core/`.
+`raw/` is the **foundation layer** — pure callbag protocol with zero core dependencies. Contains `rawSubscribe` (callbag sink), `fromTimer` (callbag source from setTimeout), and `firstValueFrom` (callbag → Promise bridge, the ONE place `new Promise` is allowed). `raw/` never imports from `core/` or any other folder. Importable from any tier.
 
 ### Strict import rules (the canonical reference)
 
-- `core/` never imports from any other folder
-- `raw/` imports from `core/` only — cross-cutting, importable from any folder
+- `raw/` never imports from any other folder — pure callbag protocol, zero dependencies
+- `core/` imports from `raw/` only
 - `extra/` imports from `core/` and `raw/` only
 - `utils/` imports from `core/`, `raw/`, and `extra/` only
 - `data/` imports from `core/`, `raw/`, and `utils/` only

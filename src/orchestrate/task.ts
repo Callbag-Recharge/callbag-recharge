@@ -24,6 +24,8 @@ import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { switchMap } from "../extra/switchMap";
+import { firstValueFrom } from "../raw/firstValueFrom";
+import { fromTimer } from "../raw/fromTimer";
 import type { RetryOptions } from "../utils/retry";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
@@ -194,8 +196,6 @@ export function task<T>(
 				// Run the task with cancellation support
 				return producer<T | null>(({ emit, complete }) => {
 					let stopped = false;
-					let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
-					let delayTimer: ReturnType<typeof setTimeout> | null = null;
 
 					const safeEmit = (v: T | null) => {
 						if (!stopped) emit(v);
@@ -222,24 +222,18 @@ export function task<T>(
 									);
 								}
 
-								// Apply timeout if configured
+								// Apply timeout if configured — pass signal so timer is
+								// cancelled when the task completes or is destroyed
 								if (timeoutOpt !== undefined && maybePromise instanceof Promise) {
 									maybePromise = Promise.race([
 										maybePromise,
-										new Promise<never>((_, reject) => {
-											timeoutTimer = setTimeout(() => {
-												timeoutTimer = null;
-												reject(new Error(`Timeout: ${timeoutOpt}ms`));
-											}, timeoutOpt);
+										firstValueFrom(fromTimer(timeoutOpt, signal)).then(() => {
+											throw new Error(`Timeout: ${timeoutOpt}ms`);
 										}),
 									]);
 								}
 
 								const r = await maybePromise;
-								if (timeoutTimer !== null) {
-									clearTimeout(timeoutTimer);
-									timeoutTimer = null;
-								}
 								safeEmit(r);
 								safeComplete();
 								return r;
@@ -262,12 +256,7 @@ export function task<T>(
 								}
 								ts.reset(); // Reset so we can run() again
 								if (delay > 0) {
-									await new Promise<void>((r) => {
-										delayTimer = setTimeout(() => {
-											delayTimer = null;
-											r();
-										}, delay);
-									});
+									await firstValueFrom(fromTimer(delay));
 								}
 								if (stopped) return;
 								return runTask(attempt + 1);
@@ -296,14 +285,6 @@ export function task<T>(
 					});
 					return () => {
 						stopped = true;
-						if (timeoutTimer !== null) {
-							clearTimeout(timeoutTimer);
-							timeoutTimer = null;
-						}
-						if (delayTimer !== null) {
-							clearTimeout(delayTimer);
-							delayTimer = null;
-						}
 					};
 				});
 			}),

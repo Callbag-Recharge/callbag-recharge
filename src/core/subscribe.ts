@@ -1,13 +1,14 @@
 /**
- * Core subscribe — reusable callbag sink connector.
+ * Core subscribe — Store-aware callbag sink built on raw/subscribe.
  *
  * Used as the base for:
  * - External subscribe (extra/subscribe re-exports this)
  * - Internal wiring in tier 2 operators, orchestrate, etc.
  *
- * v7: Returns Subscription object { unsubscribe(), signal() } instead of
- * bare () => void. signal() sends lifecycle signals upstream via talkback.
- * Breaking change — all callsites must update.
+ * Adds on top of raw/subscribe:
+ * - Store.get() baseline for prev tracking
+ * - beginDeferredStart / endDeferredStart for connection batching
+ * - signal() for upstream lifecycle control via talkback
  */
 
 import type { LifecycleSignal, Subscription } from "./protocol";
@@ -46,9 +47,9 @@ export function subscribe<T>(
 
 	beginDeferredStart();
 
-	// `prev` is declared after store.source() but the closure only reads it
-	// after endDeferredStart() triggers producers. By that point prev is already
-	// set to store.get(). Order: register sink → read baseline → start producers.
+	// We need direct access to talkback for signal(), so we use the raw
+	// callbag protocol directly rather than rawSubscribe — but the DATA/END
+	// handling follows the same pattern as rawSubscribe.
 	store.source(START, (type: number, data: any) => {
 		if (type === START) talkback = data;
 		if (type === END) {

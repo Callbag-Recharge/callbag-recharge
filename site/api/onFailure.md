@@ -12,7 +12,7 @@ Pipeline auto-registers `"stepName.error"` for any `task()` step, so
 ```ts
 function onFailure<T>(
 	dep: string,
-	handler: (error: unknown) => T | Promise<T>,
+	handler: (signal: AbortSignal, error: unknown) => T | Promise<T>,
 	opts?: OnFailureOpts,
 ): OnFailureStepDef<T>
 ```
@@ -22,7 +22,7 @@ function onFailure<T>(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `dep` | `string` | Name of the upstream task step to watch for failures. |
-| `handler` | `(error: unknown) =&gt; T | Promise&lt;T&gt;` | Function receiving the error. Returns a value for downstream steps. |
+| `handler` | `(signal: AbortSignal, error: unknown) =&gt; T | Promise&lt;T&gt;` | Function receiving `(signal, error)`. Signal is aborted on reset/destroy. Returns a value for downstream steps. |
 | `opts` | `OnFailureOpts` | Optional configuration (name). |
 
 ## Returns

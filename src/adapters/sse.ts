@@ -15,6 +15,8 @@ import { Inspector } from "../core/inspector";
 import { state } from "../core/state";
 import { subscribe as coreSub } from "../core/subscribe";
 import type { Store } from "../core/types";
+import { firstValueFrom } from "../raw/firstValueFrom";
+import { fromNodeCallback } from "../raw/fromNodeCallback";
 
 export interface SSEOptions {
 	/** Port to listen on. Required when using `listen()`. */
@@ -222,15 +224,17 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 			throw new Error("toSSE: already listening. Call close() first.");
 		}
 		const http = await import("node:http");
-		return new Promise((resolve, reject) => {
-			server = http.createServer(handler);
-			server.once("listening", () => resolve());
-			server.once("error", (err: unknown) => {
-				server = null;
-				reject(err);
-			});
-			server.listen(opts!.port, hostname);
-		});
+		return firstValueFrom(
+			fromNodeCallback((resolve, reject) => {
+				server = http.createServer(handler);
+				server.once("listening", () => resolve());
+				server.once("error", (err: unknown) => {
+					server = null;
+					reject(err);
+				});
+				server.listen(opts!.port, hostname);
+			}),
+		);
 	}
 
 	function close() {

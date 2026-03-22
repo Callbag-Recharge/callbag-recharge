@@ -10,7 +10,9 @@
 //   - indexedDBAdapter(db)  — IndexedDB (browser)
 // ---------------------------------------------------------------------------
 
+import { firstValueFrom } from "../raw/firstValueFrom";
 import type { CheckpointAdapter } from "./checkpoint";
+import { fromIDBRequest } from "./fromIDBRequest";
 
 // ---------------------------------------------------------------------------
 // File-based adapter (Node.js)
@@ -210,27 +212,26 @@ export function indexedDBAdapter(opts?: IndexedDBAdapterOptions): CheckpointAdap
 	function openDB(): Promise<IDBDatabase> {
 		if (_db) return Promise.resolve(_db);
 		if (_openPromise) return _openPromise;
-		_openPromise = new Promise<IDBDatabase>((resolve, reject) => {
-			const request = indexedDB.open(dbName, 1);
-			request.onupgradeneeded = () => {
-				const db = request.result;
-				if (!db.objectStoreNames.contains(storeName)) {
-					db.createObjectStore(storeName);
-				}
-			};
-			request.onsuccess = () => {
-				_db = request.result;
-				_db.onversionchange = () => {
-					_db?.close();
-					_db = null;
-					_openPromise = null;
-				};
-				resolve(_db);
-			};
-			request.onerror = () => {
+
+		const request = indexedDB.open(dbName, 1);
+		request.onupgradeneeded = () => {
+			const db = request.result;
+			if (!db.objectStoreNames.contains(storeName)) {
+				db.createObjectStore(storeName);
+			}
+		};
+
+		_openPromise = firstValueFrom<IDBDatabase>(fromIDBRequest(request)).then((db) => {
+			_db = db;
+			_db.onversionchange = () => {
+				_db?.close();
+				_db = null;
 				_openPromise = null;
-				reject(request.error);
 			};
+			return _db;
+		});
+		_openPromise.catch(() => {
+			_openPromise = null;
 		});
 		return _openPromise;
 	}
@@ -249,21 +250,13 @@ export function indexedDBAdapter(opts?: IndexedDBAdapterOptions): CheckpointAdap
 	): Promise<R> {
 		try {
 			const { store } = await tx(mode);
-			return await new Promise<R>((resolve, reject) => {
-				const req = op(store);
-				req.onsuccess = () => resolve(req.result);
-				req.onerror = () => reject(req.error);
-			});
+			return await firstValueFrom<R>(fromIDBRequest(op(store)));
 		} catch (err: any) {
 			if (err?.name === "InvalidStateError" || _db === null) {
 				_db = null;
 				_openPromise = null;
 				const { store } = await tx(mode);
-				return new Promise<R>((resolve, reject) => {
-					const req = op(store);
-					req.onsuccess = () => resolve(req.result);
-					req.onerror = () => reject(req.error);
-				});
+				return firstValueFrom<R>(fromIDBRequest(op(store)));
 			}
 			throw err;
 		}

@@ -9,7 +9,7 @@ Previous child pipelines are destroyed on re-trigger (switchMap semantics).
 ```ts
 function subPipeline<T>(
 	deps: string[],
-	factory: (...values: any[]) => SubPipelineDef,
+	factory: (signal: AbortSignal, values: any[]) => SubPipelineDef,
 	opts?: SubPipelineOpts,
 ): SubPipelineStepDef<T>
 ```
@@ -19,7 +19,7 @@ function subPipeline<T>(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `deps` | `string[]` | Names of upstream steps whose values are passed to the factory. |
-| `factory` | `(...values: any[]) =&gt; SubPipelineDef` | Function receiving dep values, returns a `SubPipelineDef` describing the child pipeline. |
+| `factory` | `(signal: AbortSignal, values: any[]) =&gt; SubPipelineDef` | Function receiving `(signal, values)`. Signal is aborted on reset/destroy. Values is an array of dep values. Returns a `SubPipelineDef` describing the child pipeline. |
 | `opts` | `SubPipelineOpts` | Optional configuration (name). |
 
 ## Returns

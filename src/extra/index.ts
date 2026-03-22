@@ -21,6 +21,7 @@ export { exhaustMap } from "./exhaustMap";
 export { filter } from "./filter";
 export { find } from "./find";
 export { first } from "./first";
+export { firstValueFrom } from "./firstValueFrom";
 export { flat } from "./flat";
 // Sinks
 export { forEach } from "./forEach";
@@ -32,6 +33,7 @@ export { fromEvent } from "./fromEvent";
 export { fromIter } from "./fromIter";
 export { fromObs } from "./fromObs";
 export { fromPromise } from "./fromPromise";
+export { fromTimer } from "./fromTimer";
 export type { TriggerStore } from "./fromTrigger";
 export { fromTrigger } from "./fromTrigger";
 export { groupBy } from "./groupBy";

@@ -16,8 +16,11 @@
 
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
+import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
-import { firstValueFrom } from "../raw/firstValueFrom";
+import { firstValueFrom } from "../extra/firstValueFrom";
+import { interval } from "../extra/interval";
+import { firstValueFrom as rawFirstValueFrom } from "../raw/firstValueFrom";
 import { fromTimer } from "../raw/fromTimer";
 import { exponential } from "../utils/backoff";
 import { subscription } from "./subscription";
@@ -200,7 +203,7 @@ export function jobQueue<T, R = void>(
 					}
 
 					if (delay > 0) {
-						await firstValueFrom(fromTimer(delay, rec.abort.signal));
+						await rawFirstValueFrom(fromTimer(delay, rec.abort.signal));
 					}
 
 					// Wait for unpause if paused (push-based via _pausedStore, no polling)
@@ -293,18 +296,19 @@ export function jobQueue<T, R = void>(
 		}
 	}
 
-	// --- Polling for new messages ---
-	// We poll because subscription is pull-based; topic publishes may arrive
-	// asynchronously. We check on a short interval.
-	let _pollTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+	// --- Push-based pull trigger ---
+	// React to topic depth changes instead of polling. When a message is
+	// published, the topic's depth store updates, triggering a pull.
+	const _depthSub = subscribe(_topic.depth, () => {
 		if (!_pausedStore.get() && !_destroyed) {
 			_updateWaiting();
 			_tryPull();
 		}
-	}, 100);
+	});
 
 	// --- Stall detection (5e-7) ---
-	let _stallTimer: ReturnType<typeof setInterval> | null = setInterval(() => {
+	const _stallTick$ = interval(stallIntervalMs);
+	const _stallSub = subscribe(_stallTick$, () => {
 		if (_destroyed) return;
 		const now = Date.now();
 		for (const rec of _jobs.values()) {
@@ -326,7 +330,7 @@ export function jobQueue<T, R = void>(
 				}
 			}
 		}
-	}, stallIntervalMs);
+	});
 
 	// Initial pull
 	_updateWaiting();
@@ -384,14 +388,8 @@ export function jobQueue<T, R = void>(
 			_destroyed = true;
 			_queueAbort.abort();
 
-			if (_pollTimer) {
-				clearInterval(_pollTimer);
-				_pollTimer = null;
-			}
-			if (_stallTimer) {
-				clearInterval(_stallTimer);
-				_stallTimer = null;
-			}
+			_depthSub.unsubscribe();
+			_stallSub.unsubscribe();
 
 			_sub.destroy();
 			_topic.destroy();

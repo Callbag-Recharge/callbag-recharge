@@ -1,11 +1,11 @@
 # forEach()
 
-Curried sink: `forEach(cb)(store)` runs `cb` on each DATA after subscribe; returns unsubscribe.
+Curried sink: `forEach(cb)(store)` runs `cb` on each DATA after subscribe; returns Subscription.
 
 ## Signature
 
 ```ts
-function forEach<T>(cb: (value: T) => void): (store: Store<T>) => () => void
+function forEach<T>(cb: (value: T) => void): (store: Store<T>) => Subscription
 ```
 
 ## Parameters
@@ -16,7 +16,7 @@ function forEach<T>(cb: (value: T) => void): (store: Store<T>) => () => void
 
 ## Returns
 
-Function taking `Store&lt;T&gt;` and returning `() =&gt; void` unsubscribe.
+Function taking `Store&lt;T&gt;` and returning `Subscription`.
 
 ## See Also
 

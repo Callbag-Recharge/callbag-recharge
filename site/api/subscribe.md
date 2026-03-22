@@ -1,7 +1,7 @@
 # subscribe()
 
-Subscribes to a store’s DATA emissions with previous-value tracking. Returns an unsubscribe function.
-Does not invoke the callback for the current value at subscribe time (Rx-style); only subsequent changes.
+Subscribes to a store's DATA emissions with previous-value tracking.
+Returns a Subscription with `unsubscribe()` and `signal()` for upstream lifecycle control.
 
 ## Signature
 
@@ -10,7 +10,7 @@ function subscribe<T>(
 	store: Store<T>,
 	cb: (value: T, prev: T | undefined) => void,
 	opts?: { onEnd?: (error?: unknown) => void },
-): () => void
+): Subscription
 ```
 
 ## Parameters
@@ -23,24 +23,19 @@ function subscribe<T>(
 
 ## Returns
 
-`() =&gt; void` — call to unsubscribe (sends END on talkback).
+`Subscription` — `unsubscribe()` to disconnect, `signal(s)` to send lifecycle signals upstream.
 
 ## Basic Usage
 
 ```ts
-import { state, subscribe } from 'callbag-recharge';
+import { state, subscribe, RESET } from 'callbag-recharge';
 
 const n = state(0);
-const stop = subscribe(n, (v, prev) => {
-    // prev is undefined on first emission after subscribe
-  });
+const sub = subscribe(n, (v, prev) => console.log(v));
 n.set(1);
-stop();
+sub.signal(RESET);    // send RESET upstream
+sub.unsubscribe();    // disconnect
 ```
-
-## Options / Behavior Details
-
-- **Deferred start:** Works with `beginDeferredStart` / `endDeferredStart` batching used internally.
 
 ## See Also
 
