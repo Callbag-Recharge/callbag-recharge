@@ -4,15 +4,17 @@
 ## Overview
 
 callbag-recharge is a reactive state management library where every store is a callbag source.
-6 primitives, 60+ operators, framework-agnostic, zero dependencies.
+6 primitives, 70+ operators, 170+ modules, framework-agnostic, zero dependencies.
 
 Key differentiators:
 1. Glitch-free diamond resolution — two-phase push (DIRTY then values) ensures derived stores compute exactly once
 2. Streaming-native — LLM token streams, WebSocket, SSE are first-class, not bolted on
 3. Inspectable — every node in the graph is observable without runtime cost
 4. Completion semantics — stores can complete/error like streams; retry, rescue, repeat handle recovery
-5. Edge LLM ready — token streams as producers, conversation state as stores, tool calls as state machines
+5. Protocol-native lifecycle — RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals through the reactive graph
 6. Durable workflows — checkpoint persistence (file, SQLite, IndexedDB), execution logging, pipeline builder
+7. Cross-thread reactivity — Worker bridge exposes stores across Web Worker, SharedWorker, ServiceWorker
+8. Message queues — Pulsar-inspired topic/subscription system with job queues and workflow chaining
 
 ## Install
 
@@ -198,6 +200,27 @@ Inspector.trace(store, cb)  // value change callback
 Inspector.tap(store, name)  // transparent passthrough for visualization
 ```
 
+## Lifecycle Signals
+
+Protocol-native lifecycle control via TYPE 3 STATE channel. Signals propagate through the reactive graph — no imperative method calls bypassing topology.
+
+```ts
+import { subscribe, RESET, PAUSE, RESUME, TEARDOWN } from 'callbag-recharge'
+
+const sub = subscribe(store, (v) => console.log(v));
+sub.signal(PAUSE);    // pause upstream (timers stop, polling pauses)
+sub.signal(RESUME);   // resume activity
+sub.signal(RESET);    // reset all upstream state to initial values
+sub.signal(TEARDOWN); // terminate the graph (cascades END downstream)
+sub.unsubscribe();    // standard unsubscribe
+```
+
+- **RESET**: Resets state to initial, re-initializes operator handlers, re-runs effects
+- **PAUSE/RESUME**: Bidirectional. Tier 2 operators pause timers/polling. `pausable()` gates DATA flow
+- **TEARDOWN**: Terminal — cleanup then complete. Replaces imperative `destroy()` calls
+
+All core nodes, tier 2 extras, orchestrate, adapters, and patterns handle lifecycle signals.
+
 ## Operators (callbag-recharge/extra)
 
 ### Sources
@@ -207,6 +230,7 @@ Inspector.tap(store, name)  // transparent passthrough for visualization
 - `fromEvent(target, eventName)` — emits DOM/Node events
 - `fromPromise(promise)` — emits resolved value, completes
 - `fromObs(observable)` — wraps RxJS/TC39 Observable
+- `fromAny(source)` — universal converter (iterable, observable, promise, callbag)
 - `of(...values)` — emits values synchronously, completes
 - `empty()` — completes immediately
 - `throwError(err)` — errors immediately
@@ -276,6 +300,8 @@ Inspector.tap(store, name)  // transparent passthrough for visualization
 - `remember()` — replay last value to new subscribers
 - `subject()` — manual emit + subscribe (like RxJS Subject)
 - `wrap(source)` — RxJS/callbag interop wrapper
+- `cached([deps], fn)` — input-level memoization for expensive computations
+- `pausable()` — pause/resume DATA flow via lifecycle signals
 
 ### Piping
 - `pipeRaw(source, ...fns)` — fuse transforms into single derived (~2x throughput)
@@ -421,15 +447,136 @@ log.entries.get()             // reactive log of all events
 
 Acyclicity validation via Kahn's algorithm. Registers edges with Inspector.
 
-### Additional orchestration operators
+### Additional orchestration nodes
 
 - `fromTrigger()` — manual trigger source (`.fire(value)` emits into stream)
 - `gate()` — human-in-the-loop: pause stream, inspect pending, approve/reject/modify, resume
 - `track()` — pipe-native task tracking (status, duration, count, error as reactive stores)
 - `route(source, pred)` — dynamic conditional routing → `[matching, notMatching]`
+- `forEach(dep, fn)` — fan-out: spawn N parallel tasks from array. Concurrency control, switchMap re-trigger cancellation
+- `onFailure(dep, handler)` — dead letter / error handler step
+- `wait(dep, ms | signal)` — delay or signal-based wait
+- `subPipeline(deps, factory)` — nested child pipeline per trigger
+- `join(deps, strategy)` — merge strategies (append, merge-by-key, intersect)
+- `sensor(dep, poll, opts?)` — Airflow sensor pattern: poll until truthy, then forward
+- `loop(deps, factory, opts?)` — declarative iteration with predicate and maxIterations
+- `pipelineRunner(configs[])` — supervisor with health checks and auto-restart
+- `toMermaid(steps)` / `toD2(steps)` — serialize pipeline DAG to diagram syntax
 - `withBreaker(breaker)` — circuit breaker as pipe operator
 - `withRetry(config)` — retry + backoff with observable retry state
 - `withTimeout(ms)` — timeout as pipe operator
+
+## Messaging (callbag-recharge/messaging)
+
+Pulsar-inspired embeddable messaging layer. Topics are persistent streams with cursor-based consumption.
+
+### topic<T>(name, opts?)
+
+Persistent append-only stream backed by `reactiveLog`.
+
+```ts
+import { topic } from 'callbag-recharge/messaging'
+
+const events = topic<Event>('user-events', { maxSize: 10000 })
+events.publish({ type: 'login', userId: '42' })
+events.depth.get()        // reactive message count
+events.latest.get()       // most recent message
+```
+
+Options: maxSize, dedup key, priority, delay, schema validation, compaction mode, namespace.
+
+### subscription(topic, opts)
+
+Cursor-based consumer with backpressure.
+
+```ts
+import { subscription } from 'callbag-recharge/messaging'
+
+const sub = subscription(events, {
+  name: 'processor',
+  mode: 'shared',        // exclusive | shared | failover | key_shared
+})
+const msgs = sub.pull(10)  // pull up to 10 messages
+msgs.forEach(m => {
+  process(m.data)
+  m.ack()                  // or m.nack() for retry
+})
+sub.position.get()         // reactive cursor position
+sub.backlog.get()          // messages behind cursor
+```
+
+Retry + dead letter: `nack()` routes to retry queue with configurable backoff. Terminal failures route to dead letter topic.
+
+### jobQueue<T>(name, processor, opts?)
+
+Wraps topic + subscription + per-job processing.
+
+```ts
+import { jobQueue } from 'callbag-recharge/messaging'
+
+const queue = jobQueue<EmailJob>('emails', async (signal, job) => {
+  await sendEmail(job.to, job.body, { signal })
+}, { concurrency: 5, retries: 3 })
+
+queue.add({ to: 'alice@example.com', body: 'Hello' })
+queue.active.get()     // reactive count of active jobs
+queue.completed.get()  // reactive count of completed jobs
+```
+
+### jobFlow(queues, edges, opts?)
+
+Chain job queues via completion event wiring.
+
+```ts
+import { jobFlow } from 'callbag-recharge/messaging'
+
+const flow = jobFlow(
+  { fetch: fetchQueue, transform: transformQueue, save: saveQueue },
+  [['fetch', 'transform'], ['transform', 'save']],
+)
+```
+
+### repeatPublish(topic, value, opts)
+
+Scheduled message production via interval or cron. Dedup by repeat key.
+
+## Worker (callbag-recharge/worker)
+
+Reactive cross-thread store bridge. Stores exposed from one thread appear as reactive `Store<T>` on the other.
+
+### workerBridge(worker, opts) + workerSelf(opts)
+
+```ts
+// main.ts
+import { workerBridge } from 'callbag-recharge/worker'
+
+const { stores, status, destroy } = workerBridge(
+  new Worker('./worker.ts'),
+  {
+    expose: { query: queryStore },    // send to worker
+    import: { result: '' as string }, // receive from worker (with type + initial)
+  }
+)
+stores.result.get()  // reactive — updates when worker emits
+status.get()         // 'connecting' | 'connected' | 'disconnected' | 'failed'
+
+// worker.ts
+import { workerSelf } from 'callbag-recharge/worker'
+
+const { stores } = workerSelf({
+  expose: { result: resultStore },
+  import: { query: '' as string },
+})
+effect([stores.query], () => {
+  resultStore.set(compute(stores.query.get()))
+})
+```
+
+- Auto-detects Worker, SharedWorker, ServiceWorker, BroadcastChannel, MessagePort
+- Lifecycle signals (RESET/PAUSE/RESUME/TEARDOWN) serialize across the wire
+- Batch coalescing: `batch()` updates → one `postMessage` (via reactive graph, no timing hacks)
+- `transfer` option for zero-copy ArrayBuffer passing
+- `withConnectionStatus()` for connection lifecycle companion stores
 
 ## Adapters (callbag-recharge/adapters)
 
@@ -523,40 +670,65 @@ memory.recallByTag('pref') // tag-based retrieval
 
 ### Additional patterns
 
+- `agentLoop` — agent tool-call loop with gate/approval
+- `textEditor` — text editor state (undo/redo, cursor, selection, markdown commands)
 - `rateLimiter(opts)` — reactive rate-limiting (drop/queue/error strategies)
 - `undoRedo(initial, opts)` — state with undo/redo history
 - `pagination(fetchFn, opts)` — paginated data fetching with auto-cancel
 - `formField(opts)` — form field with sync + async validation
+- `commandBus` — command pattern with undo support
+- `toolCallState` — LLM tool call state machine
+- `focusManager` — focus tracking across elements
+- `hybridRoute` — cloud+edge model routing
+- `selection` — multi-select state management
+- `textBuffer` — text buffer with cursor tracking
 
-## Compat Layers (drop-in API replacements)
+## Compat Layers (drop-in API replacements + framework bindings)
 
-### Zustand compat
+### Drop-in API replacements
+
 ```ts
+// Zustand
 import { create } from 'callbag-recharge/compat/zustand'
 const useStore = create((set) => ({ count: 0, inc: () => set(s => ({ count: s.count + 1 })) }))
-```
 
-### Jotai compat
-```ts
+// Jotai
 import { atom } from 'callbag-recharge/compat/jotai'
 const countAtom = atom(0)
-const doubledAtom = atom((get) => get(countAtom) * 2) // dynamic dep tracking
-```
+const doubledAtom = atom((get) => get(countAtom) * 2)
 
-### Nanostores compat
-```ts
+// Nanostores
 import { atom, computed, map } from 'callbag-recharge/compat/nanostores'
-const count = atom(0)
-const doubled = computed(count, v => v * 2)
-const profile = map({ name: 'Alice', age: 30 })
-```
 
-### TC39 Signals compat
-```ts
+// TC39 Signals
 import { Signal } from 'callbag-recharge/compat/signals'
 const count = new Signal.State(0)
 const doubled = new Signal.Computed(() => count.get() * 2)
 ```
+
+### Framework bindings
+
+```ts
+// Vue
+import { useStore, useSubscribe } from 'callbag-recharge/compat/vue'
+const count = useStore(countStore)    // writable Ref<T>
+const status = useSubscribe(ws.status) // readonly Ref<T>
+
+// React
+import { useStore, useSubscribe } from 'callbag-recharge/compat/react'
+const [count, setCount] = useStore(countStore)
+const status = useSubscribe(ws.status)
+
+// Svelte
+import { useSubscribe } from 'callbag-recharge/compat/svelte'
+const count = useSubscribe(countStore) // Svelte readable store
+
+// Solid
+import { useSubscribe } from 'callbag-recharge/compat/solid'
+const count = useSubscribe(countStore) // Solid signal accessor
+```
+
+`useStore()` for writable stores (read + set). `useSubscribe()` for read-only subscriptions — any `Store<T>`, including companion stores like `ws.status`.
 
 ## Common Patterns
 
@@ -675,13 +847,17 @@ log.connectPipeline(workflow)
 
 - Two-phase push: DIRTY propagates on type 3 STATE, values on type 1 DATA
 - Diamond resolution uses dirty-dep bitmask at convergence points
-- Single-dep chains skip bitmask (P0 optimization)
+- Single-dep chains skip bitmask (SINGLE_DEP optimization)
 - Tier 1 operators participate in diamond resolution; Tier 2 (async/timer) are cycle boundaries
 - batch() defers DATA but DIRTY propagates immediately
 - Explicit deps — no implicit tracking magic (except dynamicDerived)
 - Every store exposes .source (callbag) for protocol-level interop
 - Lazy derived — no computation until first use; disconnects when last subscriber leaves
 - Output slot model: null → fn → Set for memory-efficient subscriber management
+- Lifecycle signals (RESET/PAUSE/RESUME/TEARDOWN) flow through TYPE 3 STATE channel
+- Companion store pattern: `with*()` wrappers return `Store<T> & { status, error, ... }`
+- Dependency hierarchy: raw/ → core/ → extra/ → utils/ → domain layers (orchestrate/messaging/worker) → surface (patterns/adapters/compat)
+- data/ is cross-cutting, importable from any tier except core
 
 ## Links
 - Docs: https://callbag-recharge.github.io/callbag-recharge/

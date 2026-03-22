@@ -1,9 +1,18 @@
+import { copyFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { defineConfig } from "vitepress";
 
 const root = resolve(__dirname, "../..");
 
 export default defineConfig({
+	buildEnd() {
+		copyFileSync(resolve(root, "llms.txt"), resolve(root, "site/.vitepress/dist/llms.txt"));
+		copyFileSync(
+			resolve(root, "llms-full.txt"),
+			resolve(root, "site/.vitepress/dist/llms-full.txt"),
+		);
+	},
+
 	title: "callbag-recharge",
 	description: "State that flows. Reactive state management for TypeScript.",
 	base: "/callbag-recharge/",

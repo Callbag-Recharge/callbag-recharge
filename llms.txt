@@ -3,8 +3,9 @@
 
 ## What it does
 Reactive state management with 6 primitives: state, derived, dynamicDerived, effect, producer, operator.
-Glitch-free diamond resolution via two-phase push. 60+ tree-shakeable operators.
-Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
+Glitch-free diamond resolution via two-phase push. 70+ tree-shakeable operators.
+Protocol-native lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN).
+Framework-agnostic. Works frontend, backend, edge. Zero dependencies. 170+ modules.
 
 ## When to use
 - Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
@@ -12,12 +13,12 @@ Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 - Cancellable async operations (switchMap auto-cancels previous)
 - Derived/computed values that are always consistent (diamond-safe, cached)
 - Agentic workflows (session state, tool call lifecycle, multi-agent coordination)
-- Event pipelines with 60+ operators for transform, buffer, window, error handling
+- Event pipelines with 70+ operators for transform, buffer, window, error handling
 - Reactive data structures (reactiveMap, reactiveLog, reactiveIndex) with near-native perf
 - Scheduled pipelines (cron triggers, task state, DAG validation, checkpoint persistence)
+- Message queues and job processing (Pulsar-inspired topic/subscription system)
+- Cross-thread reactive stores (Web Worker, SharedWorker, Service Worker, BroadcastChannel)
 - On-device / edge LLM streaming state management (WebLLM, Ollama, ExecuTorch)
-- Hybrid cloud+edge model routing with confidence-based fallback
-- Tool call state machines for local LLMs in the browser
 - Durable workflows with checkpoint persistence (file, SQLite, IndexedDB adapters)
 - Live pipeline monitoring via SSE sink adapter
 
@@ -34,8 +35,15 @@ Framework-agnostic. Works frontend, backend, edge. Zero dependencies.
 - `batch(fn)` — defer emissions until outermost batch ends
 - `pipeRaw(source, fn1, fn2, ...)` — fuse transforms into single derived for ~2x throughput
 
+## Lifecycle Signals
+- `subscribe()` returns `Subscription` with `signal()` method
+- `sub.signal(RESET)` — reset all upstream state to initial
+- `sub.signal(PAUSE)` / `sub.signal(RESUME)` — pause/resume activity
+- `sub.signal(TEARDOWN)` — terminate the graph (cascades END downstream)
+- Signals propagate through the reactive graph via TYPE 3 STATE channel
+
 ## Operators (import from callbag-recharge/extra)
-Sources: interval, fromIter, fromAsyncIter, fromEvent, fromPromise, fromObs, of, empty, throwError, never
+Sources: interval, fromIter, fromAsyncIter, fromEvent, fromPromise, fromObs, fromAny, of, empty, throwError, never
 Filtering: filter, take, skip, first, last, find, elementAt, distinctUntilChanged, takeUntil, takeWhile
 Transformation: map, scan, pairwise, startWith, flat, switchMap, concatMap, exhaustMap, groupBy
 Combination: merge, combine, concat, race, withLatestFrom, partition
@@ -44,34 +52,56 @@ Buffering: buffer, bufferCount, bufferTime
 Windowing: window, windowCount, windowTime
 Aggregation: reduce, toArray
 Error handling: rescue, retry, repeat
-Utilities: tap, share, remember, subject, wrap
+Utilities: tap, share, remember, subject, wrap, cached, pausable
 Sinks: forEach, subscribe
 
 ## Data structures (import from callbag-recharge/data)
 - `reactiveMap<K,V>()` — reactive key-value store. select(), keysStore, sizeStore, events, TTL, eviction, namespaces
 - `reactiveLog<T>()` — append-only reactive log. Bounded mode (circular buffer). lengthStore, latest, tail(n)
 - `reactiveIndex<PK,IK,V>()` — dual-key reactive index. O(1) reverse map. 1.01x native Map.get reads
+- `reactiveList<T>()` — ordered collection with positional operations
 - `pubsub()` — topic-based publish/subscribe. Each topic is a lazy state store
+- `compaction(log, keyFn)` — composable log compaction, retains latest per key
+
+## Messaging (import from callbag-recharge/messaging)
+- `topic<T>(name, opts?)` — persistent append-only stream. Priority, delay, dedup, schema validation, compaction
+- `subscription(topic, opts)` — cursor-based consumer. Modes: exclusive, shared, failover, key_shared. Pull-based backpressure, ack/nack
+- `repeatPublish(topic, value, opts)` — scheduled message production via interval or cron
+- `jobQueue<T>(name, processor, opts?)` — topic + subscription + processing. Concurrency control, retry, DLQ
+- `jobFlow(queues, edges, opts?)` — multi-queue workflow chaining with diagram export
 
 ## Orchestration (import from callbag-recharge/orchestrate)
-- `fromCron(schedule)` — producer that emits on cron schedule (zero-dep parser)
-- `taskState<T>({ id })` — reactive task execution tracker (status, duration, error, runCount)
-- `dag(tasks)` — acyclicity validation + Inspector graph registration
 - `pipeline(steps)` — declarative workflow builder, auto-wires via topological sort
-- `step(factory, deps?)` — step definition for pipeline()
-- `checkpoint(id, adapter)` — durable step boundary, persist on emit, skip on recovery
-- `executionLog(opts)` — reactive execution history with pipeline auto-connect
+- `task(deps, fn)` — work step with AbortSignal. fn(signal, values)
+- `step(factory, deps?)` — raw reactive source wrapper
+- `branch(dep, pred)` — binary conditional routing
+- `approval(dep, opts)` — human-in-the-loop with approve/reject/modify
+- `gate()` — pipe operator for approval queuing
+- `taskState<T>({ id })` — reactive task tracker (status, duration, error, runCount as companion stores)
+- `forEach(dep, fn)` — fan-out: spawn N parallel tasks from array
+- `onFailure(dep, handler)` — dead letter / error handler step
+- `wait(dep, ms | signal)` — delay or signal-based wait
+- `subPipeline(deps, factory)` — nested child pipeline per trigger
+- `join(deps, strategy)` — merge strategies (append, merge-by-key, intersect)
+- `sensor(dep, poll, opts?)` — Airflow sensor pattern
+- `loop(deps, factory, opts?)` — declarative iteration
+- `executionLog(opts)` — reactive execution history
+- `pipelineRunner(configs[])` — supervisor with health checks and auto-restart
+- `toMermaid(steps)` / `toD2(steps)` — DAG diagram export
+- `fromCron(schedule)` — cron trigger (zero-dep parser)
+- `fromTrigger()` — manual trigger source
 - Checkpoint adapters: memoryAdapter(), fileAdapter(), sqliteAdapter(), indexedDBAdapter()
-- `fromTrigger()` — manual trigger source (.fire(value))
-- `gate()` — human-in-the-loop: pause, inspect, approve/reject, resume
-- `track()` — pipe-native task tracking (status, duration, count, error)
-- `route(source, pred)` — dynamic conditional routing
-- `withBreaker(breaker)` — circuit breaker as pipe operator
-- `withRetry(config)` — retry + backoff with observable state
-- `withTimeout(ms)` — timeout as pipe operator
+
+## Worker (import from callbag-recharge/worker)
+- `workerBridge(worker, opts)` — main-thread side: expose/import stores across threads
+- `workerSelf(opts)` — worker-side: expose/import stores back to main thread
+- Auto-detects Worker, SharedWorker, ServiceWorker, BroadcastChannel, MessagePort
+- Lifecycle signals (RESET/PAUSE/RESUME/TEARDOWN) serialize across the wire
+- Batch coalescing: multiple store changes in batch() → one postMessage
+- `withConnectionStatus(store)` — connection lifecycle companion stores
 
 ## Adapters (import from callbag-recharge/adapters)
-- `fromWebhook(opts?)` — HTTP trigger source (Node.js/edge)
+- `fromWebhook(opts?)` — HTTP trigger source with request-response wiring
 - `fromWebSocket(url)` / `toWebSocket(ws)` — reactive WebSocket bridge
 - `toSSE(source, opts?)` — Server-Sent Events sink, stream store values to browser
 - `fromHTTP(url, opts?)` — fetch-based HTTP source with polling, headers, transform
@@ -80,16 +110,28 @@ Sinks: forEach, subscribe
 - `createStore` — Zustand-compatible API with diamond-safe selectors
 - `chatStream` — LLM streaming with history, cancel, retry, rate limiting
 - `memoryStore` — three-tier AI memory: session, working, long-term
-- `rateLimiter` — reactive rate-limiting (drop/queue/error strategies)
+- `agentLoop` — agent tool-call loop with gate/approval
+- `textEditor` — text editor state (undo/redo, cursor, selection)
+- `formField` — form field with sync + async validation
 - `undoRedo` — state with undo/redo history
 - `pagination` — paginated data fetching with auto-cancel
-- `formField` — form field with sync + async validation
+- `rateLimiter` — reactive rate-limiting (drop/queue/error strategies)
+- `commandBus` — command pattern with undo support
+- `toolCallState` — LLM tool call state machine
+- `focusManager` — focus tracking across elements
+- `hybridRoute` — cloud+edge model routing
+- `selection` — multi-select state
+- `textBuffer` — text buffer with cursor tracking
 
-## Compat layers (drop-in API replacements)
+## Compat layers (drop-in API replacements + framework bindings)
 - `callbag-recharge/compat/zustand` — create() matching StoreApi
 - `callbag-recharge/compat/jotai` — atom() with dynamic dep tracking
 - `callbag-recharge/compat/nanostores` — atom(), computed(), map()
 - `callbag-recharge/compat/signals` — TC39 Signal.State, Signal.Computed
+- `callbag-recharge/compat/vue` — useStore(store), useSubscribe(store)
+- `callbag-recharge/compat/react` — useStore(store), useSubscribe(store)
+- `callbag-recharge/compat/svelte` — useSubscribe(store)
+- `callbag-recharge/compat/solid` — useSubscribe(store)
 
 ## Inspectability
 - `Inspector.inspect(store)` — { name, kind, value, status }

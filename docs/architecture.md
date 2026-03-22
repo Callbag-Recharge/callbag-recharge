@@ -1,8 +1,6 @@
 # Architecture
 
-> **Status:** Canonical design document. The output slot model, status model, lazy
-> derived (Option D3), dynamicDerived, and D5 error handling are implemented and shipped.
-> This is the definitive architecture reference.
+> **Status:** Canonical design document. All core architecture is implemented and shipped.
 
 ---
 
@@ -140,8 +138,6 @@ Both tiers use the same wiring pattern: a pure `.ts` file (library only) + a `.v
 
 ---
 
----
-
 ## 3. Protocol: Type Constants & Signal Vocabulary
 
 ```ts
@@ -224,176 +220,62 @@ Every node has one of three callbag roles. `state` and `derived` are syntax suga
 
 ## 5. The Chain Model (Conceptual)
 
-This is the central mental model. The stages described here are **not** composed as separate callbag functions — they are inlined into dep subscription handler closures for zero-allocation performance. The conceptual model accurately describes the signal flow.
-
-### Signal flow through a transform node
-
-Every transform node B (derived, operator) processes signals through these conceptual stages:
+Every transform node B processes signals through inlined stages (not composed callbag functions):
 
 ```
 dep.source → state tracking → transform(fn) → value caching → output dispatch
 ```
 
-In implementation, `_connectSingleDep()` and `_connectMultiDep()` contain all of these stages as inline logic within one closure. There is no `_chain` property on the class, and no `B.sources` array.
+`_connectSingleDep()` and `_connectMultiDep()` contain all stages as inline closure logic.
 
-### State tracking stage
-
-Fires on STATE signals, updates `B._status`, then forwards the signal downstream unchanged:
-
-```
-STATE DIRTY    → B._status = DIRTY;    forward DIRTY downstream
-STATE RESOLVED → B._status = RESOLVED; forward RESOLVED downstream
-STATE unknown  → forward unchanged (required for forward-compat)
-END            → B._status = DISCONNECTED; forward END downstream
-```
-
-### Value caching stage
-
-Fires on DATA after the transform, writes to `B._cachedValue`, then dispatches downstream:
-
-```
-DATA value → B._cachedValue = value; B._status = SETTLED; dispatch to output slot
-```
-
-### Why the tap is always active
-
-The handler closure captures `this` and always writes to `_cachedValue`/`_status`, regardless of whether `_output` has a downstream consumer. `_dispatch()` no-ops when `_output === null`, but the state/value updates still happen. When connected, whoever is downstream — a subscriber C, or a downstream effect — B's cached state stays current.
+- **State tracking:** STATE DIRTY → `_status = DIRTY`, forward. STATE RESOLVED → `_status = RESOLVED`, forward. Unknown STATE → forward unchanged. END → disconnect, forward.
+- **Value caching:** DATA → `_cachedValue = computed`, `_status = SETTLED`, dispatch to output slot.
+- **Always active:** Handler closure always writes `_cachedValue`/`_status` regardless of subscribers. `_dispatch()` no-ops when `_output === null`.
 
 ---
 
 ## 6. The Output Slot
 
-Every transform node B has an **output slot** (`_output`). The output slot is the multicast dispatch point — it routes every DATA/STATE/END signal to whoever is currently subscribed to B. This replaces subscriber-count bookkeeping and avoids any involvement of upstream nodes in topology changes.
-
-The output slot is purely a dispatch point. Dep connections and downstream dispatch are independent concerns — no handoff protocol is needed.
-
-A itself is always completely unaware of what happens at the output slot.
-
-### Output slot mode transitions
+Every node has an **output slot** (`_output`) — a lazy multicast dispatch point. Upstream nodes are unaware of topology changes.
 
 ```
-DISCONNECTED ──[subscriber arrives]──→ SINGLE ──[2nd subscriber]──→ MULTI
-      ↑                                   |                           |
-      └──[last subscriber leaves]─────────┘                           |
-      ↑                                                               |
-      └──[last subscriber leaves]─────────────────────────────────────┘
+DISCONNECTED (null) ──→ SINGLE (fn) ──→ MULTI (Set)
+      ↑                      |                |
+      └──[last unsub]────────┘                |
+      └──[last unsub]─────────────────────────┘
 ```
 
-### DISCONNECTED (no subscribers)
+- **DISCONNECTED:** `_output = null`, deps not connected. `get()` pull-computes from deps. Fully lazy.
+- **SINGLE:** `_output = sink`. First subscriber triggers `_lazyConnect()`.
+- **MULTI:** `_output = Set{sinks}`. Dispatch to all in one pass. O(1) topology changes.
 
-Both `derived` and `operator` start DISCONNECTED. When B has no subscribers:
-
-- `_output = null`
-- Dep connections are inactive — B is not subscribed to any deps
-- `B.get()` performs a pull-based recompute: calls `_fn()` which reads deps via closure (always-fresh), writes result to `_cachedValue`, and returns it
-- No computation or connection overhead at construction — fully lazy
-
-### Mode 1: SINGLE
-
-When the first subscriber C subscribes to B:
-
-1. `_output = sink` (C's sink function)
-2. Connect to deps via `_lazyConnect()` — subscribe to each dep's `source()`
-3. Handler closures fire on dep signals — `_cachedValue` and `_status` kept current
-
-C receives a talkback. Calling `talkback(END)` removes C from the output slot.
-
-### Mode 2: MULTI
-
-When a second subscriber D subscribes while C is already in the slot:
-
-1. `_output` switches from a single sink function to `Set{C, D}`
-2. Emissions dispatch to all sinks in one pass
-3. Additional subscribers just join the Set — no upstream restructuring
-4. Each `talkback(END)` removes only that specific sink from the Set
-
-**Key:** A never gets an additional subscriber. The only topology change is in the output slot. This is the decisive advantage: topology changes are O(1) and source-agnostic.
-
-### Return to DISCONNECTED
-
-When the last subscriber leaves:
-
-- For both `derived` and `operator`: `_output = null`, disconnect from all deps, `_status = DISCONNECTED`
-
-`_cachedValue` is retained — `get()` returns the last cached value (or performs a fresh pull-recompute for derived).
+On last unsubscribe: `_output = null`, disconnect from deps, `_status = DISCONNECTED`. `_cachedValue` retained for `get()`.
 
 ---
 
 ## 7. `.get()` Semantics
 
-`.get()` returns a meaningful value at all times. When `_status` is DIRTY, `.get()` also communicates staleness — it does not silently return a stale value as if it were fresh.
-
 | Status | `.get()` behavior |
 |--------|-------------------|
-| `SETTLED` | Return `_value` — definitely current |
-| `RESOLVED` | Return `_value` — guaranteed unchanged from last SETTLED |
-| `DIRTY` | Return `_value` alongside a staleness indicator (exact API TBD — see below) |
-| `DISCONNECTED` | Pull-based recompute: call `_fn()` which reads deps via closure, write result to `_cachedValue`, return it |
-| `COMPLETED` | Return `_value` — last value before terminal |
-| `ERRORED` | **Throw** the stored error (derived/dynamicDerived); return `_value` (producer/operator — error stored separately in `_errorData`) |
-
-**Honest DIRTY feedback** — when `_status === DIRTY`, a new value is in flight. Silently returning `_value` misleads callers. Options for the API shape:
-- `inspect()` → `{ status, value }` for callers that need to distinguish fresh vs. stale
-- `get()` returns `_value` as-is (compatible with existing usages); staleness queryable via `node._status`
-- Future: `getLive()` forces a synchronous upstream pull to return the real-time value
-
-The chosen approach is: `.get()` returns `_value` for compatibility; `_status` is always publicly readable; `Inspector.inspect()` surfaces both together. The full pull-propagation design for a `getLive()` is deferred.
-
-**DISCONNECTED pull recompute** writes the result to `_cachedValue` so subsequent `get()` calls can return it. When a subscriber later arrives, `_lazyConnect()` establishes the push pipeline and `_cachedValue` is overwritten by incoming DATA.
+| `SETTLED` / `RESOLVED` | Return `_value` (current) |
+| `DIRTY` | Return `_value` (may be stale); staleness queryable via `_status` or `Inspector.inspect()` |
+| `DISCONNECTED` | Pull-recompute: call `_fn()`, write to `_cachedValue`, return it |
+| `COMPLETED` | Return last value before terminal |
+| `ERRORED` | **Throw** stored error (derived/dynamicDerived); return `_value` (producer/operator) |
 
 ---
 
 ## 8. Diamond Resolution
 
-Diamond resolution works correctly via the bitmask algorithm applied at convergence points (multi-dep nodes).
+Multi-dep nodes use a `Bitmask` to track which deps are dirty. Recompute fires only when all bits clear.
 
-### Example: C depends on [A, B] where B depends on A
+- **DIRTY from dep N:** set bit N, forward DIRTY on first dirty dep only
+- **RESOLVED from dep N:** clear bit N, forward RESOLVED if all clear
+- **DATA from dep N:** clear bit N, recompute if all clear
 
-C connects to both deps:
-- dep 0: A.source directly
-- dep 1: B.source (which internally flows through A → B's handler → B's output slot)
+`Bitmask` class: ≤32 deps → plain number; >32 deps → `Uint32Array` with O(1) `empty()`. Single-dep chains skip bitmask entirely.
 
-A gets two sinks (C's direct connection + B's upstream connection).
-
-**Signal flow:**
-1. A sends DIRTY → flows to C's dep-0 connection → C sets bit 0 → `dirtyDeps = 0b01` → C forwards DIRTY downstream (first dirty dep)
-2. A sends DIRTY → flows through B's handler → B._status = DIRTY → B dispatches DIRTY → arrives at C's dep-1 connection → C sets bit 1 → `dirtyDeps = 0b11` → idempotent (DIRTY already forwarded)
-3. A sends DATA → flows through B's handler → B computes fn, B._cachedValue updated, B._status = SETTLED → B dispatches DATA → arrives at C's dep-1 → C clears bit 1 → `dirtyDeps = 0b01` → not 0, wait
-4. A sends DATA → also arrives at C's dep-0 directly → C clears bit 0 → `dirtyDeps = 0` → recompute: `fn(A.get(), B.get())` — both values are current
-
-C computes exactly once. B._cachedValue is updated via its handler closure. Diamond resolution holds.
-
-**Key:** The bitmask waits for both paths. The ordering (which DATA arrives first) doesn't matter. Correctness is guaranteed by waiting for all bits to clear.
-
-### Bitmask algorithm (applied at multi-dep nodes only)
-
-The `Bitmask` class (`core/bitmask.ts`) provides per-dep dirty tracking safe for any number of deps:
-
-- **≤32 deps:** stores the bitmask as a plain number (`_v`). Bitwise ops on a single 32-bit integer — zero overhead.
-- **>32 deps:** stores bits in a `Uint32Array` (`_w`), with `_v` tracking the count of set bits. `empty()` is O(1) via the count rather than scanning words.
-
-In both cases `empty()` is a single `_v === 0` comparison. Method dispatch is monomorphic (one class, one hidden class for all instances).
-
-```ts
-const dirtyDeps = new Bitmask(deps.length);
-
-// On STATE DIRTY from depIndex:
-const wasClean = dirtyDeps.empty();
-dirtyDeps.set(depIndex);
-if (wasClean) signal(DIRTY);           // forward on first dirty dep only
-
-// On STATE RESOLVED from depIndex:
-if (dirtyDeps.test(depIndex)) {
-  dirtyDeps.clear(depIndex);
-  if (dirtyDeps.empty()) signal(RESOLVED); // all resolved without DATA
-}
-
-// On DATA from depIndex:
-dirtyDeps.clear(depIndex);             // clear bit; no-op if not set (raw callbag)
-if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
-```
-
-**Single-dep chains:** No bitmask. Forward every DIRTY directly.
+**Diamond A→B,C→D:** A sets both bits. B's DATA clears bit 1, A's DATA clears bit 0. D computes exactly once with both values current. Order of DATA arrival doesn't matter.
 
 ---
 
@@ -406,345 +288,140 @@ if (dirtyDeps.empty()) recompute();    // act only when all deps resolved
 - **talkback(END)** → upstream (unsubscribe)
 - **talkback(STATE, lifecycleSignal)** → upstream (RESET, TEARDOWN)
 
-### What each node does with each signal
+### Lifecycle signals
 
-| Signal | producer (source) | operator / derived (transform) | effect (sink) |
-|--------|------------------|-------------------------------|---------------|
-| STATE DIRTY received | N/A (source) | stateIntercept → update `_status = DIRTY`; single-dep: forward; multi-dep: bitmask → forward if first | Track in bitmask; do NOT forward |
-| STATE RESOLVED received | N/A | stateIntercept → update `_status = RESOLVED`; single-dep: forward; multi-dep: bitmask → if 0, forward | Bitmask → if 0, skip fn() |
-| STATE unknown received | N/A | **Forward downstream unchanged — no exceptions** | Ignore (terminal) |
-| DATA received | N/A | valueIntercept → `_value = computed`; `_status = SETTLED`; single-dep: forward; multi-dep: bitmask → if 0, compute+forward | Bitmask → if 0, run fn() |
-| END (completion) received | N/A | `_status = DISCONNECTED`; complete() → disconnect upstream, notify sinks | cleanup(); disconnect from all talkbacks |
-| END (error) received | N/A | `_status = DISCONNECTED`; error(e) → disconnect upstream, notify sinks with error | cleanup(); disconnect from all talkbacks |
-| DIRTY sent | `signal(DIRTY)` before `emit()` | `signal(DIRTY)` downstream (from bitmask or single-dep forward) | N/A |
-| RESOLVED sent | `signal(RESOLVED)` when equals guard | `signal(RESOLVED)` when suppressing or all-RESOLVED bitmask | N/A |
-| DATA sent | `emit(value)` | emit computed value downstream | N/A |
+Flow **upstream** via `talkback(STATE, signal)`. PAUSE/RESUME also propagate **downstream** (unknown STATE signals are forwarded per rule 6).
 
-### Lifecycle signals (bidirectional)
+| Signal | Behavior |
+|--------|----------|
+| RESET | Reset `_value` to initial, re-init operator handler (generation counter invalidates stale closures), clear derived cache, re-run effect |
+| PAUSE | Forward upstream; tier 2 extras handle locally (pause timers, polling) |
+| RESUME | Forward upstream; resume paused activity |
+| TEARDOWN | Handle cleanup, then `complete()` — cascades END downstream |
 
-Lifecycle signals flow **upstream** via `talkback(STATE, signal)` and can also flow **downstream** via `actions.signal()` or `producer.signal()`. Upstream: each node handles the signal locally, then forwards to its deps. Downstream: PAUSE/RESUME propagate through the graph naturally since unknown STATE signals are forwarded unchanged (rule 6). The `pausable()` extra operator uses downstream PAUSE/RESUME to gate DATA flow.
-
-| Signal | producer | state | operator | derived | effect |
-|--------|----------|-------|----------|---------|--------|
-| RESET | `_value = _initial`, emit initial, call `onSignal` | Reset to initial value, emit | Increment generation (invalidate old actions), re-init handler, notify handler, forward upstream | Clear cache flags, forward upstream | Increment generation, reset dirty tracking, re-run fn(), forward upstream |
-| PAUSE | Call `onSignal` handler | No-op | Notify handler, forward upstream | Forward upstream | Forward upstream |
-| RESUME | Call `onSignal` handler | No-op | Notify handler, forward upstream | Forward upstream | Forward upstream |
-| TEARDOWN | Call `onSignal`, then `complete()` | N/A | Notify handler, forward upstream, complete inline | Forward upstream, `_handleEnd` | Forward upstream, dispose |
-
-**Single-owner semantics:** Lifecycle signals sent via `sub.signal()` affect the entire upstream graph from that subscription point. Multiple subscribers sending conflicting signals (e.g., one pauses, another resumes) is undefined behavior. Design pipelines with a single control owner per graph segment.
-
-**Tier 2 boundary crossing:** DIRTY/RESOLVED don't cross tier 2 boundaries (producer-based operators). Lifecycle signals DO cross them via `onSignal` handlers registered in the producer factory. Every tier 2 extra (switchMap, debounce, etc.) registers an `onSignal` handler that forwards signals to the outer subscription and performs operator-specific cleanup on RESET.
-
-**Subscription interface:**
 ```ts
 const sub = subscribe(store, (v) => console.log(v));
 sub.signal(PAUSE);    // sends PAUSE upstream through the graph
-sub.signal(RESUME);   // sends RESUME upstream
 sub.signal(RESET);    // resets all upstream state to initial
-sub.signal(TEARDOWN); // terminates the graph (cascades END downstream)
+sub.signal(TEARDOWN); // terminates the graph
 sub.unsubscribe();    // standard unsubscribe
 ```
 
-**Operator generation counter:** On RESET, operator increments `_generation` and re-creates actions. Old actions (bound to previous generation) become no-ops, preventing stale closures from emitting after reset.
+**Single-owner semantics:** Multiple subscribers sending conflicting signals is undefined behavior.
 
-### Tier 2 extras (cycle boundaries)
+**Tier 2 boundary:** DIRTY/RESOLVED don't cross tier 2 boundaries (producer-based operators like switchMap, debounce). Lifecycle signals DO cross via `onSignal` handlers. Tier 2 nodes start fresh DIRTY+DATA cycles via `autoDirty: true`.
 
-Tier 2 nodes (debounce, switchMap, etc.) use `subscribe()` internally, which is a callbag sink that receives only DATA (type 1). Tier 2 nodes do not receive DIRTY/RESOLVED from upstream. Each `emit()` starts a fresh DIRTY+DATA cycle via `autoDirty: true`. Tier 2 always produces DATA — upstream nodes always get a tap event when tier 2 fires.
-
-Tier 2 nodes register `onSignal` handlers in their producer factory to forward lifecycle signals upstream and perform operator-specific cleanup (e.g., cancel inner subscriptions on RESET, clear timers on PAUSE).
-
-### DATA without prior DIRTY (raw callbag compat)
-
-When a dep sends DATA without having sent DIRTY (raw callbag source with no type 3 support):
-
-```ts
-// Applied universally to operator, derived, effect:
-if (type === DATA) {
-  dirtyDeps &= ~(1 << depIndex); // clear bit if set; no-op if not (raw callbag case) (Comment: why clear bit if not set? I feel that we should always keep track of the input data for the dep even if it's not dirty so when bitmask is 0 we can recompute using this cache for that dep)
-  if (dirtyDeps === 0) recompute(); // wait for all known-dirty deps
-}
-```
-
-Values from raw callbag deps are captured by calling `dep.get()` inside `recompute()` — the dep's value is current even if no DIRTY was sent.
+**Raw callbag compat:** DATA without prior DIRTY is handled gracefully — bitmask `clear` is a no-op if bit wasn't set, and values are captured via `dep.get()` on recompute.
 
 ---
 
 ## 10. Lifecycle: Startup, Teardown, Cleanup, Reconnect
 
-### Construction → Connection → Disconnection
+1. **Construction:** Initialize properties, register with Inspector. Do NOT connect to deps — fully lazy.
+2. **Connection** (first subscriber): `_lazyConnect()` subscribes to deps. `beginDeferredStart()`/`endDeferredStart()` batches activations.
+3. **Disconnection** (last unsubscribe): null `_output`, disconnect deps, `DISCONNECTED`. `_cachedValue` retained.
 
-1. **Construction** (once): Initialize properties, prepare handler closures, register with Inspector. Do NOT connect to deps — fully lazy.
-2. **Connection** (first subscriber arrives): `_lazyConnect()` subscribes to each dep's `source()`. Handler-local state (counters, accumulators, flags) allocated fresh.
-3. **Disconnection** (last subscriber leaves): `_output = null`, disconnect from all deps, `_status = DISCONNECTED`. `_cachedValue` retained for `get()` pull-recompute.
+**Completion/error teardown order:** idempotency guard → terminal status → store error → disconnect upstream → null `_output` → `_stop()` cleanup → notify sinks. **Cleanup before notification** ensures `resubscribable` re-subscription finds clean state.
 
-`beginDeferredStart()` / `endDeferredStart()` batches chain activations so a subscriber's baseline is captured before any producer emits.
+**Error handling (derived):** Push path: try/catch around `fn()` → ERRORED, disconnects upstream. Pull path (`get()` disconnected): throws directly to caller, retryable. `get()` on ERRORED: throws stored error.
 
-### Completion/error teardown
-
-Order: idempotency guard → set terminal status → store error (derived: `_cachedValue`; operator: `_errorData`) → disconnect upstream (`talkback(END)`) → null `_output` → `_stop()` cleanup → notify sinks with `END`/`END(error)`. Multi-sink: try/catch per sink. **Cleanup before notification** ensures `resubscribable` re-subscription finds clean state.
-
-### D5: Error handling in derived/dynamicDerived
-
-- **Push path**: try/catch around `fn()` → `_handleEnd(err)` sets ERRORED, stores error, disconnects upstream. Late subscriber to ERRORED node gets `START` + `END(error)`.
-- **Pull path** (`get()` when disconnected): `fn()` throws directly to caller. No state mutation — retryable on next `get()`.
-- **`get()` on ERRORED node**: throws the stored error.
-
-### Reconnect
-
-- **derived**: `_lazyConnect()` re-subscribes to deps on new subscriber.
-- **operator**: `init()` re-runs, handler-local state resets.
-- **producer**: `_start()` re-runs. If `resetOnTeardown`, `_value` resets.
-- **effect**: no reconnect — dispose and create new.
-- **Completed nodes**: reject new subscribers (immediate START + END) unless `resubscribable`.
-
-### Lifecycle signal control
-
-Lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) provide graph-native control without imperative method calls (§1.15). They propagate upstream via `talkback(STATE, signal)` and PAUSE/RESUME can also propagate downstream:
-
-- **RESET**: Resets state to initial values, re-initializes operator handlers (generation counter invalidates stale closures), re-runs effects. Producer emits initial value after reset.
-- **PAUSE/RESUME**: Bidirectional. Upstream: forwarded via talkback. Tier 2 operators with timers/polling handle locally (e.g., timer pauses ticking). Downstream: `pausable()` operator dispatches PAUSE/RESUME via `signal()`, gating DATA flow. Messaging layer dispatches PAUSE/RESUME through companion stores when topic/subscription pauses.
-- **TEARDOWN**: Terminal signal. Each node handles cleanup then completes (cascades END downstream). Replaces imperative `destroy()` calls on individual nodes.
-
-Orchestrate's `pipeline.reset()` and `pipeline.destroy()` send RESET/TEARDOWN via step subscriptions. The `task()` operator intercepts these signals and delegates to `taskState` (ts.reset()/ts.destroy()) — no flat task list iteration needed.
+**Reconnect:** derived re-subscribes via `_lazyConnect()`. Operator re-runs `init()`. Producer re-runs `_start()`. Effect: dispose and create new. Completed nodes reject new subscribers unless `resubscribable`.
 
 ---
 
-## 11. Where to Put Guards, Stops, Passthroughs, Switches
+## 11. Operator Implementation Rules
 
-### Guard placement (unchanged)
-
-```ts
-return (depIndex, type, data) => {
-  if (completed) return;        // ALWAYS first
-  if (type === STATE) { ... }
-  if (type === DATA) { ... }
-  if (type === END) { ... }
-};
-```
-
-### Passthrough convention (unchanged)
-
-```ts
-if (type === STATE) signal(data);        // forward all STATE, no exceptions
-if (type === DATA)  emit(transform(data));
-if (type === END)   data ? error(data) : complete();
-```
-
-### RESOLVED when suppressing (unchanged)
-
-Operators that reject DATA (filter, distinctUntilChanged) MUST send `signal(RESOLVED)`. Silence leaves downstream bitmasks in a permanently waiting state.
-
-### Dynamic upstream = tier 2
-
-Dynamic upstream (dep changes at runtime) is a tier 2 pattern — use producer + subscribe. Operator deps are static. Sync inner completion race guard (`innerEnded` flag) is required. See §8 of the implementation guide.
+- **Guard order:** `if (completed) return` → STATE → DATA → END
+- **Passthrough:** `signal(data)` for all STATE (no exceptions), `emit(transform(data))` for DATA, `data ? error(data) : complete()` for END
+- **Suppress = RESOLVED:** Operators rejecting DATA (filter, distinctUntilChanged) MUST send `signal(RESOLVED)`. Silence leaves downstream bitmasks waiting forever.
+- **Dynamic upstream = tier 2:** Use producer + subscribe. Operator deps are static.
 
 ---
 
-## 12. Resource Allocation & Cleanup
+## 12. Resource Cleanup
 
-Every tier 2 extra must clean up all resources it allocates. The chain model does not change this — tier 2 nodes are producers, not operators, and their cleanup happens in the producer's `_stop()`.
-
-| Resource | Cleanup |
-|----------|---------|
-| `setInterval` | `clearInterval(id)` |
-| `setTimeout` | `clearTimeout(id)` |
-| `addEventListener` | `removeEventListener(event, handler)` |
-| `subscribe()` return | `unsub()` |
-| Inner callbag talkback | `talkback(END)` |
-| Inner store subscription | `innerUnsub?.()` |
-| Pending promise | `cancelled = true` flag |
-| Observable subscription | `subscription.unsubscribe()` |
+Every tier 2 extra must clean up all resources in `_stop()`: `clearInterval`, `clearTimeout`, `removeEventListener`, `unsub()`, `talkback(END)`, cancelled flags, `subscription.unsubscribe()`.
 
 ---
 
-## 13. Operator Behavioral Compatibility
+## 13. Behavioral Compatibility
 
-### Default: follow RxJS
+**Default:** Match RxJS semantics for any operator with an RxJS equivalent.
 
-For any operator with an RxJS equivalent, match RxJS semantics. See [rxjs.dev/api](https://rxjs.dev/api). Do not guess.
+**Key divergences:** Suppression emits RESOLVED (not silence) for bitmask clearing. `share()` is no-op (stores are multicast). Completion cleans up before notifying sinks (reentrancy safety). `batch()` defers DATA, not DIRTY.
 
-### Documented divergences from RxJS
+**TC39 Signals:** `state` matches Signal.State: `equals: Object.is`, `set(same)` is no-op.
 
-| Behavior | RxJS | callbag-recharge | Reason |
-|----------|------|---------------------|--------|
-| Value suppression | No emission | Must send `signal(RESOLVED)` | Downstream bitmasks need clearing |
-| `filter` non-match | No emission | `signal(RESOLVED)` | Same |
-| `distinctUntilChanged` equal | No emission | `signal(RESOLVED)` | Same |
-| `share()` | Adds refcounting | No-op | Stores are inherently multicast |
-| Completion ordering | Notify sinks first | Cleanup first | Reentrancy safety for `resubscribable` |
-| `batch()` | No equivalent | Defers DATA, DIRTY immediate | Diamond resolution across batched changes |
-| `effect` | No equivalent | Inline, synchronous | No global scheduler |
-| `state` completion | N/A (TC39 infinite) | Inherits from producer | Deliberate; state is a callbag, not a pure TC39 Signal |
-
-### TC39 Signals compatibility (unchanged)
-
-`state` matches TC39 Signal.State: `equals: Object.is` default, `set(same)` is no-op, batch defers DATA.
-
-### Raw callbag compatibility (unchanged)
-
-Type 1 is pure values only. Raw callbag sources feed into the graph via the "DATA without prior DIRTY" rule (§9).
+**Raw callbag:** Type 1 is pure values. Raw sources use "DATA without prior DIRTY" compat path (§9).
 
 ---
 
 ## 14. Optimization Guidelines
 
-See [`docs/optimizations.md`](optimizations.md) for the full optimization reference (V8 hidden classes, bitmask flags, SINGLE_DEP/P_SKIP_DIRTY signaling, handler closure zero-allocation, snapshot-free completion).
-
-Key principles:
-- Classes for hot paths (`ProducerImpl`, `DerivedImpl`, `OperatorImpl`) — all properties initialized in constructor for V8 hidden class stability.
-- Booleans packed into `_flags: number` as bit flags.
-- Handler closures capture `this`, write `_cachedValue`/`_status` in-place — zero allocation per signal.
-- `effect` is a pure closure (no class).
+See [`docs/optimizations.md`](optimizations.md) for the full reference. Key principles: classes for hot paths (V8 hidden classes), booleans packed into `_flags`, handler closures write in-place (zero allocation), `effect` is a pure closure.
 
 ---
 
 ## 15. Inspector & Debugging
 
-### Current capabilities
-
 ```ts
-Inspector.register(store, { name, kind });
-Inspector.getName(store);
-Inspector.getKind(store);
-Inspector.inspect(store);  // { name, kind, value }
-Inspector.graph();         // Map<name, StoreInfo>
-Inspector.trace(store, cb); // subscribe to value changes
+Inspector.inspect(store)  // { name, kind, value, status }
+Inspector.graph()         // Map of all named stores
+Inspector.getEdges()      // dependency graph
+Inspector.snapshot()      // JSON-serializable { nodes, edges }
+Inspector.toMermaid()     // diagram text
+Inspector.observe(store)  // protocol-level test utility
 ```
 
-### Status tracking
-
-Every registered store exposes `_status`. Inspector should surface this:
-
-```ts
-Inspector.inspect(store): {
-  name: string | undefined;
-  kind: string;
-  value: unknown;
-  status: "DISCONNECTED" | "DIRTY" | "SETTLED" | "RESOLVED";  // ← new
-}
-```
-
-Inspector hooks into handler closures (zero-cost when disabled). See `src/core/inspector.ts` for the full API.
+Zero per-store cost via WeakMaps. Disable in production: `Inspector.enabled = false`.
 
 ---
 
 ## 16. Raw Callbag Interop
 
-### The interop gap
-
-A raw callbag operator is a plain `(type, data) => void` function — it has no `source()`, no `_output`, no output slot. It's 1-to-1: one upstream, one downstream.
-
-**The problem:** Given `A → B → C` and `A → rawOp → C`, if E wants to subscribe to `rawOp`'s output, it can't. `rawOp` has no `source()` method, no multicast capability. E would need to create a duplicate subscription to A through a second rawOp instance — duplicating the upstream path with no shared state.
-
-### Interop wrapper
-
-The wrapper promotes a raw callbag operator to a proper node with `source()` + output slot for multicast capability. It becomes a subscribable store that participates in the graph like any other node.
-
-### Diamond behavior with raw operators
-
-Raw callbag operators in diamond topologies swallow STATE signals (DIRTY/RESOLVED), causing downstream nodes to fall back to the "DATA without prior DIRTY" compat path (§9). This is correct but may cause double-computation at convergence points — the downstream node receives DATA from the raw path without a prior DIRTY, so it can't defer computation until all paths resolve.
-
-### Raw callbag sinks (terminal)
-
-Raw callbag sinks (terminal consumers, not operators) need no wrapping — they simply ignore STATE signals harmlessly. They receive only type 0/1/2 from the standard callbag protocol.
+Raw callbag operators lack `source()` and multicast capability. The `wrap()` interop wrapper promotes them to proper nodes with output slots. Raw operators in diamonds swallow STATE signals, causing "DATA without prior DIRTY" compat path (§9). Raw callbag sinks need no wrapping.
 
 ---
 
-## 17. Summary: Decision Tree for New Extras
+## 17. Decision Tree for New Extras
 
-```
-Need to implement a new extra?
+1. **Sync transform, static deps?** → `operator()` (or `derived()` as sugar). Forward STATE, suppress with RESOLVED, bitmask for multi-dep.
+2. **Async / timer / dynamic upstream?** → `producer()` with `autoDirty: true`. Subscribe internally, emit fresh cycles, return cleanup fn.
+3. **Fused pipe?** → `pipeRaw()` for lazy, SKIP sentinel for filter semantics.
+4. **Last resort** → raw callbag.
 
-1. Synchronous transform with static deps?
-   YES → operator() (or derived() as sugar)
-       → Handler closure inlines state tracking + transform + value caching
-       → single-dep: forward every DIRTY
-       → multi-dep: bitmask tracks dirty deps
-       → Suppress with RESOLVED (not silence) when rejecting DATA
-       → Forward unknown STATE signals always
-
-2. Async, timer-based, or dynamic upstream?
-   YES → producer() with autoDirty: true
-       → Subscribe to input internally (subscribe() for DATA only)
-       → Emit results as new DIRTY+DATA cycles
-       → Set initial + equals to prevent spurious emissions
-       → Return cleanup fn that releases all resources
-       → innerEnded flag for sync inner completion race
-
-3. Pattern shared by many operators?
-   YES → Add option to producer() / operator() before duplicating boilerplate
-
-4. Fused pipe chain?
-   → pipeDerived() for always-reactive (auto-connects like derived)
-   → pipeRaw() for lazy (DISCONNECTED like operator)
-   → Both fuse N transforms into one derived/operator with one output slot
-   → SKIP sentinel for filter semantics in both
-
-5. None of the above?
-   → Raw callbag as last resort
-
-For all extras:
-  - Verify cleanup: every exit path releases all resources
-  - Verify error forwarding: upstream END with payload → error(), not complete()
-  - Verify RESOLVED: every suppressed DATA must emit RESOLVED downstream
-  - Verify reconnect: state resets (init re-runs for operator, fn re-runs for producer)
-  - Match RxJS semantics unless in the divergences table (§13)
-  - All nodes register with Inspector (kind, name); skip for inner anonymous nodes
-```
+**Checklist for all extras:** cleanup on every exit path, error forwarding (`END(error)` → `error()`), RESOLVED on suppression, reconnect resets state, match RxJS semantics (§13), Inspector registration.
 
 ---
 
-## 19. Higher-Level Layers (Utils, Data, Memory, Orchestrate)
-
-These layers build on core + extra. Read the source READMEs when working in these areas.
+## 19. Higher-Level Layers
 
 > **Design principle (§1.14):** High-level layers expose user-friendly APIs with domain semantics.
-> If low-level callbag internals must be accessible, lump them under an `inner` property.
-> Users of `pipeline()`, `formField()`, `chatStream()`, etc. should never need to understand
-> DIRTY/RESOLVED or output slots.
+> Callbag internals go under `inner` property. Read source READMEs when working in these areas.
 
 ### Utils (`src/utils/`)
 
-Pure strategies and reactive utilities. Key categories:
-
-- **Resilience:** `circuitBreaker`, `withBreaker`, `retry`, `backoff` (constant/linear/exponential/fibonacci/decorrelatedJitter)
-- **Async/concurrency:** `asyncQueue`, `cancellableAction`, `cancellableStream`, `batchWriter`
-- **Metadata wrappers:** `withStatus`, `track`, `tokenTracker`, `connectionHealth`
-- **Eviction:** `eviction` (fifo/lru/lfu/scored/random), `reactiveEviction` (O(log n) min-heap with effect subscriptions)
-- **State:** `dirtyTracker`, `stateMachine`, `timer` (countdown/stopwatch), `validationPipeline`
-- **Persistence:** `checkpoint`, `checkpointAdapters` (file/SQLite/IndexedDB)
-- **Graph:** `dag` (topological sort, acyclicity validation)
+Resilience (`circuitBreaker`, `withBreaker`, `retry`, `backoff`), async (`asyncQueue`, `cancellableAction`), metadata (`withStatus`, `withConnectionStatus`, `track`), eviction (fifo/lru/lfu/scored), state (`stateMachine`, `timer`), persistence (`checkpoint` + file/SQLite/IndexedDB adapters), caching (`cascadingCache`, `tieredStorage`), graph (`dag`).
 
 ### Data (`src/data/`)
 
-Reactive data structures using the **version-gated pattern**: `state<number>` version counter bumped on structural changes, `derived` stores materialize lazily. All implement `NodeV0` (`id`, `version`, `snapshot()`).
+Reactive data structures using version-gated pattern. `reactiveMap` (KV + TTL + eviction), `reactiveLog` (append-only + circular buffer), `reactiveIndex` (dual-key + reverse map), `reactiveList` (positional ops), `pubsub` (lazy topic stores), `compaction` (log compaction).
 
-| Structure | Purpose |
-|-----------|---------|
-| `reactiveMap` | Key-value store with TTL, eviction, namespaces, keyspace events |
-| `reactiveLog` | Append-only log with bounded circular buffer, sequence numbers |
-| `reactiveIndex` | Secondary index (`indexKey → Set<primaryKey>`) with reverse map |
-| `reactiveList` | Ordered collection with positional operations (index-based, version-gated) |
-| `pubsub` | Topic-based pub/sub — lazy `state` per topic, `equals: () => false` |
+### Messaging (`src/messaging/`)
+
+Pulsar-inspired topic/subscription. `topic` (persistent stream), `subscription` (cursor-based consumer with exclusive/shared/failover/key_shared modes), `repeatPublish` (scheduled production), `jobQueue` (topic + subscription + processing), `jobFlow` (multi-queue chaining).
 
 ### Memory (`src/memory/`)
 
-`collection` uses `reactiveIndex` for O(1) tag-based lookups. `byTag(tag)` delegates to `_tagIndex.get(tag)`.
+`collection` (reactive index for O(1) tag lookups), `decay` (time-based eviction), `node` (memory node with metadata).
+
+### Worker (`src/worker/`)
+
+Reactive cross-thread bridge. `workerBridge()`/`workerSelf()` expose/import stores across Worker/SharedWorker/ServiceWorker/BroadcastChannel. Lifecycle signals serialize across wire. Batch coalescing via reactive graph.
 
 ### Orchestrate (`src/orchestrate/`)
 
-Workflow nodes — users build pipelines with these building blocks. All nodes expose workflow-friendly APIs. Low-level callbag internals (stream status, step metadata) live under `pipeline().inner`.
-
-| Node | What it does |
-|------|-------------|
-| `pipeline(steps)` | Declares a DAG of steps. Auto-wires deps, tracks status, provides reset/destroy. `destroy()` tears down subscriptions and destroys auto-detected `task()` states (externally provided `opts.tasks` are left to the caller). Expert internals under `.inner` (streamStatus, stepMeta, topo order). |
-| `task(deps, fn, opts)` | Value-level work step. `fn(signal, values)` — signal first (AbortSignal, aborted on re-trigger/reset/destroy), dep values as array. Auto-join (combine), re-trigger (switchMap), lifecycle (taskState). **Default choice for work.** |
-| `branch(dep, pred)` | Binary conditional routing. Creates `name` (pass) + `name.fail` (fail) steps. |
-| `approval(dep, opts)` | Human-in-the-loop. Queues values until `approve()`/`reject()`/`modify()`. |
-| `step(factory)` | Raw reactive source wrapper. For `fromTrigger()`, `state()`, or expert-only full reactive control. |
-| `gate(opts)` | Pipe operator for approval queuing — the building block under `approval()`. Also usable standalone for custom human-in-the-loop flows. |
-| `taskState(opts)` | Reactive task tracker with companion stores: `status`, `error`, `duration`, `runCount`, `result`, `lastRun`. Each companion is an independent `Store`. `.get()` returns composed `TaskMeta` for convenience. `run(fn)` passes `AbortSignal` to `fn`; aborted on `reset()`/`restart()`/`destroy()`. Used internally by `task()`, but also standalone. |
-| `executionLog(opts)` | Reactive execution history with pipeline auto-logging. Backed by `reactiveLog`. |
+`pipeline(steps)` (DAG builder), `task(deps, fn)` (work step — signal-first callbacks), `branch` (conditional routing), `approval` (human-in-the-loop), `gate` (approval building block), `taskState` (reactive tracker with companion stores), `forEach` (fan-out), `onFailure` (dead letter), `wait`, `subPipeline`, `join` (merge strategies), `sensor`, `loop`, `executionLog`, `pipelineRunner`, `toMermaid`/`toD2`.
 
 ## 20. Companion Store Pattern (`with*()` Wrappers)
 

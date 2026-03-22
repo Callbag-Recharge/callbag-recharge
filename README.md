@@ -3,11 +3,13 @@
 **State that flows.** Reactive state management for TypeScript — from simple atoms to streaming pipelines, in one library.
 
 - **6 primitives** — `state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`
-- **60+ operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
+- **70+ operators** — `switchMap`, `debounce`, `scan`, `retry`, and more — tree-shakeable
+- **170+ modules** across 12 categories — core, extra, utils, data, orchestrate, messaging, worker, memory, patterns, adapters, compat, raw
 - **Glitch-free** — two-phase push resolves diamonds correctly, every time
 - **Streaming-native** — LLM chunks, WebSocket, SSE are first-class, not bolted on
+- **Lifecycle signals** — RESET, PAUSE, RESUME, TEARDOWN propagate through the graph as TYPE 3 STATE signals
 - **Inspectable** — every node in the graph is observable via `Inspector` — names, edges, phases, values
-- **Framework-agnostic** — no providers, no wrappers, works anywhere JS runs
+- **Framework-agnostic** — Vue, React, Svelte, Solid bindings via `compat/`; works anywhere JS runs
 - Zero dependencies
 
 ```ts
@@ -31,12 +33,14 @@ count.set(5)
 - **Streaming data** — LLM token streams, WebSocket, SSE flowing into reactive state via `producer` or `fromAsyncIter`
 - **Cancellable async** — `switchMap` auto-cancels the previous operation when a new one starts
 - **Derived values you can trust** — diamond-safe, cached, always consistent
-- **On-device / edge LLM streaming** — manage WebLLM, Ollama, or ExecuTorch token streams as reactive sources. Conversation state as stores, context window as derived computation
-- **Hybrid cloud+edge model routing** — confidence-based routing between local and cloud LLMs with automatic fallback via `route()` + `rescue()`. Research shows 60% cost reduction and 40% latency improvement
-- **Tool call state machines** — reactive state machines for LLM tool call lifecycle (request → execute → result → continue) using `stateMachine` + `producer`
+- **On-device / edge LLM streaming** — manage WebLLM, Ollama, or ExecuTorch token streams as reactive sources
+- **Hybrid cloud+edge model routing** — confidence-based routing between local and cloud LLMs with automatic fallback via `route()` + `rescue()`
+- **Tool call state machines** — reactive state machines for LLM tool call lifecycle using `stateMachine` + `producer`
 - **Agentic workflows** — session state, tool call lifecycle, multi-agent coordination, memory with decay-scored eviction
 - **Event pipelines** — transform, buffer, window, throttle, retry — compose with `pipe`
 - **Reactive data structures** — `reactiveMap`, `reactiveLog`, `reactiveIndex` with near-native read performance
+- **Messaging** — Pulsar-inspired `topic`/`subscription` with `jobQueue`, `jobFlow`, and `repeatPublish`
+- **Cross-thread reactivity** — `workerBridge`/`workerSelf` for Web Workers, SharedWorker, and service workers
 - **Scheduled pipelines** — cron triggers, task state tracking, DAG validation — Airflow-in-TypeScript
 - **Durable workflows** — checkpoint persistence (file, SQLite, IndexedDB), execution logging, pipeline builder with topological sort
 
@@ -50,11 +54,13 @@ Most state managers stop at atoms and computed values. Most streaming libraries 
 
 - **Glitch-free diamond resolution** — when A → B, A → C, B+C → D, D computes exactly once with consistent values. Jotai, Nanostores, and vanilla signals all glitch here.
 - **Streaming operators as first-class citizens** — `switchMap`, `debounce`, `throttle`, `scan`, `retry`, `bufferTime` — not an afterthought, not a separate library.
+- **Lifecycle signals** — RESET, PAUSE, RESUME, TEARDOWN propagate through the reactive graph as TYPE 3 STATE signals. No imperative teardown lists.
 - **Inspectable graph** — every store has a name, a kind, dependency edges, and a status. `Inspector.graph()` shows the full picture. No other state manager gives you this without runtime cost in production.
 - **Effects with dirty tracking** — `effect()` knows which deps changed and waits for all to resolve before running. Smarter than `useEffect`, `autorun`, or `watch`.
 - **Completion and error semantics** — stores can complete and error, just like streams. `retry`, `rescue`, `repeat` handle recovery. No ad-hoc try/catch.
 - **Built-in batching** — `batch()` defers value propagation until all writes finish. No torn reads mid-update.
-- **Reactive data structures** — `reactiveMap` (1.56x native Map), `reactiveLog` (2.5x native), `reactiveIndex` (1.01x native reads) — near-native reactive collections that no competitor offers.
+- **Reactive data structures** — `reactiveMap`, `reactiveLog`, `reactiveIndex` — near-native reactive collections that no competitor offers.
+- **Full-stack reactive** — messaging, worker bridges, adapters (LLM, WebSocket, SSE, MCP), and framework bindings — all built on the same 6 primitives.
 
 ---
 
@@ -105,15 +111,15 @@ Inspector.graph()
 
 ---
 
-## 60+ operators, tree-shakeable
+## 70+ operators, tree-shakeable
 
 Import only what you need from `callbag-recharge/extra`.
 
-**Sources** — `interval` · `fromIter` · `fromAsyncIter` · `fromEvent` · `fromPromise` · `fromObs` · `of` · `empty` · `throwError` · `never`
+**Sources** — `interval` · `fromIter` · `fromAsyncIter` · `fromEvent` · `fromPromise` · `fromObs` · `fromAny` · `fromTimer` · `fromTrigger` · `fromCron` · `of` · `empty` · `throwError` · `never`
 
-**Filtering** — `filter` · `take` · `skip` · `first` · `last` · `find` · `elementAt` · `distinctUntilChanged` · `takeUntil`
+**Filtering** — `filter` · `take` · `skip` · `first` · `last` · `find` · `elementAt` · `distinctUntilChanged` · `takeUntil` · `takeWhile`
 
-**Transformation** — `map` · `scan` · `pairwise` · `startWith` · `flat` · `switchMap` · `concatMap` · `exhaustMap` · `groupBy`
+**Transformation** — `map` · `scan` · `pairwise` · `startWith` · `flat` · `switchMap` · `concatMap` · `exhaustMap` · `groupBy` · `streamParse`
 
 **Combination** — `merge` · `combine` · `concat` · `race` · `withLatestFrom` · `partition`
 
@@ -125,9 +131,9 @@ Import only what you need from `callbag-recharge/extra`.
 
 **Aggregation** — `reduce` · `toArray`
 
-**Error handling** — `rescue` · `retry` · `repeat`
+**Error handling** — `rescue` · `retry` · `repeat` · `route`
 
-**Utilities** — `tap` · `share` · `remember` · `subject` · `wrap`
+**Utilities** — `tap` · `share` · `remember` · `cached` · `pausable` · `subject` · `wrap` · `firstValueFrom`
 
 **Piping** — `pipeRaw` · `SKIP`
 
@@ -175,27 +181,31 @@ const found = index.select('pk', 'sk') // Store<Item | undefined>
 
 ## Scheduling & orchestration
 
-Lightweight scheduling primitives that compose with `derived()` + `effect()` — diamond resolution IS the DAG executor.
+17 orchestration nodes — diamond resolution IS the DAG executor.
 
 ```ts
-import { fromCron, taskState, dag } from 'callbag-recharge/orchestrate'
+import { task, pipeline, gate, sensor, forEach } from 'callbag-recharge/orchestrate'
 import { pipe } from 'callbag-recharge'
 import { exhaustMap, retry } from 'callbag-recharge/extra'
 
-// Cron-triggered pipeline with retry
-const daily = fromCron('0 9 * * *')
-const fetchBank = pipe(daily, exhaustMap(() => fromPromise(plaid.sync())), retry(3))
-const fetchCards = pipe(daily, exhaustMap(() => fromPromise(stripe.charges())), retry(3))
+// Pipeline — DAG with topological sort, checkpoints, execution logging
+const etl = pipeline('daily-etl', [
+  task('fetch-bank', () => plaid.sync()),
+  task('fetch-cards', () => stripe.charges()),
+  task('aggregate', () => merge(bank, cards), { deps: ['fetch-bank', 'fetch-cards'] }),
+])
 
-// Diamond resolution ensures aggregate runs once when both complete
-const aggregate = derived([fetchBank, fetchCards], () => merge(fetchBank.get(), fetchCards.get()))
+// Gate — hold values until a condition store is true
+const approved = gate(data, approvalStore)
 
-// Task state tracking
-const task = taskState<Result>({ id: 'daily-sync' })
-await task.run(() => syncAll())
-task.get().status   // 'success'
-task.get().duration // ms
+// Sensor — reactive condition monitor
+const ready = sensor([dbHealth, cacheHealth], () => dbHealth.get() && cacheHealth.get())
+
+// forEach — run a side-effect for each value from a source
+forEach(events, (signal, event) => process(event))
 ```
+
+`task` · `taskState` · `pipeline` · `pipelineRunner` · `gate` · `sensor` · `forEach` · `branch` · `join` · `loop` · `wait` · `approval` · `onFailure` · `subPipeline` · `executionLog` · `diagram` · `fromCron`
 
 ---
 
@@ -217,18 +227,82 @@ memory.tagIndex.select('preference').get() // Set{'pref-1'}
 
 ---
 
-## Callbag interop
+## Messaging
 
-Every store exposes a `.source` property — a standard callbag source function. State management signals (DIRTY, RESOLVED) flow on the type 3 STATE channel, keeping type 1 DATA for real values only.
+Pulsar-inspired reactive pub/sub — topics, subscriptions, and job processing built on callbag stores.
 
 ```ts
-import { STATE, DIRTY, RESOLVED } from 'callbag-recharge'
+import { topic, subscription, jobQueue, jobFlow } from 'callbag-recharge/messaging'
+
+// Topic — named pub/sub channel
+const events = topic<{ type: string; payload: unknown }>('events')
+
+// Subscription — filtered, reactive consumer
+const clicks = subscription(events, msg => msg.type === 'click')
+
+// Job queue — ordered processing with concurrency control
+const queue = jobQueue<Task>(tasks, { concurrency: 3 })
+
+// Job flow — multi-step pipeline with per-step handlers
+const flow = jobFlow<Input, Output>(source, [step1, step2, step3])
+```
+
+---
+
+## Worker bridge
+
+Cross-thread reactive stores — Web Workers, SharedWorker, and service workers.
+
+```ts
+// Main thread
+import { workerBridge } from 'callbag-recharge/worker'
+const bridge = workerBridge(new Worker('./worker.ts'))
+const remoteCount = bridge.get('count') // Store<number> — reactive across threads
+
+// Worker thread
+import { workerSelf } from 'callbag-recharge/worker'
+const self = workerSelf()
+self.expose('count', countStore)
+```
+
+---
+
+## Patterns
+
+16 ready-made patterns built on the primitives — import and go.
+
+`createStore` · `chatStream` · `commandBus` · `focusManager` · `formField` · `hybridRoute` · `memoryStore` · `pagination` · `rateLimiter` · `selection` · `textBuffer` · `textEditor` · `toolCallState` · `undoRedo` · `agentLoop`
+
+---
+
+## Adapters & compatibility
+
+**Adapters** (`callbag-recharge/adapters`) — `fromLLM` · `fromWebSocket` · `fromSSE` · `fromWebhook` · `fromHTTP` · `fromMCP`
+
+**Framework bindings** (`callbag-recharge/compat/*`) — Vue · React · Svelte · Solid · Zustand · Jotai · Nanostores · TC39 Signals
+
+---
+
+## Callbag interop
+
+Every store exposes a `.source` property — a standard callbag source function. State management signals (DIRTY, RESOLVED) and lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN) flow on the type 3 STATE channel, keeping type 1 DATA for real values only.
+
+```ts
+import { STATE, DIRTY, RESOLVED, RESET, PAUSE, RESUME, TEARDOWN } from 'callbag-recharge'
 
 store.source(0, (type, data) => {
   if (type === 3 && data === DIRTY)    { /* invalidation */ }
   if (type === 3 && data === RESOLVED) { /* resolved unchanged */ }
+  if (type === 3 && data === PAUSE)    { /* paused */ }
+  if (type === 3 && data === RESET)    { /* reset to initial */ }
   if (type === 1)                      { /* value */ }
 })
+
+// Send lifecycle signals through the graph
+sub.signal(PAUSE)    // pause downstream
+sub.signal(RESUME)   // resume downstream
+sub.signal(RESET)    // reset to initial state
+sub.signal(TEARDOWN) // tear down the subgraph
 ```
 
 ---
