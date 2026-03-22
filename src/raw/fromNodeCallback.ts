@@ -20,13 +20,16 @@ import type { CallbagSource } from "./subscribe";
  * @category raw
  */
 export function fromNodeCallback<T = void>(
-	setup: (resolve: (value: T) => void, reject: (error: unknown) => void) => (() => void) | void,
+	setup: (
+		resolve: (value: T) => void,
+		reject: (error: unknown) => void,
+	) => (() => void) | undefined,
 ): CallbagSource {
 	return (type: number, sink?: any) => {
 		if (type !== 0) return;
 
 		let done = false;
-		let teardown: (() => void) | void;
+		let teardown: (() => void) | undefined;
 
 		sink(0, (t: number) => {
 			if (t === 2 && !done) {

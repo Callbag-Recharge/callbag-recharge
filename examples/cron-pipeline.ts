@@ -5,8 +5,8 @@
  * a scheduled data pipeline with automatic retry and aggregation.
  */
 
-import { derived, effect, pipe, producer } from "callbag-recharge";
-import { exhaustMap, retry } from "callbag-recharge/extra";
+import { derived, effect, pipe } from "callbag-recharge";
+import { exhaustMap, firstValueFrom, fromPromise, fromTimer, retry } from "callbag-recharge/extra";
 import { fromCron } from "callbag-recharge/orchestrate";
 
 // ── Simulated data fetchers ──────────────────────────────────
@@ -27,31 +27,13 @@ const trigger = fromCron("* * * * *");
 // Each trigger runs the fetch (exhaustMap ignores overlapping triggers)
 const bankData = pipe(
 	trigger,
-	exhaustMap(() =>
-		producer<number[]>(({ emit, complete, error }) => {
-			fetchBankTransactions()
-				.then((data) => {
-					emit(data);
-					complete();
-				})
-				.catch((e) => error(e));
-		}),
-	),
+	exhaustMap(() => fromPromise(fetchBankTransactions())),
 	retry(3), // retry up to 3 times on failure
 );
 
 const cardData = pipe(
 	trigger,
-	exhaustMap(() =>
-		producer<number[]>(({ emit, complete, error }) => {
-			fetchCardCharges()
-				.then((data) => {
-					emit(data);
-					complete();
-				})
-				.catch((e) => error(e));
-		}),
-	),
+	exhaustMap(() => fromPromise(fetchCardCharges())),
 	retry(3),
 );
 
@@ -81,10 +63,10 @@ const dispose = effect([aggregate], () => {
 });
 
 // Let the cron tick once, then clean up
-setTimeout(() => {
+firstValueFrom(fromTimer(62_000)).then(() => {
 	dispose();
 	console.log("Pipeline stopped.");
 	process.exit(0);
-}, 62_000);
+});
 
 console.log("Cron pipeline running (triggers every minute)...");

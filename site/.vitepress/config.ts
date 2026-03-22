@@ -14,6 +14,14 @@ export default defineConfig({
 		resolve: {
 			alias: {
 				"@lib": resolve(root, "src"),
+				"@examples": resolve(root, "examples"),
+				"callbag-recharge/extra": resolve(root, "src/extra"),
+				"callbag-recharge/data": resolve(root, "src/data"),
+				"callbag-recharge/orchestrate": resolve(root, "src/orchestrate"),
+				"callbag-recharge/utils": resolve(root, "src/utils"),
+				"callbag-recharge/memory": resolve(root, "src/memory"),
+				"callbag-recharge/messaging": resolve(root, "src/messaging"),
+				"callbag-recharge": resolve(root, "src"),
 			},
 		},
 	},
@@ -103,12 +111,16 @@ export default defineConfig({
 				items: [
 					{ text: "Overview", link: "/recipes/" },
 					{
-						text: "AI Chat with Streaming",
-						link: "/recipes/ai-chat-streaming",
+						text: "Airflow-Style Pipeline",
+						link: "/recipes/airflow-pipeline",
 					},
 					{
-						text: "createStore (Zustand Migration)",
-						link: "/recipes/zustand-migration",
+						text: "Cron Pipeline",
+						link: "/recipes/cron-pipeline",
+					},
+					{
+						text: "AI Chat with Streaming",
+						link: "/recipes/ai-chat-streaming",
 					},
 					{
 						text: "Reactive Data Pipeline",
@@ -117,10 +129,6 @@ export default defineConfig({
 					{
 						text: "Real-Time Dashboard",
 						link: "/recipes/real-time-dashboard",
-					},
-					{
-						text: "Cron Pipeline (Airflow Alternative)",
-						link: "/recipes/cron-pipeline",
 					},
 					{
 						text: "On-Device LLM Streaming",
@@ -133,6 +141,10 @@ export default defineConfig({
 					{
 						text: "Tool Calls for Local LLMs",
 						link: "/recipes/tool-calls",
+					},
+					{
+						text: "createStore (Zustand Migration)",
+						link: "/recipes/zustand-migration",
 					},
 				],
 			},

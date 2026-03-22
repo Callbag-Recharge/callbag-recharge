@@ -266,8 +266,10 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 						reject(err);
 					});
 					server.listen(opts!.port, hostname);
+					return undefined;
 				} catch (err) {
 					reject(err);
+					return undefined;
 				}
 			}),
 		);

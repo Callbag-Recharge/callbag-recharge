@@ -6,19 +6,20 @@
 
 ## What's Shipped
 
-149 modules across 10 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
+155 modules across 11 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
 
 | Category | Count | Highlights |
 |----------|------:|------------|
 | Core | 6 | `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect` + protocol, inspector, pipe, bitmask |
 | Extra | 65 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, …), sources (`fromPromise`, `fromCron`, `fromEvent`, …), sinks (`subscribe`, `forEach`) |
-| Utils | 27 | `retry`, `withBreaker`, `withStatus`, `withSchema`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, … |
+| Utils | 28 | `retry`, `withBreaker`, `withStatus`, `withConnectionStatus`, `withSchema`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
 | Messaging | 3 | `topic`, `subscription`, `repeatPublish` — Pulsar-inspired topic/subscription system |
 | Memory | 3 | `collection`, `decay`, `node` |
 | Orchestrate | 13 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, … |
 | Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
+| Worker | 5 | `workerBridge`, `workerSelf`, `createTransport`, `WorkerTransport`, wire protocol |
 | Compat | 8 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`), React (`useStore`/`useSubscribe`), Svelte (`useSubscribe`), Solid (`useSubscribe`) |
 
 ---
@@ -320,22 +321,30 @@ changes:
 > **Depends on:** Core (shipped), utils/withStatus (shipped), Phase 5f lifecycle signals (shipped).
 >
 > **Design:** [SESSION-worker-bridge-h2-design.md](../src/archive/docs/SESSION-worker-bridge-h2-design.md)
+>
+> **Status:** Complete.
 
-| # | Deliverable | What | Effort |
-|---|-------------|------|--------|
-| 5g-1 | `WorkerTransport` | Internal transport abstraction — auto-detects Worker, SharedWorker, ServiceWorker, BroadcastChannel. Normalizes `post()`/`listen()`/`terminate()`. ~10 lines per transport adapter. | S |
-| 5g-2 | `workerBridge()` + `workerSelf()` | Main-thread and worker-side APIs. `expose` sends store values across; `import` creates proxy `Store<T>` for received values. Batch coalescing via `batch()` — multiple rapid `set()` calls → one `postMessage`. TypeScript inference from `expose`/`import` declarations. | M |
-| 5g-3 | Lifecycle signals across bridge | PAUSE/RESET/RESUME/TEARDOWN serialize across the wire and propagate into the remote graph. `destroy()` sends TEARDOWN + calls `worker.terminate()`. | S |
-| 5g-4 | `withStatus()` + transfer support | Bridge wraps with `withStatus()` for connection lifecycle (connecting → ready → error). `transfer` option per store for zero-copy `ArrayBuffer` passing. | S |
-| 5g-5 | Tests | Wire protocol, multi-store sync, lifecycle signal propagation, batch coalescing, transfer semantics, auto-detect for all 4 transport types. | S |
+| # | Deliverable | What | Effort | Status |
+|---|-------------|------|--------|--------|
+| ~~5g-1~~ | ~~`WorkerTransport`~~ | Internal transport abstraction — auto-detects Worker, SharedWorker, ServiceWorker, BroadcastChannel, MessagePort. Normalizes `post()`/`listen()`/`terminate()`. Also accepts pre-built `WorkerTransport` for testing. | S | **Done** |
+| ~~5g-2~~ | ~~`workerBridge()` + `workerSelf()`~~ | Main-thread and worker-side APIs. `expose` sends store values across; `import` creates proxy `Store<T>` for received values. Batch coalescing via `derived()` + `effect()` — two-phase push + bitmask naturally coalesces `batch()` updates into one `postMessage`. TypeScript inference from `expose`/`import` declarations. | M | **Done** |
+| ~~5g-3~~ | ~~Lifecycle signals across bridge~~ | PAUSE/RESET/RESUME/TEARDOWN serialize as strings across the wire (Symbols can't survive structured clone). `destroy()` sends TEARDOWN + calls `worker.terminate()`. Bridge-level TEARDOWN (`s: "*"`) destroys the entire remote side. | S | **Done** |
+| ~~5g-4~~ | ~~`withConnectionStatus()` + transfer support~~ | New `withConnectionStatus()` utility in `utils/` — imperative connection lifecycle companions (`connecting` → `connected` → `disconnected` \| `failed`). Bridge uses it for status/error. `transfer` option per store for zero-copy `ArrayBuffer` passing. | S | **Done** |
+| ~~5g-5~~ | ~~Tests~~ | 27 tests: wire protocol round-trip, handshake (both directions), multi-store sync, batch coalescing (batched vs unbatched), lifecycle signal propagation, destroy idempotency, TEARDOWN cascading, withConnectionStatus full lifecycle, transfer extractors, edge cases (no stores, post-destroy, dedup). Mock transport pair simulates synchronous structured clone. | S | **Done** |
 
 **Wire protocol:**
 ```
-{ t: 'v', s: storeName, d: value }     — value update
-{ t: 's', s: storeName, sig: signal }  — lifecycle signal
-{ t: 'r', stores: string[] }           — worker ready (declares exported stores)
-{ t: 'i', stores: Record<string,any> } — main sends initial values
+{ t: 'v', s: storeName, d: value }        — value update
+{ t: 'b', u: Record<string, any> }        — batch value update (coalesced)
+{ t: 's', s: storeName, sig: string }      — lifecycle signal (serialized symbol)
+{ t: 'r', stores: Record<string, any> }    — worker ready (names + initial values)
+{ t: 'i', stores: Record<string, any> }    — main sends initial values
 ```
+
+**Send coalescing design:** Uses `derived([...allExposedStores])` + `effect()`. When multiple
+stores change in a `batch()`, two-phase push (DIRTY then DATA) + bitmask resolution means the
+derived computes exactly once → one `postMessage`. No microtask, no timing hacks — pure
+callbag reactive semantics. Unbatched changes send individually (correct behavior).
 
 **H2 dependency:** Worker bridge enables H2 AI Chat's SharedWorker memory manager.
 Cross-tab shared summarization + IndexedDB writes without `postMessage` plumbing.

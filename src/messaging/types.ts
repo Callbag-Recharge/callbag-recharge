@@ -356,7 +356,7 @@ export interface JobQueue<T, R = void> {
 // ---------------------------------------------------------------------------
 
 /** A single edge in a job flow wiring. */
-export interface JobFlowEdge<T = any, R = any, T2 = any> {
+export interface JobFlowEdge<_T = any, R = any, T2 = any> {
 	/** Source queue name. */
 	from: string;
 	/** Destination queue name. */

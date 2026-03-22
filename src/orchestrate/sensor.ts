@@ -193,12 +193,10 @@ export function sensor<T>(
 						let timedOut = false;
 						let result: { ok: boolean; err?: unknown } | null;
 						if (timeout !== undefined) {
-							const timeoutRace = rawFirstValueFrom(fromTimer(timeout, signal)).then(
-								(): null => {
-									timedOut = true;
-									return null;
-								},
-							);
+							const timeoutRace = rawFirstValueFrom(fromTimer(timeout, signal)).then((): null => {
+								timedOut = true;
+								return null;
+							});
 							result = await Promise.race([waitForPoll, timeoutRace]);
 						} else {
 							result = await waitForPoll;

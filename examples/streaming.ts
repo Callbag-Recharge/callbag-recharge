@@ -10,7 +10,14 @@
  * Run: npx tsx examples/streaming.ts
  */
 import { pipe, producer, state } from "callbag-recharge";
-import { filter, scan, subscribe, switchMap } from "callbag-recharge/extra";
+import {
+	filter,
+	firstValueFrom,
+	fromTimer,
+	scan,
+	subscribe,
+	switchMap,
+} from "callbag-recharge/extra";
 
 // Simulate a streaming LLM response
 function fakeLLMStream(prompt: string, signal: AbortSignal): AsyncIterable<string> {
@@ -19,7 +26,8 @@ function fakeLLMStream(prompt: string, signal: AbortSignal): AsyncIterable<strin
 		async *[Symbol.asyncIterator]() {
 			for (const word of words) {
 				if (signal.aborted) return;
-				await new Promise((r) => setTimeout(r, 50));
+				await firstValueFrom(fromTimer(50, signal));
+				if (signal.aborted) return;
 				yield `${word} `;
 			}
 		},
@@ -58,7 +66,7 @@ const unsub = subscribe(fullResponse, (text) => {
 prompt.set("Tell me a joke");
 
 // After the stream completes, clean up
-setTimeout(() => {
+firstValueFrom(fromTimer(500)).then(() => {
 	console.log("\n--- done ---");
 	unsub();
-}, 500);
+});

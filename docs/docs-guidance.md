@@ -162,11 +162,23 @@ The generator produces `site/api/<name>.md` with this structure:
 
 | Tier | Location | Purpose | Key rule |
 |------|----------|---------|----------|
-| **1** | `@example` in JSDoc | IDE tooltips + feeds generated API pages | First = basic usage; additional = titled advanced patterns. Show return values as comments, not `console.log`. |
-| **2** | `examples/*.ts` | Runnable standalone scripts (`npx tsx examples/<name>.ts`) | Self-contained, clean up at end, JSDoc comment at top. **In this repo**, the package name is scoped (`@callbag-recharge/callbag-recharge`) but examples import the public name `callbag-recharge`; use `pnpm exec tsx --tsconfig tsconfig.examples.json examples/<name>.ts` so path aliases resolve to `src/`. |
-| **3** | `site/recipes/*.md` | Long-form VitePress docs with context and variations | **Pull code from `examples/`** via `<<< @/../examples/<name>.ts` — never duplicate. |
+| **0** | `@example` in JSDoc | IDE tooltips + feeds generated API pages | First = basic usage; additional = titled advanced patterns. Show return values as comments, not `console.log`. |
+| **1** | `examples/*.ts` | **Single source of truth for all runnable code.** | All library logic lives here — recipes, demos, and hero apps all import from this directory. Uses public `callbag-recharge` imports. Run via `pnpm exec tsx --tsconfig tsconfig.examples.json examples/<name>.ts`. |
+| **2** | `site/recipes/*.md` | Long-form VitePress docs with context and variations | **Pull code from `examples/`** via `<<< @/../examples/<name>.ts` — never duplicate inline. |
+| **3** | `site/demos/*.md` + `site/.vitepress/theme/components/examples/<Name>.vue` | Interactive Vue demos with GUI | Vue component handles **UI only** — imports stores from `examples/` via `@examples/<name>`. No library logic in Vue files. |
 | **4** | `src/patterns/<name>/` | Published reusable patterns (npm package) | Pattern `README.md` is canonical API reference. Recipe links to it. |
 | **5** | `llms.txt` / `llms-full.txt` | AI-readable docs (repo root + `site/public/`) | Update when adding new primitives/operators/patterns, not on bug fixes. |
+
+### Unified code location rule
+
+**All library logic lives in `examples/`.** This is the single rule that governs recipes, demos, and hero apps:
+
+- **Recipe pages** (`site/recipes/*.md`) pull code via VitePress snippet import: `<<< @/../examples/<name>.ts`
+- **Interactive demos** (`site/.vitepress/theme/components/examples/<Name>.vue`) import stores via: `import { ... } from "@examples/<name>"`
+- **Hero apps** (planned) follow the same pattern — Vue component is UI shell, store logic in `examples/`
+- **Vue demo components may also read the raw source** for code panels: `import raw from "@examples/<name>.ts?raw"`
+
+The `@examples` Vite alias is configured in `site/.vitepress/config.ts` and resolves to the repo-root `examples/` directory. The `callbag-recharge` import alias is also configured there so examples using public package imports resolve correctly in the VitePress build.
 
 ---
 
@@ -175,9 +187,10 @@ The generator produces `site/api/<name>.md` with this structure:
 1. **Implementation** in `src/` + tests
 2. **Structured JSDoc** on the exported function (Tier 0) — this is the source of truth
 3. **Register** in `scripts/gen-api-docs.mjs` REGISTRY, run `pnpm run docs:gen`
-4. **Runnable example** in `examples/` (Tier 2) — if the feature warrants a standalone demo
-5. **Recipe** on the site that imports from `examples/` (Tier 3) — for complex patterns
-6. **Update llms.txt/llms-full.txt** if the feature is user-facing (Tier 5)
+4. **Runnable example** in `examples/` (Tier 1) — if the feature warrants a standalone demo
+5. **Recipe** on the site that imports from `examples/` (Tier 2) — for complex patterns
+6. **Interactive demo** Vue component if warranted (Tier 3) — imports stores from `examples/`, handles UI only
+7. **Update llms.txt/llms-full.txt** if the feature is user-facing (Tier 5)
 
 ---
 
@@ -189,8 +202,10 @@ The generator produces `site/api/<name>.md` with this structure:
 | API doc generator | `scripts/gen-api-docs.mjs` | Yes — add new entries to REGISTRY |
 | Generated API pages | `site/api/*.md` | **No** — regenerated from JSDoc |
 | Manually maintained pages | `site/api/inspector.md`, `site/api/protocol.md` | Yes — check ad-hoc when source changes |
-| Runnable examples | `examples/*.ts` | Yes |
-| Recipes | `site/recipes/*.md` | Yes — import code from `examples/` |
+| Runnable examples + demo stores | `examples/*.ts` | Yes — **all library logic lives here** |
+| Recipes | `site/recipes/*.md` | Yes — import code from `examples/` via `<<<` |
+| Interactive demo UI | `site/.vitepress/theme/components/examples/<Name>.vue` | Yes — UI only, imports from `@examples/` |
+| Demo pages | `site/demos/*.md` | Yes — renders Vue component via `<ClientOnly>` |
 | Pattern READMEs | `src/patterns/<name>/README.md` | Yes |
 | AI docs | `llms.txt`, `llms-full.txt` | Yes — updated periodically |
 | VitePress config | `site/.vitepress/config.ts` | Yes — update sidebar when adding pages |

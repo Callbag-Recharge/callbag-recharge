@@ -39,6 +39,13 @@ callbag-recharge is a reactive state management library where **every store is a
 - **No raw `new Promise`** (architecture.md §1.16). Use callbag primitives (`fromTimer`, `producer`) and `firstValueFrom` (the ONE bridge in `raw/`) instead of hand-rolling Promises. `src/raw/` is the foundation layer — pure callbag protocol with zero core dependencies. Dependency hierarchy: `raw/` → `core/` → `extra/` → `utils/` → higher layers. `raw/` is importable from any folder.
 - **Push/pull via callbag, never poll** (architecture.md §1.17). Wait for conditions via reactive stores + `firstValueFrom`, not `setInterval` loops.
 
+## Examples & docs (single source of truth)
+
+- **All library logic lives in `examples/`.** Recipes, demos, and hero apps all reference this directory — never duplicate code inline.
+- **Recipe pages** (`site/recipes/*.md`) pull code via `<<< @/../examples/<name>.ts`.
+- **Interactive demos** (`site/.vitepress/theme/components/examples/<Name>.vue`) import stores via `import { ... } from "@examples/<name>"`. Vue files handle UI only.
+- See [docs/docs-guidance.md](docs/docs-guidance.md) for the full documentation tier system.
+
 ## Code style
 
 - Biome: tabs, 100 char line width, `noExplicitAny: off`

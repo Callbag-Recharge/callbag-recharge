@@ -233,6 +233,7 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 					reject(err);
 				});
 				server.listen(opts!.port, hostname);
+				return undefined;
 			}),
 		);
 	}

@@ -4,10 +4,10 @@ import { Position, VueFlow } from "@vue-flow/core";
 import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
-import { subscribe } from "@lib/core/subscribe";
-import type { Store } from "@lib/core/types";
-import { createPipeline } from "./pipeline";
-import pipelineRaw from "./pipeline.ts?raw";
+import { createPipeline } from "@examples/airflow-demo";
+import pipelineRaw from "@examples/airflow-demo.ts?raw";
+import type { Store } from "callbag-recharge";
+import { subscribe } from "callbag-recharge";
 
 // Extract the display region between #region display and #endregion display
 const REGION_START = "// #region display";

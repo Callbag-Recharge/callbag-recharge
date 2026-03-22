@@ -62,6 +62,7 @@ src/
 ├── messaging/       ← Pulsar-inspired topic/subscription system (topic, subscription, repeatPublish)
 ├── memory/          ← agent memory primitives (collection, decay, node)
 ├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
+├── worker/          ← reactive cross-thread bridge (workerBridge, workerSelf, WorkerTransport)
 ├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
 ├── compat/          ← drop-in API wrappers + framework bindings (react, vue, signals, zustand, jotai, nanostores)
 └── index.ts         ← public API barrel (core primitives only; other layers via subpath exports)
@@ -80,8 +81,8 @@ Tier 1 (operators)    extra/
                         ↓
 Tier 2 (utilities)    utils/
                         ↓
-Tier 3 (domains)      orchestrate/    messaging/    memory/
-                        ↓                ↓              ↓
+Tier 3 (domains)      orchestrate/    messaging/    memory/    worker/
+                        ↓                ↓              ↓          ↓
 Tier 4 (surface)      patterns/    adapters/    compat/
 ```
 
@@ -99,8 +100,9 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 - `orchestrate/` imports from `core/`, `raw/`, `extra/`, `utils/`, and `data/`
 - `messaging/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, and `orchestrate/`
 - `memory/` imports from `core/`, `raw/`, `utils/`, and `data/`
-- `patterns/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
-- `adapters/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, and `memory/`
+- `worker/` imports from `core/`, `raw/`, `extra/`, and `utils/`
+- `patterns/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, `memory/`, and `worker/`
+- `adapters/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, `memory/`, and `worker/`
 - `compat/` imports from `core/`, `raw/`, `extra/`, `orchestrate/`, and `memory/` only
 - **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files

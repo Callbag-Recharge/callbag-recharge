@@ -157,6 +157,8 @@ export interface FromAbortableOptions<T> {
 	onComplete?: () => void;
 	/** Called when stream errors. */
 	onError?: (error: unknown) => void;
+	/** Called when the stream is aborted (e.g. cancelled by switchMap). Not called on normal complete or error. */
+	onAbort?: () => void;
 }
 
 /**
@@ -218,7 +220,14 @@ export function fromAbortable<T>(
 			})();
 
 			return () => {
-				if (!done) ac.abort();
+				if (!done) {
+					ac.abort();
+					try {
+						opts?.onAbort?.();
+					} catch {
+						// Don't let callback exceptions block abort
+					}
+				}
 			};
 		},
 		{

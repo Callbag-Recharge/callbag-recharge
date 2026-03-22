@@ -6,8 +6,9 @@
  * Works with any OpenAI-compatible streaming endpoint.
  */
 
-import { derived, pipe, producer, state } from "callbag-recharge";
+import { derived, pipe, state } from "callbag-recharge";
 import { filter, scan, subscribe, switchMap } from "callbag-recharge/extra";
+import { fromAbortable } from "callbag-recharge/utils";
 
 // ── State ────────────────────────────────────────────────────
 
@@ -20,56 +21,45 @@ const isStreaming = state(false, { name: "streaming" });
 const tokens = pipe(
 	prompt,
 	filter((p: string) => p.length > 0),
-	switchMap((p: string) =>
-		producer<string>(({ emit, complete, error }) => {
-			const ctrl = new AbortController();
-			isStreaming.set(true);
-
-			// Works with Ollama (localhost:11434) or any OpenAI-compatible endpoint
-			fetch("http://localhost:11434/api/generate", {
-				method: "POST",
-				headers: { "Content-Type": "application/json" },
-				body: JSON.stringify({ model: "llama4", prompt: p, stream: true }),
-				signal: ctrl.signal,
-			})
-				.then(async (res) => {
-					if (!res.ok || !res.body) {
-						throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-					}
-					const reader = res.body.getReader();
-					const decoder = new TextDecoder();
-					while (true) {
-						const { done, value } = await reader.read();
-						if (done) break;
-						const lines = decoder.decode(value, { stream: true }).split("\n").filter(Boolean);
-						for (const line of lines) {
-							try {
-								const chunk = JSON.parse(line);
-								if (chunk.response) emit(chunk.response);
-								if (chunk.done) {
-									isStreaming.set(false);
-									complete();
-									return;
-								}
-							} catch {
-								/* skip malformed lines */
-							}
+	switchMap((p: string) => {
+		isStreaming.set(true);
+		return fromAbortable<string>(
+			async function* (signal) {
+				// Works with Ollama (localhost:11434) or any OpenAI-compatible endpoint
+				const res = await fetch("http://localhost:11434/api/generate", {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ model: "llama4", prompt: p, stream: true }),
+					signal,
+				});
+				if (!res.ok || !res.body) {
+					throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+				}
+				const reader = res.body.getReader();
+				const decoder = new TextDecoder();
+				while (true) {
+					const { done, value } = await reader.read();
+					if (done) break;
+					const lines = decoder.decode(value, { stream: true }).split("\n").filter(Boolean);
+					for (const line of lines) {
+						try {
+							const chunk = JSON.parse(line);
+							if (chunk.response) yield chunk.response;
+							if (chunk.done) return;
+						} catch {
+							/* skip malformed lines */
 						}
 					}
-					isStreaming.set(false);
-					complete();
-				})
-				.catch((e) => {
-					isStreaming.set(false);
-					if (e.name !== "AbortError") error(e);
-				});
-
-			return () => {
-				ctrl.abort();
-				isStreaming.set(false);
-			};
-		}),
-	),
+				}
+			},
+			{
+				name: "llm-tokens",
+				onComplete: () => isStreaming.set(false),
+				onError: () => isStreaming.set(false),
+				onAbort: () => isStreaming.set(false),
+			},
+		);
+	}),
 );
 
 // ── Accumulated response ─────────────────────────────────────
