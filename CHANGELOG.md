@@ -1,3 +1,10 @@
+# [0.16.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.15.0...v0.16.0) (2026-03-22)
+
+
+### Features
+
+* implement 5e 6-8 ([dbcc53e](https://github.com/Callbag-Recharge/callbag-recharge/commit/dbcc53e201bf2be157d42438000c9981ca002ac3))
+
 # [0.15.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.14.0...v0.15.0) (2026-03-22)
 
 
