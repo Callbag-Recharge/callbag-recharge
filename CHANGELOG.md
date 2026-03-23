@@ -1,3 +1,10 @@
+# [0.19.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.18.0...v0.19.0) (2026-03-23)
+
+
+### Features
+
+* prepare for hero app ([5b25679](https://github.com/Callbag-Recharge/callbag-recharge/commit/5b25679eff75e4eef4fc5b0bfb09b1f6b33099c2))
+
 # [0.18.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.17.0...v0.18.0) (2026-03-23)
 
 
