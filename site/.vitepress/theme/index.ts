@@ -10,7 +10,19 @@ export default {
 		app.component("HomeLayout", HomeLayout);
 
 		// -- Showcase apps (homepage heroes, no code panel) --
-		// (H1 MarkdownEditor, H2 AIChat, H3 WorkflowBuilder — pending)
+		app.component(
+			"MarkdownEditor",
+			defineAsyncComponent(
+				() => import("./components/showcases/MarkdownEditor/MarkdownEditor.vue"),
+			),
+		);
+		app.component(
+			"WorkflowBuilder",
+			defineAsyncComponent(
+				() => import("./components/showcases/WorkflowBuilder/WorkflowBuilder.vue"),
+			),
+		);
+		// (H2 AIChat — pending)
 
 		// -- Code examples (with source panel, for doc pages) --
 		app.component(

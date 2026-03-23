@@ -9,11 +9,20 @@
 //   utils/ — track, checkpoint, tokenTracker, withBreaker, dag, retry
 // ---------------------------------------------------------------------------
 
+export { effect } from "../core/effect";
+// -- Re-exports from lower tiers (for orchestrate-level consumers) ----------
+export { state } from "../core/state";
+export type { Store, WritableStore } from "../core/types";
+export type { TriggerStore } from "../extra/fromTrigger";
+export { fromTrigger } from "../extra/fromTrigger";
 // -- Workflow nodes ----------------------------------------------------------
 export type { ApprovalOpts, ApprovalStepDef } from "./approval";
 export { approval } from "./approval";
 export type { BranchStepDef } from "./branch";
 export { branch } from "./branch";
+// -- DAG layout for visualization ------------------------------------------
+export type { DagLayoutEdge, DagLayoutOpts, DagLayoutResult, LayoutNode } from "./dagLayout";
+export { dagLayout } from "./dagLayout";
 // -- Additional workflow nodes ------------------------------------------------
 export type { D2Opts, MermaidOpts } from "./diagram";
 export { toD2, toMermaid } from "./diagram";
@@ -78,5 +87,9 @@ export type {
 	TaskStateSnapshot,
 	TaskStatus,
 } from "./types";
+export { TASK_STATE } from "./types";
 export type { WaitOpts } from "./wait";
 export { wait } from "./wait";
+// -- Workflow node (bundled task node with log + breaker) -------------------
+export type { WorkflowNodeOpts, WorkflowNodeResult } from "./workflowNode";
+export { workflowNode } from "./workflowNode";

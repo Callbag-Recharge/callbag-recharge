@@ -10,7 +10,17 @@
 //   const status = useSubscribe(ws.status);     // Readonly<Ref<string>>
 // ---------------------------------------------------------------------------
 
-import { computed, getCurrentScope, onScopeDispose, type Ref, readonly, shallowRef } from "vue";
+import {
+	computed,
+	getCurrentScope,
+	onScopeDispose,
+	type Ref,
+	readonly,
+	shallowRef,
+	type WatchSource,
+	watch,
+} from "vue";
+import type { Subscription } from "../../core/protocol";
 import { subscribe } from "../../core/subscribe";
 import type { Store, WritableStore } from "../../core/types";
 
@@ -85,4 +95,117 @@ export function useStore<T>(store: WritableStore<T>): Ref<T> {
 		get: () => inner.value,
 		set: (v: T) => store.set(v),
 	}) as Ref<T>;
+}
+
+// ---------------------------------------------------------------------------
+// useSubscribeRecord — dynamic per-key store subscriptions
+// ---------------------------------------------------------------------------
+
+/** Maps a key to an object of stores. Used by `useSubscribeRecord` factory. */
+export type StoreFactory<K, R extends Record<string, any>> = (key: K) => {
+	[P in keyof R]: Store<R[P]>;
+};
+
+/**
+ * Subscribe to a dynamic set of keyed store records. When keys change,
+ * old subscriptions are torn down and new ones created automatically.
+ *
+ * Solves the common pattern of rendering a list where each item owns
+ * multiple reactive stores (e.g., DAG nodes with status + breaker + log).
+ *
+ * Must be called during Vue `setup()`.
+ *
+ * @param keys - Reactive source of current keys (e.g., node IDs).
+ * @param factory - Function that returns a `{ [field]: Store<V> }` object per key.
+ *
+ * @returns `Readonly<Ref<Record<K, R>>>` — reactive record of resolved values.
+ *
+ * @example
+ * ```ts
+ * const nodes = useSubscribe(wb.nodes); // Ref<WorkflowNode[]>
+ * const nodeData = useSubscribeRecord(
+ *   () => nodes.value.map(n => n.id),
+ *   (id) => {
+ *     const n = nodes.value.find(n => n.id === id)!;
+ *     return { status: n.task.status, breaker: n.breakerState };
+ *   },
+ * );
+ * // Template: {{ nodeData["extract"].status }}
+ * ```
+ *
+ * @category compat/vue
+ */
+export function useSubscribeRecord<K extends string, R extends Record<string, any>>(
+	keys: WatchSource<K[]>,
+	factory: StoreFactory<K, R>,
+): Readonly<Ref<Record<K, R>>> {
+	const result = shallowRef<Record<K, R>>({} as Record<K, R>);
+
+	// Track active subscriptions per key
+	const activeSubs = new Map<K, { subs: Subscription[]; values: R }>();
+
+	// Batched reactivity trigger — coalesce multiple field updates into one ref write
+	let batchPending = false;
+	function scheduleBatch() {
+		if (batchPending) return;
+		batchPending = true;
+		queueMicrotask(() => {
+			batchPending = false;
+			const snap = {} as Record<K, R>;
+			for (const [key, entry] of activeSubs) {
+				snap[key] = { ...entry.values };
+			}
+			result.value = snap;
+		});
+	}
+
+	function sync(newKeys: K[]) {
+		// Always tear down ALL existing subscriptions (P3: avoids stale factory closures)
+		for (const entry of activeSubs.values()) {
+			for (const sub of entry.subs) sub.unsubscribe();
+		}
+		activeSubs.clear();
+
+		// Subscribe all current keys fresh
+		for (const key of newKeys) {
+			const stores = factory(key);
+			const fields = Object.keys(stores) as (keyof R)[];
+			const values = {} as R;
+			const subs: Subscription[] = [];
+
+			for (const field of fields) {
+				const store = stores[field];
+				values[field] = store.get();
+				const sub = subscribe(store, (v) => {
+					values[field] = v;
+					scheduleBatch();
+				});
+				subs.push(sub);
+			}
+
+			activeSubs.set(key, { subs, values });
+		}
+
+		// Immediate snapshot (don't wait for microtask on key changes)
+		const snap = {} as Record<K, R>;
+		for (const [key, entry] of activeSubs) {
+			snap[key] = { ...entry.values };
+		}
+		result.value = snap;
+	}
+
+	// Watch for key changes
+	watch(keys, (newKeys) => sync(newKeys), { immediate: true });
+
+	// Cleanup all on scope disposal
+	if (getCurrentScope()) {
+		onScopeDispose(() => {
+			for (const entry of activeSubs.values()) {
+				for (const sub of entry.subs) sub.unsubscribe();
+			}
+			activeSubs.clear();
+		});
+	}
+
+	return readonly(result) as Readonly<Ref<Record<K, R>>>;
 }

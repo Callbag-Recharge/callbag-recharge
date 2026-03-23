@@ -6,19 +6,22 @@
  *
  * All library logic lives here; the Vue component is UI-only.
  *
- * Demonstrates: textEditor pattern, checkpoint (auto-save), debounce,
- * derived (word count, cursor display), state (auto-save indicator).
+ * Demonstrates: textEditor pattern, contentStats, cursorInfo, autoSave (utils).
+ * Import constraint: utils+ only (no raw/core/extra).
  *
  * Run: pnpm exec tsx --tsconfig tsconfig.examples.json examples/markdown-editor-hero.ts
  */
 
 import type { Store } from "callbag-recharge";
-import { derived, effect, pipe } from "callbag-recharge";
-import { debounce } from "callbag-recharge/extra";
 import type { TextEditorResult } from "callbag-recharge/patterns/textEditor";
 import { textEditor } from "callbag-recharge/patterns/textEditor";
-import type { CheckpointAdapter } from "callbag-recharge/utils";
-import { checkpoint, memoryAdapter } from "callbag-recharge/utils";
+import type {
+	AutoSaveResult,
+	CheckpointAdapter,
+	ContentStats,
+	CursorInfo,
+} from "callbag-recharge/utils";
+import { autoSave, contentStats, cursorInfo, memoryAdapter } from "callbag-recharge/utils";
 
 // ---------------------------------------------------------------------------
 // Markdown preview (lightweight — no external parser)
@@ -95,6 +98,12 @@ export interface MarkdownEditorHero {
 	autoSaveStatus: Store<"saved" | "saving" | "unsaved">;
 	/** Debounced content for auto-save (fires after 1s quiet). */
 	debouncedContent: Store<string | undefined>;
+	/** Content stats (word/char/line count). */
+	stats: ContentStats;
+	/** Cursor info (line/column/display). */
+	cursor: CursorInfo;
+	/** Auto-save result (debouncedContent, checkpointed, status). */
+	save: AutoSaveResult<string>;
 	/** Tear down everything. */
 	dispose(): void;
 }
@@ -125,83 +134,37 @@ export function createMarkdownEditorHero(opts?: MarkdownEditorHeroOpts): Markdow
 		validators: opts?.validators,
 	});
 
-	// --- Derived stats ---
-	const wordCount = derived(
-		[editor.buffer.content],
-		() => {
-			const text = editor.buffer.content.get().trim();
-			if (text.length === 0) return 0;
-			return text.split(/\s+/).length;
-		},
-		{ name: "h1.wordCount" },
-	);
+	// --- Derived stats (via contentStats utility) ---
+	const stats = contentStats(editor.buffer.content, { name: "h1" });
 
-	const charCount = derived([editor.buffer.content], () => editor.buffer.content.get().length, {
-		name: "h1.charCount",
-	});
+	// --- Cursor info (via cursorInfo utility) ---
+	const cursor = cursorInfo(editor.buffer.content, editor.buffer.cursor.start, { name: "h1" });
 
-	const lineCount = derived(
-		[editor.buffer.content],
-		() => editor.buffer.content.get().split("\n").length,
-		{ name: "h1.lineCount" },
-	);
-
-	const cursorDisplay = derived(
-		[editor.buffer.cursor.start, editor.buffer.content],
-		() => {
-			const pos = editor.buffer.cursor.start.get();
-			const text = editor.buffer.content.get();
-			const before = text.slice(0, pos);
-			const line = before.split("\n").length;
-			const lastNewline = before.lastIndexOf("\n");
-			const col = pos - lastNewline;
-			return `Ln ${line}, Col ${col}`;
-		},
-		{ name: "h1.cursorDisplay" },
-	);
-
-	// --- Auto-save via debounce + checkpoint ---
-	const debouncedContent = pipe(editor.buffer.content, debounce(autoSaveMs));
-
-	const save = checkpoint<string>("h1:autosave", adapter, { name: "h1.checkpoint" });
-	const checkpointed = save(debouncedContent);
-
-	// Single derived: glitch-free status with a fixed priority order.
-	// Priority: saved > saving > unsaved. "saved" when the checkpoint has
-	// persisted the latest debounced value AND the buffer is not dirty again.
-	const autoSaveStatus = derived(
-		[editor.buffer.dirty, debouncedContent, checkpointed],
-		(): "saved" | "saving" | "unsaved" => {
-			if (checkpointed.get() !== undefined && !editor.buffer.dirty.get()) return "saved";
-			if (debouncedContent.get() !== undefined) return "saving";
-			if (editor.buffer.dirty.get()) return "unsaved";
-			return "saved";
-		},
-		{ name: "h1.autoSaveStatus" },
-	);
-
-	// Side-effect: mark buffer clean after each successful checkpoint persist.
-	const disposeClean = effect([checkpointed], () => {
-		if (checkpointed.get() !== undefined) {
-			editor.buffer.markClean();
-		}
+	// --- Auto-save (via autoSave utility) ---
+	const save = autoSave(editor.buffer.content, editor.buffer.dirty, adapter, {
+		debounceMs: autoSaveMs,
+		checkpointId: "h1:autosave",
+		name: "h1",
+		markClean: () => editor.buffer.markClean(),
 	});
 
 	// --- Dispose ---
 	function dispose(): void {
-		disposeClean();
-		checkpointed.clear();
+		save.dispose();
 		editor.dispose();
 	}
 
 	return {
 		editor,
-		wordCount,
-		charCount,
-		lineCount,
-		cursorDisplay,
-		autoSaveStatus,
-		debouncedContent,
+		wordCount: stats.wordCount,
+		charCount: stats.charCount,
+		lineCount: stats.lineCount,
+		cursorDisplay: cursor.display,
+		autoSaveStatus: save.status,
+		debouncedContent: save.debouncedContent,
+		stats,
+		cursor,
+		save,
 		dispose,
 	};
 }

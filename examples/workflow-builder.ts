@@ -7,23 +7,34 @@
  *
  * All library logic lives here; the Vue component is UI-only.
  *
- * Demonstrates: pipeline, task, source, fromTrigger, taskState, circuitBreaker,
- * checkpoint (execution history), reactiveLog, state, derived, effect.
+ * Demonstrates: pipeline, task, source, workflowNode, dagLayout (orchestrate),
+ * reactiveLog (data).
+ * Import constraint: orchestrate+ and data only (no raw/core/extra/utils).
  *
  * Run: pnpm exec tsx --tsconfig tsconfig.examples.json examples/workflow-builder.ts
  */
 
-import type { Store } from "callbag-recharge";
-import { effect, state } from "callbag-recharge";
+import type { Store, WritableStore } from "callbag-recharge";
 import type { ReactiveLog } from "callbag-recharge/data";
 import { reactiveLog } from "callbag-recharge/data";
-import { firstValueFrom, fromTimer, fromTrigger } from "callbag-recharge/extra";
-import { pipeline, source } from "callbag-recharge/orchestrate/pipeline";
-import { task } from "callbag-recharge/orchestrate/task";
-import type { PipelineStatus, TaskState } from "callbag-recharge/orchestrate/types";
-import { TASK_STATE } from "callbag-recharge/orchestrate/types";
-import { exponential } from "callbag-recharge/utils/backoff";
-import { circuitBreaker } from "callbag-recharge/utils/circuitBreaker";
+import type {
+	DagLayoutEdge,
+	LayoutNode,
+	PipelineStatus,
+	TaskState,
+	WorkflowNodeResult,
+} from "callbag-recharge/orchestrate";
+import {
+	dagLayout,
+	effect,
+	fromTrigger,
+	pipeline,
+	source,
+	state,
+	TASK_STATE,
+	task,
+	workflowNode,
+} from "callbag-recharge/orchestrate";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -35,8 +46,8 @@ export interface WorkflowNode {
 	label: string;
 	task: TaskState;
 	log: ReactiveLog<string>;
-	breaker: ReturnType<typeof circuitBreaker>;
-	breakerState: Store<string>;
+	breaker: WorkflowNodeResult["breaker"];
+	breakerState: WritableStore<string>;
 }
 
 /** An edge in the visual DAG. */
@@ -66,6 +77,8 @@ interface TemplateBuildOpts {
 interface BuiltPipeline {
 	nodes: WorkflowNode[];
 	edges: WorkflowEdge[];
+	/** Auto-layout positions for DAG visualization. */
+	layout: LayoutNode[];
 	trigger: ReturnType<typeof fromTrigger<string>>;
 	wf: { status: Store<PipelineStatus>; reset(): void; destroy(): void };
 }
@@ -74,50 +87,19 @@ interface BuiltPipeline {
 // Shared helpers
 // ---------------------------------------------------------------------------
 
-interface NodeMeta {
-	id: string;
-	label: string;
-	log: ReactiveLog<string>;
-	breaker: ReturnType<typeof circuitBreaker>;
-	breakerState: Store<string>;
-}
-
-function createMeta(id: string, label: string): NodeMeta {
+function buildNode(meta: WorkflowNodeResult, def: any): WorkflowNode {
 	return {
-		id,
-		label,
-		log: reactiveLog<string>({ id: `${id}:log`, maxSize: 50 }),
-		breaker: circuitBreaker({
-			failureThreshold: 3,
-			cooldownMs: 5000,
-			cooldown: exponential({ base: 1000, factor: 2, max: 10000 }),
-		}),
-		breakerState: state<string>("closed", { name: `${id}:breakerState` }),
+		id: meta.id,
+		label: meta.label,
+		task: def[TASK_STATE] as TaskState,
+		log: meta.log,
+		breaker: meta.breaker,
+		breakerState: meta.breakerState,
 	};
 }
 
-async function simulateWork(
-	meta: NodeMeta,
-	durationRange: [number, number],
-	failRate: number,
-): Promise<string> {
-	const [min, max] = durationRange;
-	const duration = min + Math.random() * (max - min);
-	await firstValueFrom(fromTimer(duration));
-	if (Math.random() < failRate) {
-		meta.breaker.recordFailure();
-		meta.breakerState.set(meta.breaker.state);
-		meta.log.append(`[ERROR] Failed after ${Math.round(duration)}ms`);
-		throw new Error(`${meta.label} failed`);
-	}
-	meta.breaker.recordSuccess();
-	meta.breakerState.set(meta.breaker.state);
-	meta.log.append(`[OK] Completed in ${Math.round(duration)}ms`);
-	return `${meta.label} result`;
-}
-
-function buildNode(meta: NodeMeta, def: any): WorkflowNode {
-	return { ...meta, task: def[TASK_STATE] as TaskState };
+function computeLayout(nodes: { id: string }[], edges: DagLayoutEdge[]): LayoutNode[] {
+	return dagLayout(nodes, edges, { nodeGap: 200, layerGap: 120, direction: "TB" }).nodes;
 }
 
 // ---------------------------------------------------------------------------
@@ -125,9 +107,9 @@ function buildNode(meta: NodeMeta, def: any): WorkflowNode {
 // ---------------------------------------------------------------------------
 function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 	const n = {
-		extract: createMeta("extract", "Extract"),
-		transform: createMeta("transform", "Transform"),
-		load: createMeta("load", "Load"),
+		extract: workflowNode("extract", "Extract"),
+		transform: workflowNode("transform", "Transform"),
+		load: workflowNode("load", "Load"),
 	};
 
 	const triggerSrc = fromTrigger<string>({ name: "etl:trigger" });
@@ -136,7 +118,7 @@ function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["trigger"],
 		async (_signal, [_v]) => {
 			n.extract.log.append("[START] Extracting data...");
-			return simulateWork(n.extract, opts.durationRange, opts.failRate);
+			return n.extract.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "extract" },
 	);
@@ -145,7 +127,7 @@ function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["extract"],
 		async (_signal, [_v]) => {
 			n.transform.log.append("[START] Transforming...");
-			return simulateWork(n.transform, opts.durationRange, opts.failRate);
+			return n.transform.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "transform" },
 	);
@@ -154,7 +136,7 @@ function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["transform"],
 		async (_signal, [_v]) => {
 			n.load.log.append("[START] Loading...");
-			return simulateWork(n.load, opts.durationRange, opts.failRate);
+			return n.load.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "load" },
 	);
@@ -169,16 +151,19 @@ function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		{ name: "etl" },
 	);
 
+	const edges: WorkflowEdge[] = [
+		{ source: "extract", target: "transform" },
+		{ source: "transform", target: "load" },
+	];
+
 	return {
 		nodes: [
 			buildNode(n.extract, extractDef),
 			buildNode(n.transform, transformDef),
 			buildNode(n.load, loadDef),
 		],
-		edges: [
-			{ source: "extract", target: "transform" },
-			{ source: "transform", target: "load" },
-		],
+		edges,
+		layout: computeLayout([{ id: "extract" }, { id: "transform" }, { id: "load" }], edges),
 		trigger: triggerSrc,
 		wf,
 	};
@@ -189,10 +174,10 @@ function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 // ---------------------------------------------------------------------------
 function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 	const n = {
-		ingest: createMeta("ingest", "Ingest"),
-		validate: createMeta("validate", "Validate"),
-		enrich: createMeta("enrich", "Enrich"),
-		store: createMeta("store", "Store"),
+		ingest: workflowNode("ingest", "Ingest"),
+		validate: workflowNode("validate", "Validate"),
+		enrich: workflowNode("enrich", "Enrich"),
+		store: workflowNode("store", "Store"),
 	};
 
 	const triggerSrc = fromTrigger<string>({ name: "fanout:trigger" });
@@ -201,7 +186,7 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["trigger"],
 		async (_signal, [_v]) => {
 			n.ingest.log.append("[START] Ingesting...");
-			return simulateWork(n.ingest, opts.durationRange, opts.failRate);
+			return n.ingest.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "ingest" },
 	);
@@ -210,7 +195,7 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["ingest"],
 		async (_signal, [_v]) => {
 			n.validate.log.append("[START] Validating...");
-			return simulateWork(n.validate, opts.durationRange, opts.failRate);
+			return n.validate.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "validate" },
 	);
@@ -219,7 +204,7 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["ingest"],
 		async (_signal, [_v]) => {
 			n.enrich.log.append("[START] Enriching...");
-			return simulateWork(n.enrich, opts.durationRange, opts.failRate);
+			return n.enrich.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "enrich" },
 	);
@@ -228,7 +213,7 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["validate", "enrich"],
 		async (_signal, [_v1, _v2]) => {
 			n.store.log.append("[START] Storing...");
-			return simulateWork(n.store, opts.durationRange, opts.failRate);
+			return n.store.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "store" },
 	);
@@ -244,6 +229,13 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		{ name: "fanout" },
 	);
 
+	const edges: WorkflowEdge[] = [
+		{ source: "ingest", target: "validate" },
+		{ source: "ingest", target: "enrich" },
+		{ source: "validate", target: "store" },
+		{ source: "enrich", target: "store" },
+	];
+
 	return {
 		nodes: [
 			buildNode(n.ingest, ingestDef),
@@ -251,12 +243,11 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 			buildNode(n.enrich, enrichDef),
 			buildNode(n.store, storeDef),
 		],
-		edges: [
-			{ source: "ingest", target: "validate" },
-			{ source: "ingest", target: "enrich" },
-			{ source: "validate", target: "store" },
-			{ source: "enrich", target: "store" },
-		],
+		edges,
+		layout: computeLayout(
+			[{ id: "ingest" }, { id: "validate" }, { id: "enrich" }, { id: "store" }],
+			edges,
+		),
 		trigger: triggerSrc,
 		wf,
 	};
@@ -267,13 +258,13 @@ function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 // ---------------------------------------------------------------------------
 function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 	const n = {
-		cron: createMeta("cron", "Cron Trigger"),
-		fetchBank: createMeta("fetch-bank", "Fetch Bank"),
-		fetchCards: createMeta("fetch-cards", "Fetch Cards"),
-		aggregate: createMeta("aggregate", "Aggregate"),
-		anomaly: createMeta("anomaly", "Detect Anomaly"),
-		batchWrite: createMeta("batch-write", "Batch Write"),
-		alert: createMeta("alert", "Send Alert"),
+		cron: workflowNode("cron", "Cron Trigger"),
+		fetchBank: workflowNode("fetch-bank", "Fetch Bank"),
+		fetchCards: workflowNode("fetch-cards", "Fetch Cards"),
+		aggregate: workflowNode("aggregate", "Aggregate"),
+		anomaly: workflowNode("anomaly", "Detect Anomaly"),
+		batchWrite: workflowNode("batch-write", "Batch Write"),
+		alert: workflowNode("alert", "Send Alert"),
 	};
 
 	const triggerSrc = fromTrigger<string>({ name: "dag:trigger" });
@@ -291,7 +282,7 @@ function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 
 	const fetchBankDef = task(
 		["cron"],
-		async (_signal, [_v]) => simulateWork(n.fetchBank, opts.durationRange, opts.failRate),
+		async (_signal, [_v]) => n.fetchBank.simulate(opts.durationRange, opts.failRate),
 		{
 			name: "fetchBank",
 			skip: () => !n.fetchBank.breaker.canExecute(),
@@ -302,7 +293,7 @@ function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 
 	const fetchCardsDef = task(
 		["cron"],
-		async (_signal, [_v]) => simulateWork(n.fetchCards, opts.durationRange, opts.failRate),
+		async (_signal, [_v]) => n.fetchCards.simulate(opts.durationRange, opts.failRate),
 		{
 			name: "fetchCards",
 			skip: () => !n.fetchCards.breaker.canExecute(),
@@ -315,26 +306,26 @@ function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		["fetchBank", "fetchCards"],
 		async (_signal, [_bankVal, _cardsVal]) => {
 			n.aggregate.log.append("[START] Aggregating...");
-			return simulateWork(n.aggregate, opts.durationRange, opts.failRate);
+			return n.aggregate.simulate(opts.durationRange, opts.failRate);
 		},
 		{ name: "aggregate" },
 	);
 
 	const anomalyDef = task(
 		["aggregate"],
-		async (_signal, [_v]) => simulateWork(n.anomaly, opts.durationRange, opts.failRate),
+		async (_signal, [_v]) => n.anomaly.simulate(opts.durationRange, opts.failRate),
 		{ name: "anomaly", onStart: () => n.anomaly.log.append("[START] Running...") },
 	);
 
 	const batchWriteDef = task(
 		["aggregate"],
-		async (_signal, [_v]) => simulateWork(n.batchWrite, opts.durationRange, opts.failRate),
+		async (_signal, [_v]) => n.batchWrite.simulate(opts.durationRange, opts.failRate),
 		{ name: "batchWrite", onStart: () => n.batchWrite.log.append("[START] Running...") },
 	);
 
 	const alertDef = task(
 		["anomaly"],
-		async (_signal, [_v]) => simulateWork(n.alert, opts.durationRange, opts.failRate),
+		async (_signal, [_v]) => n.alert.simulate(opts.durationRange, opts.failRate),
 		{ name: "alert", onStart: () => n.alert.log.append("[START] Running...") },
 	);
 
@@ -352,6 +343,16 @@ function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 		{ name: "dag" },
 	);
 
+	const edges: WorkflowEdge[] = [
+		{ source: "cron", target: "fetch-bank" },
+		{ source: "cron", target: "fetch-cards" },
+		{ source: "fetch-bank", target: "aggregate" },
+		{ source: "fetch-cards", target: "aggregate" },
+		{ source: "aggregate", target: "anomaly" },
+		{ source: "aggregate", target: "batch-write" },
+		{ source: "anomaly", target: "alert" },
+	];
+
 	return {
 		nodes: [
 			buildNode(n.cron, cronDef),
@@ -362,15 +363,19 @@ function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
 			buildNode(n.batchWrite, batchWriteDef),
 			buildNode(n.alert, alertDef),
 		],
-		edges: [
-			{ source: "cron", target: "fetch-bank" },
-			{ source: "cron", target: "fetch-cards" },
-			{ source: "fetch-bank", target: "aggregate" },
-			{ source: "fetch-cards", target: "aggregate" },
-			{ source: "aggregate", target: "anomaly" },
-			{ source: "aggregate", target: "batch-write" },
-			{ source: "anomaly", target: "alert" },
-		],
+		edges,
+		layout: computeLayout(
+			[
+				{ id: "cron" },
+				{ id: "fetch-bank" },
+				{ id: "fetch-cards" },
+				{ id: "aggregate" },
+				{ id: "anomaly" },
+				{ id: "batch-write" },
+				{ id: "alert" },
+			],
+			edges,
+		),
 		trigger: triggerSrc,
 		wf,
 	};
@@ -480,6 +485,8 @@ export interface WorkflowBuilderState {
 	nodes: Store<WorkflowNode[]>;
 	/** Current edges for the DAG visualization. */
 	edges: Store<WorkflowEdge[]>;
+	/** Current auto-layout positions. */
+	layout: Store<LayoutNode[]>;
 	/** Global execution log. */
 	executionLog: ReactiveLog<string>;
 	/** Select a template and rebuild the pipeline. */
@@ -506,6 +513,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	// Reactive stores for the current pipeline's output
 	const nodesStore = state<WorkflowNode[]>([], { name: "wb.nodes" });
 	const edgesStore = state<WorkflowEdge[]>([], { name: "wb.edges" });
+	const layoutStore = state<LayoutNode[]>([], { name: "wb.layout" });
 	const pipelineStatus = state<PipelineStatus>("idle", { name: "wb.pipelineStatus" });
 	const code = state<string>(templates[0].code, { name: "wb.code" });
 
@@ -538,13 +546,14 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 
 		nodesStore.set(activePipeline.nodes);
 		edgesStore.set(activePipeline.edges);
+		layoutStore.set(activePipeline.layout);
 		code.set(template.code);
 		pipelineStatus.set("idle");
 		running.set(false);
 
 		// Sync pipeline status reactively
 		const wfStatus = activePipeline.wf.status;
-		const dispose = effect([running, wfStatus], () => {
+		const dispose = effect([wfStatus, running], () => {
 			const s = wfStatus.get();
 			pipelineStatus.set(s);
 			if (running.get() && (s === "completed" || s === "errored")) {
@@ -552,6 +561,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 				runCount.update((n) => n + 1);
 				executionLog.append(`[${new Date().toISOString()}] Run #${runCount.get()} — ${s}`);
 			}
+			return undefined;
 		});
 		statusUnsub = dispose;
 	}
@@ -600,6 +610,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 		pipelineStatus,
 		nodes: nodesStore,
 		edges: edgesStore,
+		layout: layoutStore,
 		executionLog,
 		selectTemplate,
 		trigger: triggerPipeline,
@@ -628,6 +639,12 @@ if (typeof process !== "undefined" && process.argv?.[1]?.includes("workflow-buil
 			.join(" → ")}`,
 	);
 	console.log(`Edges: ${wb.edges.get().length}`);
+	console.log(
+		`Layout: ${wb.layout
+			.get()
+			.map((l) => `${l.id}(${l.x},${l.y})`)
+			.join(", ")}`,
+	);
 	console.log(`Code:\n${wb.code.get()}\n`);
 
 	// Switch to fan-out
@@ -640,6 +657,12 @@ if (typeof process !== "undefined" && process.argv?.[1]?.includes("workflow-buil
 			.join(", ")}`,
 	);
 	console.log(`Edges: ${wb.edges.get().length}`);
+	console.log(
+		`Layout: ${wb.layout
+			.get()
+			.map((l) => `${l.id}(${l.x},${l.y})`)
+			.join(", ")}`,
+	);
 
 	wb.destroy();
 	console.log("\n--- done ---");

@@ -136,6 +136,9 @@ const REGISTRY = {
 	withMeta: "src/utils/withMeta.ts",
 	withStatus: "src/utils/withStatus.ts",
 	dag: "src/utils/dag.ts",
+	autoSave: "src/utils/autoSave.ts",
+	contentStats: "src/utils/contentStats.ts",
+	cursorInfo: "src/utils/cursorInfo.ts",
 
 	// Data
 	reactiveLog: "src/data/reactiveLog.ts",
@@ -158,6 +161,11 @@ const REGISTRY = {
 	onFailure: "src/orchestrate/onFailure.ts",
 	wait: "src/orchestrate/wait.ts",
 	subPipeline: "src/orchestrate/subPipeline.ts",
+	dagLayout: "src/orchestrate/dagLayout.ts",
+	workflowNode: "src/orchestrate/workflowNode.ts",
+
+	// Compat — Vue
+	useSubscribeRecord: "src/compat/vue/index.ts",
 
 	// Extras — sinks
 	forEach: "src/extra/forEach.ts",

@@ -1,6 +1,10 @@
+// Auto-save (debounce + checkpoint + status)
+
 // Async queue
 export type { AsyncQueueOptions, AsyncQueueResult } from "./asyncQueue";
 export { asyncQueue } from "./asyncQueue";
+export type { AutoSaveOptions, AutoSaveResult } from "./autoSave";
+export { autoSave } from "./autoSave";
 // Backoff strategies
 export type { BackoffStrategy, ExponentialOptions, JitterMode } from "./backoff";
 export {
@@ -63,6 +67,12 @@ export type {
 	ConnectionStatus,
 } from "./connectionHealth";
 export { connectionHealth } from "./connectionHealth";
+// Content stats (word/char/line count)
+export type { ContentStats } from "./contentStats";
+export { contentStats } from "./contentStats";
+// Cursor info (line/column/display from content + position)
+export type { CursorInfo } from "./cursorInfo";
+export { cursorInfo } from "./cursorInfo";
 // DAG
 export type { DagNode, DagResult } from "./dag";
 export { dag } from "./dag";
