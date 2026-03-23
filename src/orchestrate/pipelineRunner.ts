@@ -122,7 +122,7 @@ interface ManagedEntry {
  *     name: "ingest",
  *     factory: () => pipeline({
  *       trigger: step(fromTrigger<string>()),
- *       fetch: task(["trigger"], async (url) => fetch(url).then(r => r.json())),
+ *       fetch: task(["trigger"], async (signal, [url]) => fetch(url).then(r => r.json())),
  *     }),
  *     restart: { backoff: exponential({ base: 1000 }) },
  *   },

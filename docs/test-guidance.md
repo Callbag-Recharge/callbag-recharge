@@ -73,6 +73,7 @@ src/__tests__/
 │   ├── cron.test.ts                  — cron parser validation, field parsing, matching
 │   ├── dag.test.ts                   — acyclicity validation, topological sort, cycle detection
 │   ├── fromCron.test.ts              — cron source emission, timing, cleanup, fake timers
+│   ├── pipeline.test.ts              — pipeline status, reset, task lifecycle, source(), skip
 │   └── taskState.test.ts             — run tracking, status transitions, snapshot, lifecycle
 └── integrations/
     └── interop.test.ts                 — external callbag operator compatibility
@@ -233,6 +234,10 @@ dispose();
 | **"Trace one store's value changes"** | `Inspector.trace(store, cb)` |
 | **"Insert a debug point in the graph"** | `Inspector.tap(store, name)` |
 | **"Log events live to console"** | `Inspector.spy(store)` |
+| **"Was this event inside batch()?"** | `obs.events[i].inBatch` |
+| **"Timestamped event log per store"** | `Inspector.timeline(store)` |
+| **"What deps triggered a derived?"** | `Inspector.observeDerived(store).evaluations` |
+| **"Emission count / ended / error?"** | `withMeta(store)` (from `utils`) |
 
 ---
 
@@ -300,6 +305,100 @@ Bitmask must resolve correctly even though B's output slot (not B directly) disp
 - **Type 3 forwarding**: Unknown `[Symbol, data?]` tuples pass through unchanged
 - **init() timing**: Handler-local state resets on reconnect; dep connection structure survives
 - Prefer `Inspector.observe()` over raw callbag sinks for assertions
+
+---
+
+## Orchestrate / Pipeline Testing Patterns
+
+Pipeline tests verify workflow-level behavior: status derivation, task lifecycle, reset, and the `source()` / `task()` API. Use `task()` and `source()` — never raw `step()` + `switchMap` + `producer` combos.
+
+### Pipeline status derivation
+
+Pipeline status depends on **task-level** `taskState.status` stores, not stream-level meta. Test all status transitions:
+
+```ts
+const trigger = fromTrigger<string>();
+const wf = pipeline({
+  trigger: source(trigger),
+  fetch: task(["trigger"], async (_signal, [v]) => fetchData(v)),
+});
+
+expect(wf.status.get()).toBe("idle");
+
+trigger.fire("go");
+expect(wf.status.get()).toBe("active");
+
+await vi.waitFor(() => expect(wf.status.get()).toBe("completed"));
+```
+
+### Skipped tasks count as "done"
+
+When a task's `skip` predicate returns true, its status becomes `"skipped"`. Pipeline treats skipped + success as all-done → `"completed"`:
+
+```ts
+const wf = pipeline({
+  trigger: source(fromTrigger<string>()),
+  a: task(["trigger"], async () => "result", { skip: () => true }),
+  b: task(["trigger"], async () => "result"),
+});
+
+trigger.fire("go");
+await vi.waitFor(() => expect(wf.status.get()).toBe("completed"));
+```
+
+### Reset returns to idle
+
+After reset, all task statuses revert to `"idle"` and the pipeline status returns to `"idle"`:
+
+```ts
+trigger.fire("go");
+await vi.waitFor(() => expect(wf.status.get()).toBe("completed"));
+
+wf.reset();
+expect(wf.status.get()).toBe("idle");
+```
+
+### Task lifecycle hooks
+
+Verify `onSkip`, `onStart`, `onSuccess`, `onError` fire at the correct points:
+
+```ts
+const events: string[] = [];
+const wf = pipeline({
+  trigger: source(fromTrigger<string>()),
+  work: task(["trigger"], async () => "done", {
+    onStart: () => events.push("start"),
+    onSuccess: (r) => events.push(`success:${r}`),
+  }),
+});
+
+trigger.fire("go");
+await vi.waitFor(() => expect(events).toEqual(["start", "success:done"]));
+```
+
+### source() vs step()
+
+`source()` is the public API for wrapping event sources into pipeline nodes. `step()` is `@internal`. Test that `source()` tags correctly:
+
+```ts
+import { SOURCE_ROLE, source, step } from "../../orchestrate/pipeline";
+
+const def = source(someStore);
+expect((def as any)[SOURCE_ROLE]).toBe(true);
+
+const rawDef = step(someStore);
+expect((rawDef as any)[SOURCE_ROLE]).toBeUndefined();
+```
+
+### What to test for pipeline
+
+- [ ] **Status transitions:** idle → active → completed, idle → active → errored
+- [ ] **Skipped tasks:** skip predicate → status "skipped", pipeline still completes
+- [ ] **Mixed outcomes:** some skipped + some success → completed; some skipped + some error → errored
+- [ ] **Reset:** completed → reset → idle; re-trigger works after reset
+- [ ] **Task lifecycle hooks:** onStart, onSuccess, onError, onSkip fire correctly
+- [ ] **source() tagging:** SOURCE_ROLE symbol present on source(), absent on step()
+- [ ] **Destroy cleanup:** wf.destroy() tears down all subscriptions
 
 ---
 

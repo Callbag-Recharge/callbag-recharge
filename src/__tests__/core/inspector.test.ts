@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { batch } from "../../core/protocol";
 import { subscribe } from "../../extra/subscribe";
 import { derived, Inspector, operator, producer, state } from "../../index";
 
@@ -359,5 +360,112 @@ describe("Inspector", () => {
 		Inspector.registerEdge(state(1, { name: "x" }), state(2, { name: "y" }));
 		Inspector._reset();
 		expect(Inspector.getEdges().size).toBe(0);
+	});
+
+	// -----------------------------------------------------------------------
+	// observe() inBatch tagging
+	// -----------------------------------------------------------------------
+
+	it("observe events include inBatch flag", () => {
+		const s = state(0);
+		const obs = Inspector.observe(s);
+
+		s.set(1);
+		expect(obs.events.at(-1)!.inBatch).toBe(false);
+
+		batch(() => s.set(2));
+		// DIRTY is sent inside batch (inBatch=true), DATA on drain (inBatch=false)
+		const dataEvent = obs.events.filter((e) => e.type === "data").at(-1)!;
+		expect(typeof dataEvent.inBatch).toBe("boolean");
+
+		obs.dispose();
+	});
+
+	// -----------------------------------------------------------------------
+	// timeline()
+	// -----------------------------------------------------------------------
+
+	it("timeline captures timestamped events", () => {
+		const s = state(0);
+		const tl = Inspector.timeline(s);
+
+		s.set(1);
+		s.set(2);
+
+		// Should have signal + data events for each set
+		expect(tl.entries.length).toBeGreaterThanOrEqual(2);
+
+		const dataEntries = tl.entries.filter((e) => e.type === "data");
+		expect(dataEntries.map((e) => e.data)).toEqual([1, 2]);
+
+		// Timestamps should be numbers
+		for (const entry of tl.entries) {
+			expect(typeof entry.timestamp).toBe("number");
+			expect(typeof entry.inBatch).toBe("boolean");
+		}
+
+		tl.dispose();
+	});
+
+	it("timeline stops after dispose", () => {
+		const s = state(0);
+		const tl = Inspector.timeline(s);
+
+		s.set(1);
+		const count = tl.entries.length;
+		tl.dispose();
+
+		s.set(2);
+		expect(tl.entries.length).toBe(count);
+	});
+
+	// -----------------------------------------------------------------------
+	// observeDerived()
+	// -----------------------------------------------------------------------
+
+	it("observeDerived captures dep snapshots per evaluation", () => {
+		const a = state(1, { name: "a" });
+		const b = state(10, { name: "b" });
+		const sum = derived([a, b], () => a.get() + b.get(), { name: "sum" });
+
+		const obs = Inspector.observeDerived(sum);
+
+		a.set(2);
+		b.set(20);
+
+		// 3 evaluations: initial lazy connect (1,10) + a.set(2) + b.set(20)
+		expect(obs.evaluations.length).toBe(3);
+		expect(obs.evaluations[0].depValues).toEqual([1, 10]);
+		expect(obs.evaluations[0].result).toBe(11);
+		expect(obs.evaluations[1].depValues).toEqual([2, 10]);
+		expect(obs.evaluations[1].result).toBe(12);
+		expect(obs.evaluations[2].depValues).toEqual([2, 20]);
+		expect(obs.evaluations[2].result).toBe(22);
+
+		obs.dispose();
+	});
+
+	it("observeDerived restores _fn on dispose", () => {
+		const a = state(1);
+		const d = derived([a], () => a.get() * 2);
+
+		const obs = Inspector.observeDerived(d);
+		a.set(5);
+		expect(obs.values).toContain(10);
+
+		obs.dispose();
+
+		// After dispose, derived should still work normally
+		a.set(3);
+		expect(d.get()).toBe(6);
+	});
+
+	it("observeDerived falls back to observe for non-derived stores", () => {
+		const s = state(0);
+		const obs = Inspector.observeDerived(s);
+		s.set(5);
+		expect(obs.values).toContain(5);
+		expect(obs.evaluations).toEqual([]);
+		obs.dispose();
 	});
 });

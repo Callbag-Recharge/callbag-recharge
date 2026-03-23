@@ -1,13 +1,12 @@
 <script setup lang="ts">
 import { Background } from "@vue-flow/background";
 import { Position, VueFlow } from "@vue-flow/core";
-import { computed, onMounted, onUnmounted, reactive, ref } from "vue";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
-import { createPipeline } from "@examples/airflow-demo";
+import { edges, nodes, runCount, running, stop, trigger } from "@examples/airflow-demo";
 import pipelineRaw from "@examples/airflow-demo.ts?raw";
-import type { Store } from "callbag-recharge";
-import { subscribe } from "callbag-recharge";
+import { useSubscribe } from "callbag-recharge/compat/vue";
+import { computed, onUnmounted, ref, watchEffect } from "vue";
 
 // Extract the display region between #region display and #endregion display
 const REGION_START = "// #region display";
@@ -20,7 +19,6 @@ const rawRegion =
 		? pipelineRaw.slice(afterMarker + 1, regionEnd).trimEnd()
 		: pipelineRaw;
 
-// Dedent: strip common leading whitespace so the code panel isn't over-indented
 const regionLines = rawRegion.split("\n");
 const minIndent = regionLines
 	.filter((l) => l.trim().length > 0)
@@ -34,39 +32,37 @@ const PIPELINE_SOURCE =
 		: rawRegion.replace(/\t/g, "  ");
 
 // ---------------------------------------------------------------------------
-// Pipeline instance
+// Reactive bindings via useSubscribe — no manual cleanup needed
 // ---------------------------------------------------------------------------
-const pipeline = createPipeline();
-const unsubs: Array<() => void> = [];
+const isRunning = useSubscribe(running);
+const runs = useSubscribe(runCount);
+
+// Per-node reactive stores (called once during setup — valid in Vue 3)
+const nodeStatus = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.task.status)]));
+const nodeDuration = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.task.duration)]));
+const nodeRunCount = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.task.runCount)]));
+const nodeError = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.task.error)]));
+const nodeBreaker = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.breakerState)]));
+const nodeLatestLog = Object.fromEntries(nodes.map((n) => [n.id, useSubscribe(n.log.latest)]));
+
+// Accumulated log lines per node (append-only ring buffer for display)
+const nodeLogs = Object.fromEntries(nodes.map((n) => [n.id, ref<string[]>([])]));
+for (const n of nodes) {
+	const latest = nodeLatestLog[n.id];
+	watchEffect(() => {
+		const entry = latest.value;
+		if (entry) nodeLogs[n.id].value = [...nodeLogs[n.id].value.slice(-3), entry.value];
+	});
+}
+
+onUnmounted(stop);
 
 // ---------------------------------------------------------------------------
-// Reactive state for Vue
+// Popover positioning
 // ---------------------------------------------------------------------------
-const nodeStates = reactive<
-	Record<
-		string,
-		{
-			status: string;
-			duration?: number;
-			runCount: number;
-			error?: string;
-			circuitState: string;
-			logs: string[];
-		}
-	>
->({});
-
 const hoveredNode = ref<string | null>(null);
-const isRunning = ref(false);
-const runCount = ref(0);
-
-// Popover positioning — rendered outside Vue Flow to escape overflow:hidden
 const graphPanelRef = ref<HTMLElement | null>(null);
-const popoverPos = ref<{ x: number; y: number; above: boolean }>({
-	x: 0,
-	y: 0,
-	above: false,
-});
+const popoverPos = ref<{ x: number; y: number; above: boolean }>({ x: 0, y: 0, above: false });
 
 function onNodeEnter(id: string, event: MouseEvent) {
 	hoveredNode.value = id;
@@ -76,13 +72,9 @@ function onNodeEnter(id: string, event: MouseEvent) {
 
 	const nodeRect = nodeEl.getBoundingClientRect();
 	const panelRect = panelEl.getBoundingClientRect();
-
 	const x = nodeRect.left + nodeRect.width / 2 - panelRect.left;
 	const nodeRelY = nodeRect.top - panelRect.top;
-	const panelH = panelRect.height;
-
-	// Flip above if node is in lower 45% of panel
-	const above = nodeRelY > panelH * 0.55;
+	const above = nodeRelY > panelRect.height * 0.55;
 
 	popoverPos.value = {
 		x,
@@ -91,63 +83,8 @@ function onNodeEnter(id: string, event: MouseEvent) {
 	};
 }
 
-// Initialize node states
-for (const node of pipeline.nodes) {
-	nodeStates[node.id] = {
-		status: "idle",
-		duration: undefined,
-		runCount: 0,
-		error: undefined,
-		circuitState: "closed",
-		logs: [],
-	};
-}
-
-// Subscribe to taskState changes
-onMounted(() => {
-	const safeSubscribe = <T>(
-		store: Store<T> | null | undefined,
-		cb: Parameters<typeof subscribe<T>>[1],
-	) => {
-		if (!store || typeof (store as { source?: unknown }).source !== "function") {
-			return () => {};
-		}
-		return subscribe(store, cb);
-	};
-
-	for (const node of pipeline.nodes) {
-		const unsub = safeSubscribe(node.task as unknown as Store<any>, (meta) => {
-			const ns = nodeStates[node.id];
-			ns.status = meta.status;
-			ns.duration = meta.duration;
-			ns.runCount = meta.runCount;
-			ns.error = meta.error ? String(meta.error) : undefined;
-			ns.circuitState = node.breaker.state;
-		});
-		unsubs.push(unsub);
-
-		// Subscribe to log entries
-		const logUnsub = safeSubscribe(node.log?.latest, (entry) => {
-			if (entry) {
-				const ns = nodeStates[node.id];
-				ns.logs = [...ns.logs.slice(-4), entry.value];
-			}
-		});
-		unsubs.push(logUnsub);
-	}
-
-	// Pipeline-level subscriptions
-	unsubs.push(safeSubscribe(pipeline.running, (v) => (isRunning.value = v)));
-	unsubs.push(safeSubscribe(pipeline.runCount, (v) => (runCount.value = v)));
-});
-
-onUnmounted(() => {
-	for (const unsub of unsubs) unsub();
-	pipeline.destroy();
-});
-
 // ---------------------------------------------------------------------------
-// Status → color mapping
+// Status → color / glow
 // ---------------------------------------------------------------------------
 function statusColor(status: string): string {
 	switch (status) {
@@ -176,9 +113,8 @@ function statusGlow(status: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Vue Flow graph definition
+// Vue Flow graph definition (static layout)
 // ---------------------------------------------------------------------------
-// Layout positions (manually placed for the finance DAG shape)
 const positions: Record<string, { x: number; y: number }> = {
 	cron: { x: 220, y: 0 },
 	"fetch-bank": { x: 50, y: 110 },
@@ -189,7 +125,7 @@ const positions: Record<string, { x: number; y: number }> = {
 	alert: { x: 80, y: 430 },
 };
 
-const vfNodes = pipeline.nodes.map((node) => ({
+const vfNodes = nodes.map((node) => ({
 	id: node.id,
 	position: positions[node.id],
 	data: { label: node.label },
@@ -198,7 +134,7 @@ const vfNodes = pipeline.nodes.map((node) => ({
 	targetPosition: Position.Top,
 }));
 
-const vfEdges = pipeline.edges.map((e, i) => ({
+const vfEdges = edges.map((e, i) => ({
 	id: `e-${i}`,
 	source: e.source,
 	target: e.target,
@@ -206,26 +142,25 @@ const vfEdges = pipeline.edges.map((e, i) => ({
 	style: { stroke: "#4de8c244", strokeWidth: 2 },
 }));
 
-// Computed: edges with dynamic colors based on source node status
 const dynamicEdges = computed(() =>
 	vfEdges.map((e) => {
-		const sourceStatus = nodeStates[e.source]?.status ?? "idle";
-		const isHoveredPath =
+		const status = nodeStatus[e.source]?.value ?? "idle";
+		const isHovered =
 			hoveredNode.value && (e.source === hoveredNode.value || e.target === hoveredNode.value);
 		const color =
-			sourceStatus === "running"
+			status === "running"
 				? "#3b82f6"
-				: sourceStatus === "success"
+				: status === "success"
 					? "#4de8c2"
-					: sourceStatus === "error"
+					: status === "error"
 						? "#ef4444"
 						: "#4de8c244";
 		return {
 			...e,
-			animated: sourceStatus === "running" || !!isHoveredPath,
+			animated: status === "running" || !!isHovered,
 			style: {
-				stroke: isHoveredPath ? "#4de8c2" : color,
-				strokeWidth: isHoveredPath ? 3 : 2,
+				stroke: isHovered ? "#4de8c2" : color,
+				strokeWidth: isHovered ? 3 : 2,
 				transition: "stroke 0.3s, stroke-width 0.3s",
 			},
 		};
@@ -237,8 +172,6 @@ const dynamicEdges = computed(() =>
 // ---------------------------------------------------------------------------
 const codeLines = PIPELINE_SOURCE.split("\n");
 
-// Map node IDs to relevant source line ranges (0-indexed, within the display region).
-// Matches step definitions and nodeProducer calls in the pipeline() wiring.
 const NODE_PATTERNS: Record<string, RegExp> = {
 	cron: /\bcron\b/,
 	"fetch-bank": /\bfetchBank\b/,
@@ -251,12 +184,7 @@ const NODE_PATTERNS: Record<string, RegExp> = {
 
 const highlightMap: Record<string, number[]> = {};
 codeLines.forEach((line: string, i: number) => {
-	// Match step(...) definitions and nodeProducer(...) calls
-	const isStepLine = /\bstep\(/.test(line);
-	const isProducerLine = /\bnodeProducer\(/.test(line);
-	const isCommentLine = /\/\/\s*Step/.test(line);
-	if (!isStepLine && !isProducerLine && !isCommentLine) return;
-
+	if (!/\bstep\(/.test(line) && !/\bnodeProducer\(/.test(line) && !/\/\/\s*Step/.test(line)) return;
 	for (const [id, pattern] of Object.entries(NODE_PATTERNS)) {
 		if (pattern.test(line)) {
 			if (!highlightMap[id]) highlightMap[id] = [];
@@ -270,10 +198,9 @@ function isLineHighlighted(lineIdx: number): boolean {
 	return highlightMap[hoveredNode.value]?.includes(lineIdx) ?? false;
 }
 
-// Active node = currently running node for code panel auto-highlight
 const activeNodeId = computed(() => {
-	for (const node of pipeline.nodes) {
-		if (nodeStates[node.id]?.status === "running") return node.id;
+	for (const n of nodes) {
+		if (nodeStatus[n.id]?.value === "running") return n.id;
 	}
 	return null;
 });
@@ -284,8 +211,6 @@ function isLineActive(lineIdx: number): boolean {
 	return highlightMap[id]?.includes(lineIdx) ?? false;
 }
 
-// Biome currently checks `<script setup>` bindings independently from template usage.
-// Exposing template-consumed bindings keeps lint clean without changing behavior.
 defineExpose({
 	Background,
 	VueFlow,
@@ -313,14 +238,12 @@ defineExpose({
 					class="run-btn"
 					:class="{ running: isRunning }"
 					:disabled="isRunning"
-					@click="pipeline.trigger()"
+					@click="trigger()"
 				>
 					<span v-if="isRunning" class="spinner" />
 					{{ isRunning ? "Running..." : "Run Pipeline" }}
 				</button>
-				<span class="run-count" v-if="runCount > 0">
-					Run #{{ runCount }}
-				</span>
+				<span v-if="runs > 0" class="run-count">Run #{{ runs }}</span>
 			</div>
 		</div>
 
@@ -345,30 +268,21 @@ defineExpose({
 				>
 					<Background :gap="20" :size="0.5" pattern-color="#1e345033" />
 
-					<!-- Custom node template -->
 					<template #node-custom="{ id, data }">
 						<div
 							class="dag-node"
-							:class="[
-								nodeStates[id]?.status,
-								{ hovered: hoveredNode === id },
-							]"
+							:class="[nodeStatus[id]?.value, { hovered: hoveredNode === id }]"
 							:style="{
-								borderColor: statusColor(nodeStates[id]?.status ?? 'idle'),
-								boxShadow: statusGlow(nodeStates[id]?.status ?? 'idle'),
+								borderColor: statusColor(nodeStatus[id]?.value ?? 'idle'),
+								boxShadow: statusGlow(nodeStatus[id]?.value ?? 'idle'),
 							}"
 							@mouseenter="onNodeEnter(id, $event)"
 							@mouseleave="hoveredNode = null"
 						>
-							<!-- Status dot -->
 							<span
 								class="status-dot"
-								:class="nodeStates[id]?.status"
-								:style="{
-									backgroundColor: statusColor(
-										nodeStates[id]?.status ?? 'idle',
-									),
-								}"
+								:class="nodeStatus[id]?.value"
+								:style="{ backgroundColor: statusColor(nodeStatus[id]?.value ?? 'idle') }"
 							/>
 							<span class="node-label">{{ data.label }}</span>
 						</div>
@@ -384,59 +298,42 @@ defineExpose({
 						:style="{
 							left: popoverPos.x + 'px',
 							top: popoverPos.above ? 'auto' : popoverPos.y + 8 + 'px',
-							bottom: popoverPos.above ? (graphPanelRef ? graphPanelRef.offsetHeight - popoverPos.y + 8 : 0) + 'px' : 'auto',
+							bottom: popoverPos.above
+								? (graphPanelRef ? graphPanelRef.offsetHeight - popoverPos.y + 8 : 0) + 'px'
+								: 'auto',
 						}"
 					>
 						<div class="pop-row">
 							<span class="pop-label">Status</span>
-							<span
-								class="pop-value"
-								:class="nodeStates[hoveredNode]?.status"
-							>
-								{{ nodeStates[hoveredNode]?.status }}
+							<span class="pop-value" :class="nodeStatus[hoveredNode]?.value">
+								{{ nodeStatus[hoveredNode]?.value ?? "idle" }}
 							</span>
 						</div>
-						<div
-							class="pop-row"
-							v-if="nodeStates[hoveredNode]?.duration != null"
-						>
+						<div class="pop-row" v-if="nodeDuration[hoveredNode]?.value != null">
 							<span class="pop-label">Duration</span>
-							<span class="pop-value">
-								{{ Math.round(nodeStates[hoveredNode]!.duration!) }}ms
-							</span>
+							<span class="pop-value">{{ Math.round(nodeDuration[hoveredNode]!.value!) }}ms</span>
 						</div>
 						<div class="pop-row">
 							<span class="pop-label">Runs</span>
-							<span class="pop-value">
-								{{ nodeStates[hoveredNode]?.runCount ?? 0 }}
-							</span>
+							<span class="pop-value">{{ nodeRunCount[hoveredNode]?.value ?? 0 }}</span>
 						</div>
 						<div class="pop-row">
 							<span class="pop-label">Circuit</span>
 							<span
 								class="pop-value"
-								:class="'circuit-' + nodeStates[hoveredNode]?.circuitState"
+								:class="'circuit-' + nodeBreaker[hoveredNode]?.value"
 							>
-								{{ nodeStates[hoveredNode]?.circuitState }}
+								{{ nodeBreaker[hoveredNode]?.value ?? "closed" }}
 							</span>
 						</div>
-						<div
-							class="pop-row"
-							v-if="nodeStates[hoveredNode]?.error"
-						>
+						<div class="pop-row" v-if="nodeError[hoveredNode]?.value">
 							<span class="pop-label">Error</span>
-							<span class="pop-value error">
-								{{ nodeStates[hoveredNode]?.error }}
-							</span>
+							<span class="pop-value error">{{ String(nodeError[hoveredNode]!.value) }}</span>
 						</div>
-						<!-- Log tail -->
-						<div
-							class="pop-logs"
-							v-if="(nodeStates[hoveredNode]?.logs?.length ?? 0) > 0"
-						>
+						<div class="pop-logs" v-if="nodeLogs[hoveredNode]?.value.length > 0">
 							<div class="pop-label">Log</div>
 							<div
-								v-for="(line, i) in nodeStates[hoveredNode]?.logs"
+								v-for="(line, i) in nodeLogs[hoveredNode]?.value"
 								:key="i"
 								class="log-line"
 								:class="{
@@ -455,7 +352,7 @@ defineExpose({
 			<!-- Code Panel -->
 			<div class="code-panel">
 				<div class="code-header">
-					<span class="code-filename">pipeline.ts</span>
+					<span class="code-filename">airflow-demo.ts</span>
 					<span class="code-badge">{{ codeLines.length }} lines</span>
 				</div>
 				<div class="code-body">
@@ -580,9 +477,7 @@ defineExpose({
 }
 
 @keyframes spin {
-	to {
-		transform: rotate(360deg);
-	}
+	to { transform: rotate(360deg); }
 }
 
 .run-count {
@@ -645,15 +540,8 @@ defineExpose({
 }
 
 @keyframes pulse-dot {
-	0%,
-	100% {
-		opacity: 1;
-		transform: scale(1);
-	}
-	50% {
-		opacity: 0.5;
-		transform: scale(1.4);
-	}
+	0%, 100% { opacity: 1; transform: scale(1); }
+	50% { opacity: 0.5; transform: scale(1.4); }
 }
 
 .node-label {
@@ -664,7 +552,7 @@ defineExpose({
 	white-space: nowrap;
 }
 
-/* ── Popover (rendered outside Vue Flow) ── */
+/* ── Popover ── */
 .node-popover {
 	position: absolute;
 	transform: translateX(-50%);
@@ -680,16 +568,13 @@ defineExpose({
 
 .pop-enter-active,
 .pop-leave-active {
-	transition:
-		opacity 0.15s,
-		transform 0.15s;
+	transition: opacity 0.15s, transform 0.15s;
 }
 .pop-enter-from,
 .pop-leave-to {
 	opacity: 0;
 	transform: translateX(-50%) translateY(-6px);
 }
-
 .popover-above.pop-enter-from,
 .popover-above.pop-leave-to {
 	transform: translateX(-50%) translateY(6px);
@@ -717,28 +602,14 @@ defineExpose({
 	font-size: 0.78rem;
 }
 
-.pop-value.idle {
-	color: var(--cr-text-muted);
-}
-.pop-value.running {
-	color: #3b82f6;
-}
-.pop-value.success {
-	color: var(--cr-aqua);
-}
-.pop-value.error {
-	color: #ef4444;
-}
+.pop-value.idle { color: var(--cr-text-muted); }
+.pop-value.running { color: #3b82f6; }
+.pop-value.success { color: var(--cr-aqua); }
+.pop-value.error { color: #ef4444; }
 
-.circuit-closed {
-	color: var(--cr-aqua);
-}
-.circuit-open {
-	color: #ef4444;
-}
-.circuit-half-open {
-	color: var(--cr-accent-warm);
-}
+.circuit-closed { color: var(--cr-aqua); }
+.circuit-open { color: #ef4444; }
+.circuit-half-open { color: var(--cr-accent-warm); }
 
 /* ── Log tail ── */
 .pop-logs {
@@ -758,15 +629,9 @@ defineExpose({
 	text-overflow: ellipsis;
 }
 
-.log-ok {
-	color: var(--cr-aqua-dim);
-}
-.log-err {
-	color: #ef4444;
-}
-.log-start {
-	color: #3b82f6;
-}
+.log-ok { color: var(--cr-aqua-dim); }
+.log-err { color: #ef4444; }
+.log-start { color: #3b82f6; }
 
 /* ── Code panel ── */
 .code-panel {
@@ -826,9 +691,7 @@ defineExpose({
 .code-line {
 	display: block;
 	padding: 0 16px;
-	transition:
-		background 0.2s,
-		color 0.2s;
+	transition: background 0.2s, color 0.2s;
 }
 
 .code-line.highlighted {
@@ -880,9 +743,7 @@ defineExpose({
 
 /* ── Vue Flow overrides ── */
 .vue-flow-wrapper :deep(.vue-flow__edge-path) {
-	transition:
-		stroke 0.3s,
-		stroke-width 0.3s;
+	transition: stroke 0.3s, stroke-width 0.3s;
 }
 
 .vue-flow-wrapper :deep(.vue-flow__background) {
@@ -893,7 +754,6 @@ defineExpose({
 	cursor: default;
 }
 
-/* Vue Flow default styles needed */
 .vue-flow-wrapper :deep(.vue-flow__handle) {
 	width: 8px;
 	height: 8px;

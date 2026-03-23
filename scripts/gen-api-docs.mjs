@@ -133,11 +133,13 @@ const REGISTRY = {
 	checkpoint: "src/utils/checkpoint.ts",
 	tokenTracker: "src/utils/tokenTracker.ts",
 	withBreaker: "src/utils/withBreaker.ts",
+	withMeta: "src/utils/withMeta.ts",
 	withStatus: "src/utils/withStatus.ts",
 	dag: "src/utils/dag.ts",
 
 	// Orchestrate — workflow nodes
 	pipeline: "src/orchestrate/pipeline.ts",
+	source: "src/orchestrate/pipeline.ts",
 	task: "src/orchestrate/task.ts",
 	branch: "src/orchestrate/branch.ts",
 	approval: "src/orchestrate/approval.ts",

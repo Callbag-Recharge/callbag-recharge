@@ -12,23 +12,31 @@ describe("stateMachine", () => {
 			{
 				initial: "red" as const,
 				states: {
-					red: {},
-					yellow: {},
-					green: {},
-				},
-				on: {
-					NEXT: (ctx, current) => {
-						const order: Record<string, "red" | "yellow" | "green"> = {
-							red: "green",
-							green: "yellow",
-							yellow: "red",
-						};
-						return {
-							state: order[current],
-							context: { count: ctx.count + 1 },
-						};
+					red: {
+						on: {
+							NEXT: {
+								to: "green" as const,
+								action: (ctx) => ({ count: ctx.count + 1 }),
+							},
+						},
 					},
-				} as any,
+					yellow: {
+						on: {
+							NEXT: {
+								to: "red" as const,
+								action: (ctx) => ({ count: ctx.count + 1 }),
+							},
+						},
+					},
+					green: {
+						on: {
+							NEXT: {
+								to: "yellow" as const,
+								action: (ctx) => ({ count: ctx.count + 1 }),
+							},
+						},
+					},
+				},
 			},
 		);
 	}
@@ -63,23 +71,23 @@ describe("stateMachine", () => {
 		expect(m.current.get()).toBe("red");
 	});
 
-	it("returns false when handler rejects transition", () => {
+	it("returns false when event not defined for current state", () => {
 		const m = stateMachine(
 			{},
 			{
 				initial: "idle" as const,
-				states: { idle: {}, active: {} },
-				on: {
-					ACTIVATE: (_ctx, current) => {
-						if (current !== "idle") return false;
-						return { state: "active" as const };
+				states: {
+					idle: {
+						on: { ACTIVATE: "active" as const },
 					},
-				} as any,
+					active: {
+						// No ACTIVATE event defined here — can't re-activate
+					},
+				},
 			},
 		);
 		m.send("ACTIVATE" as any);
 		expect(m.current.get()).toBe("active");
-		// Now rejecting from active state
 		const result = m.send("ACTIVATE" as any);
 		expect(result).toBe(false);
 		expect(m.current.get()).toBe("active");
@@ -107,6 +115,138 @@ describe("stateMachine", () => {
 	});
 
 	// ---------------------------------------------------------------------------
+	// String shorthand transitions
+	// ---------------------------------------------------------------------------
+	it("supports string shorthand for transitions", () => {
+		const m = stateMachine(
+			{},
+			{
+				initial: "off" as const,
+				states: {
+					off: { on: { TOGGLE: "on" as const } },
+					on: { on: { TOGGLE: "off" as const } },
+				},
+			},
+		);
+		expect(m.current.get()).toBe("off");
+		m.send("TOGGLE" as any);
+		expect(m.current.get()).toBe("on");
+		m.send("TOGGLE" as any);
+		expect(m.current.get()).toBe("off");
+	});
+
+	// ---------------------------------------------------------------------------
+	// Guard support
+	// ---------------------------------------------------------------------------
+	it("guard rejects transition when returning false", () => {
+		const m = stateMachine(
+			{ attempts: 0 },
+			{
+				initial: "idle" as const,
+				states: {
+					idle: {
+						on: {
+							TRY: {
+								to: "active" as const,
+								guard: (ctx) => ctx.attempts < 2,
+								action: (ctx) => ({ attempts: ctx.attempts + 1 }),
+							},
+						},
+					},
+					active: {
+						on: { DONE: "idle" as const },
+					},
+				},
+			},
+		);
+
+		expect(m.send("TRY" as any)).toBe(true); // attempts: 1
+		m.send("DONE" as any);
+		expect(m.send("TRY" as any)).toBe(true); // attempts: 2
+		m.send("DONE" as any);
+		expect(m.send("TRY" as any)).toBe(false); // guard rejects
+		expect(m.current.get()).toBe("idle");
+	});
+
+	// ---------------------------------------------------------------------------
+	// Array of guarded alternatives
+	// ---------------------------------------------------------------------------
+	it("supports array of guarded alternatives (first match wins)", () => {
+		const m = stateMachine(
+			{ isPremium: false },
+			{
+				initial: "idle" as const,
+				states: {
+					idle: {
+						on: {
+							SUBMIT: [
+								{ to: "premium" as const, guard: (ctx) => ctx.isPremium },
+								{ to: "standard" as const },
+							],
+						},
+					},
+					premium: {},
+					standard: {},
+				},
+			},
+		);
+
+		m.send("SUBMIT" as any);
+		expect(m.current.get()).toBe("standard");
+
+		// Reset and try with premium
+		const m2 = stateMachine(
+			{ isPremium: true },
+			{
+				initial: "idle" as const,
+				states: {
+					idle: {
+						on: {
+							SUBMIT: [
+								{ to: "premium" as const, guard: (ctx) => ctx.isPremium },
+								{ to: "standard" as const },
+							],
+						},
+					},
+					premium: {},
+					standard: {},
+				},
+			},
+		);
+
+		m2.send("SUBMIT" as any);
+		expect(m2.current.get()).toBe("premium");
+	});
+
+	// ---------------------------------------------------------------------------
+	// Payload support
+	// ---------------------------------------------------------------------------
+	it("passes payload to guard and action", () => {
+		const m = stateMachine(
+			{ value: "" },
+			{
+				initial: "idle" as const,
+				states: {
+					idle: {
+						on: {
+							SET: {
+								to: "done" as const,
+								guard: (_ctx, payload) => typeof payload === "string",
+								action: (_ctx, payload) => ({ value: payload }),
+							},
+						},
+					},
+					done: {},
+				},
+			},
+		);
+
+		expect(m.send("SET" as any, 42)).toBe(false); // guard rejects
+		expect(m.send("SET" as any, "hello")).toBe(true);
+		expect(m.context.get()).toEqual({ value: "hello" });
+	});
+
+	// ---------------------------------------------------------------------------
 	// onEnter / onExit hooks
 	// ---------------------------------------------------------------------------
 	it("runs onExit and onEnter on transition", () => {
@@ -121,6 +261,7 @@ describe("stateMachine", () => {
 							log.push("exit-a");
 							return { value: ctx.value + 10 };
 						},
+						on: { GO: "b" as const },
 					},
 					b: {
 						onEnter: (ctx) => {
@@ -129,9 +270,6 @@ describe("stateMachine", () => {
 						},
 					},
 				},
-				on: {
-					GO: () => ({ state: "b" as const }),
-				} as any,
 			},
 		);
 
@@ -151,6 +289,7 @@ describe("stateMachine", () => {
 						onExit: () => {
 							log.push("exit");
 						},
+						on: { GO: "b" as const },
 					},
 					b: {
 						onEnter: () => {
@@ -158,30 +297,30 @@ describe("stateMachine", () => {
 						},
 					},
 				},
-				on: {
-					GO: () => ({ state: "b" as const }),
-				} as any,
 			},
 		);
 
 		m.send("GO" as any);
 		expect(log).toEqual(["exit", "enter"]);
-		// Context unchanged since hooks returned void
 		expect(m.context.get()).toEqual({ x: 1 });
 	});
 
-	it("transition can update context without onEnter/onExit", () => {
+	it("action updates context without onEnter/onExit", () => {
 		const m = stateMachine(
 			{ text: "" },
 			{
 				initial: "idle" as const,
-				states: { idle: {}, editing: {} },
-				on: {
-					EDIT: () => ({
-						state: "editing" as const,
-						context: { text: "hello" },
-					}),
-				} as any,
+				states: {
+					idle: {
+						on: {
+							EDIT: {
+								to: "editing" as const,
+								action: () => ({ text: "hello" }),
+							},
+						},
+					},
+					editing: {},
+				},
 			},
 		);
 
@@ -201,6 +340,7 @@ describe("stateMachine", () => {
 						onEnter: () => {
 							log.push("enter-a");
 						},
+						on: { GO: "b" as const },
 					},
 					b: {
 						onExit: () => {
@@ -208,9 +348,6 @@ describe("stateMachine", () => {
 						},
 					},
 				},
-				on: {
-					GO: () => ({ state: "b" as const }),
-				} as any,
 			},
 		);
 
@@ -225,7 +362,6 @@ describe("stateMachine", () => {
 	it("current and context are reactive stores", () => {
 		const m = createTrafficLight();
 
-		// Subscribe to current store
 		const obs = Inspector.observe(m.current);
 
 		m.send("NEXT" as any); // red → green
@@ -234,5 +370,98 @@ describe("stateMachine", () => {
 		expect(obs.values).toEqual(["green", "yellow"]);
 
 		obs.dispose();
+	});
+
+	// ---------------------------------------------------------------------------
+	// transitions — extracted graph edges
+	// ---------------------------------------------------------------------------
+	it("transitions returns all edges", () => {
+		const m = stateMachine(
+			{},
+			{
+				initial: "a" as const,
+				states: {
+					a: { on: { GO: "b" as const } },
+					b: {
+						on: {
+							BACK: "a" as const,
+							NEXT: {
+								to: "c" as const,
+								guard: () => true,
+							},
+						},
+					},
+					c: {},
+				},
+			},
+		);
+
+		expect(m.transitions).toEqual([
+			{ from: "a", event: "GO", to: "b", guarded: false },
+			{ from: "b", event: "BACK", to: "a", guarded: false },
+			{ from: "b", event: "NEXT", to: "c", guarded: true },
+		]);
+	});
+
+	// ---------------------------------------------------------------------------
+	// toMermaid
+	// ---------------------------------------------------------------------------
+	it("toMermaid produces valid diagram", () => {
+		const m = stateMachine(
+			{},
+			{
+				initial: "idle" as const,
+				states: {
+					idle: { on: { START: "running" as const } },
+					running: { on: { STOP: "idle" as const } },
+				},
+			},
+		);
+
+		const diagram = m.toMermaid();
+		expect(diagram).toContain("stateDiagram-v2");
+		expect(diagram).toContain("[*] --> idle");
+		expect(diagram).toContain("idle --> running : START");
+		expect(diagram).toContain("running --> idle : STOP");
+	});
+
+	it("toMermaid marks guarded transitions", () => {
+		const m = stateMachine(
+			{},
+			{
+				initial: "a" as const,
+				states: {
+					a: {
+						on: {
+							GO: { to: "b" as const, guard: () => true },
+						},
+					},
+					b: {},
+				},
+			},
+		);
+
+		expect(m.toMermaid()).toContain("GO [guarded]");
+	});
+
+	// ---------------------------------------------------------------------------
+	// toD2
+	// ---------------------------------------------------------------------------
+	it("toD2 produces valid diagram", () => {
+		const m = stateMachine(
+			{},
+			{
+				initial: "idle" as const,
+				states: {
+					idle: { on: { START: "running" as const } },
+					running: { on: { STOP: "idle" as const } },
+				},
+			},
+		);
+
+		const diagram = m.toD2();
+		expect(diagram).toContain('idle: "idle (initial)"');
+		expect(diagram).toContain("idle -> running: START");
+		expect(diagram).toContain("running -> idle: STOP");
 	});
 });

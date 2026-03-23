@@ -27,7 +27,8 @@ export interface GateOptions {
 	name?: string;
 }
 
-export interface GatedStore<A> extends Store<A | undefined> {
+/** Reusable gate control interface — approve/reject/modify values in a queue. */
+export interface GateController<A> {
 	/** Reactive store of values waiting for approval. */
 	pending: Store<A[]>;
 	/** Whether the gate is currently open (auto-approving). */
@@ -43,6 +44,8 @@ export interface GatedStore<A> extends Store<A | undefined> {
 	/** Re-enable gating (stop auto-approving). */
 	close(): void;
 }
+
+export interface GatedStore<A> extends Store<A | undefined>, GateController<A> {}
 
 /**
  * Human-in-the-loop: pauses stream, inspects pending values, approve/reject/modify before forwarding (Tier 2).

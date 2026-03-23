@@ -6,7 +6,7 @@ import { map } from "../../extra/map";
 import { route } from "../../extra/route";
 import { subscribe } from "../../extra/subscribe";
 import { state } from "../../index";
-import { gate, pipeline, step } from "../../orchestrate";
+import { gate, pipeline, source, step, task } from "../../orchestrate";
 import { track } from "../../utils/track";
 
 // ==========================================================================
@@ -404,6 +404,145 @@ describe("approval controls after destroy", () => {
 		// Stores should also throw after destroy
 		expect(() => reviewDef.pending.get()).toThrow("after pipeline was destroyed");
 		expect(() => reviewDef.isOpen.get()).toThrow("after pipeline was destroyed");
+	});
+
+	it("reports completed when all tasks are skipped", () => {
+		// Simulates the circuit-breaker-all-open scenario: task() skip predicate
+		// fires, taskState transitions to "skipped", pipeline reports "completed".
+		const trigger = fromTrigger<string>();
+		const shouldSkip = true;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async (_signal, _values) => "result", {
+				skip: () => shouldSkip,
+			}),
+		});
+
+		// Before firing, pipeline should be idle
+		expect(wf.status.get()).toBe("idle");
+
+		const statuses: string[] = [];
+		subscribe(wf.status, (s) => statuses.push(s));
+
+		trigger.fire("go");
+
+		// task was skipped — pipeline should report "completed"
+		expect(wf.status.get()).toBe("completed");
+		expect(statuses).toContain("completed");
+
+		wf.destroy();
+	});
+
+	it("reports completed when some tasks skipped and some succeed", async () => {
+		const trigger = fromTrigger<string>();
+		const skipA = true;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			a: task(["trigger"], async (_signal, _values) => "a-result", {
+				skip: () => skipA,
+			}),
+			b: task(["trigger"], async (_signal, _values) => "b-result"),
+		});
+
+		expect(wf.status.get()).toBe("idle");
+		const statuses: string[] = [];
+		subscribe(wf.status, (s) => statuses.push(s));
+
+		trigger.fire("go");
+		// b is async — wait for it
+		await new Promise((r) => setTimeout(r, 10));
+
+		// a was skipped, b succeeded → pipeline completed
+		expect(wf.status.get()).toBe("completed");
+		expect(statuses).toContain("completed");
+		wf.destroy();
+	});
+
+	it("reports errored when some tasks skipped and some error", async () => {
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			a: task(["trigger"], async (_signal, _values) => "a-result", {
+				skip: () => true,
+			}),
+			b: task(
+				["trigger"],
+				async () => {
+					throw new Error("boom");
+				},
+				{ fallback: null },
+			),
+		});
+
+		expect(wf.status.get()).toBe("idle");
+		const statuses: string[] = [];
+		subscribe(wf.status, (s) => statuses.push(s));
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 10));
+
+		// a skipped, b errored → pipeline errored
+		expect(wf.status.get()).toBe("errored");
+		wf.destroy();
+	});
+
+	it("source() tags step with SOURCE_ROLE", async () => {
+		const { SOURCE_ROLE } = await import("../../orchestrate/pipeline");
+		const trigger = fromTrigger<string>();
+		const def = source(trigger);
+		expect((def as any)[SOURCE_ROLE]).toBe(true);
+		expect(def.deps).toEqual([]);
+	});
+
+	it("reset after skip returns to idle and re-trigger works", async () => {
+		const trigger = fromTrigger<string>();
+		let shouldSkip = true;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async (_signal, _values) => "result", {
+				skip: () => shouldSkip,
+			}),
+		});
+
+		// First run: skip
+		trigger.fire("go");
+		expect(wf.status.get()).toBe("completed");
+
+		// Reset
+		wf.reset();
+		expect(wf.status.get()).toBe("idle");
+
+		// Second run: don't skip
+		shouldSkip = false;
+		trigger.fire("go2");
+		await new Promise((r) => setTimeout(r, 10));
+		expect(wf.status.get()).toBe("completed");
+
+		wf.destroy();
+	});
+
+	it("task lifecycle hooks fire correctly", () => {
+		const trigger = fromTrigger<string>();
+		const hooks: string[] = [];
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async (_signal, _values) => "result", {
+				skip: () => true,
+				onSkip: () => hooks.push("skipped"),
+				onStart: () => hooks.push("started"),
+			}),
+		});
+
+		trigger.fire("go");
+		expect(hooks).toEqual(["skipped"]);
+		// onStart should NOT have fired since it was skipped
+		expect(hooks).not.toContain("started");
+		wf.destroy();
 	});
 
 	it("double destroy is idempotent", async () => {

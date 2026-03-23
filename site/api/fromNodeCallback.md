@@ -11,7 +11,10 @@ the sink can send END to cancel, which triggers cleanup.
 
 ```ts
 function fromNodeCallback<T = void>(
-	setup: (resolve: (value: T) => void, reject: (error: unknown) => void) => (() => void) | void,
+	setup: (
+		resolve: (value: T) => void,
+		reject: (error: unknown) => void,
+	) => (() => void) | undefined,
 ): CallbagSource
 ```
 
@@ -19,4 +22,7 @@ function fromNodeCallback<T = void>(
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `setup` | `(resolve: (value: T) =&gt; void, reject: (error: unknown) =&gt; void) =&gt; (() =&gt; void) | void` | `(resolve, reject) =&gt; cleanup?` |
+| `setup` | `(
+		resolve: (value: T) =&gt; void,
+		reject: (error: unknown) =&gt; void,
+	) =&gt; (() =&gt; void) | undefined` | `(resolve, reject) =&gt; cleanup?` |

@@ -31,7 +31,7 @@ import {
 	withRetry,
 	withTimeout,
 } from "callbag-recharge/orchestrate";
-import { circuitBreaker } from "callbag-recharge/utils";
+import { circuitBreaker } from "callbag-recharge/utils/circuitBreaker";
 
 // ---------------------------------------------------------------------------
 // Shared resources

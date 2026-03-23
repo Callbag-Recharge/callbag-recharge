@@ -8,10 +8,10 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     sub: subPipeline(["trigger"], (v) => ({
+//     sub: subPipeline(["trigger"], (signal, [v]) => ({
 //       steps: {
-//         fetch:   task([], async () => fetchData(v)),
-//         process: task(["fetch"], async (d) => transform(d)),
+//         fetch:   task([], async (signal) => fetchData(v)),
+//         process: task(["fetch"], async (signal, [d]) => transform(d)),
 //       },
 //       output: "process",
 //     })),
@@ -87,13 +87,13 @@ export interface SubPipelineStepDef<T = any> extends StepDef<T | null> {
  *
  * const wf = pipeline({
  *   trigger: step(fromTrigger<string>()),
- *   sub: subPipeline(["trigger"], (url) => ({
+ *   sub: subPipeline(["trigger"], (signal, [url]) => ({
  *     steps: {
- *       fetch:   task([], async () => {
+ *       fetch:   task([], async (signal) => {
  *         const res = await fetch(url);
  *         return res.json();
  *       }),
- *       process: task(["fetch"], async (data) => transform(data)),
+ *       process: task(["fetch"], async (signal, [data]) => transform(data)),
  *     },
  *     output: "process",
  *   })),

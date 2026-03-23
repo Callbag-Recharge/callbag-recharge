@@ -36,8 +36,8 @@ import { pipeline, step, task, onFailure, fromTrigger } from 'callbag-recharge/o
 
 const wf = pipeline({
     trigger: step(fromTrigger<string>()),
-    fetch:   task(["trigger"], async (v) => fetchData(v), { retry: 3 }),
-    dlq:     onFailure("fetch", async (error) => {
+    fetch:   task(["trigger"], async (signal, [v]) => fetchData(v), { retry: 3 }),
+    dlq:     onFailure("fetch", async (signal, error) => {
         await logToDeadLetterQueue({ error, timestamp: Date.now() });
         return { handled: true };
       }),

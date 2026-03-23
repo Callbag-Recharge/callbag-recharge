@@ -7,8 +7,8 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     ready:   sensor("trigger", async (v) => checkReady(v), { interval: 3000 }),
-//     process: task(["ready"], async (v) => handle(v)),
+//     ready:   sensor("trigger", async (signal, v) => checkReady(v), { interval: 3000 }),
+//     process: task(["ready"], async (signal, [v]) => handle(v)),
 //   });
 // ---------------------------------------------------------------------------
 
@@ -83,11 +83,11 @@ export interface SensorStepDef<T = any> extends StepDef<T | null> {
  * // Poll every 3s until file is ready, then process
  * const wf = pipeline({
  *   trigger: step(fromTrigger<string>()),
- *   ready:   sensor("trigger", async (path) => {
+ *   ready:   sensor("trigger", async (signal, path) => {
  *     const res = await fetch(`/api/status/${path}`);
  *     return (await res.json()).ready;
  *   }, { interval: 3000, timeout: 60000 }),
- *   process: task(["ready"], async (path) => handle(path)),
+ *   process: task(["ready"], async (signal, [path]) => handle(path)),
  * });
  * ```
  *

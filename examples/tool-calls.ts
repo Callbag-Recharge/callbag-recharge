@@ -3,11 +3,11 @@
  *
  * Demonstrates: Reactive state machine for the LLM tool call lifecycle:
  * LLM requests tool → tool executes → result feeds back → LLM continues.
- * Uses stateMachine util + producer for a clean, observable flow.
+ * Uses stateMachine util + derived for a clean, observable flow.
  */
 
 import { derived, effect } from "callbag-recharge";
-import { stateMachine } from "callbag-recharge/utils";
+import { stateMachine } from "callbag-recharge/utils/stateMachine";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -22,79 +22,74 @@ interface ToolResult {
 	durationMs: number;
 }
 
-type ToolState =
-	| { status: "idle" }
-	| { status: "pending"; call: ToolCall }
-	| { status: "executing"; call: ToolCall; startedAt: number }
-	| { status: "completed"; call: ToolCall; result: ToolResult }
-	| { status: "error"; call: ToolCall; error: string };
+interface ToolContext {
+	call?: ToolCall;
+	result?: ToolResult;
+	error?: string;
+	startedAt?: number;
+}
 
-type ToolEvent =
-	| { type: "REQUEST"; call: ToolCall }
-	| { type: "EXECUTE" }
-	| { type: "COMPLETE"; result: ToolResult }
-	| { type: "ERROR"; error: string }
-	| { type: "RESET" };
+type ToolState = "idle" | "pending" | "executing" | "completed" | "error";
+type ToolEvent = "REQUEST" | "EXECUTE" | "COMPLETE" | "ERROR" | "RESET";
 
 // ── State machine ────────────────────────────────────────────
 
-const toolFSM = stateMachine<ToolState, ToolEvent>(
-	{ status: "idle" },
+const toolFSM = stateMachine<ToolContext, ToolState, ToolEvent>(
+	{},
 	{
-		idle: {
-			REQUEST: (_state, event) => ({
-				status: "pending",
-				call: event.call,
-			}),
-		},
-		pending: {
-			EXECUTE: (s) => ({
-				status: "executing",
-				call: s.call,
-				startedAt: Date.now(),
-			}),
-			RESET: () => ({ status: "idle" }),
-		},
-		executing: {
-			COMPLETE: (s, event) => ({
-				status: "completed",
-				call: s.call,
-				result: event.result,
-			}),
-			ERROR: (s, event) => ({
-				status: "error",
-				call: s.call,
-				error: event.error,
-			}),
-		},
-		completed: {
-			REQUEST: (_state, event) => ({
-				status: "pending",
-				call: event.call,
-			}),
-			RESET: () => ({ status: "idle" }),
-		},
-		error: {
-			REQUEST: (_state, event) => ({
-				status: "pending",
-				call: event.call,
-			}),
-			RESET: () => ({ status: "idle" }),
+		initial: "idle",
+		states: {
+			idle: {
+				on: { REQUEST: "pending" },
+			},
+			pending: {
+				on: {
+					EXECUTE: {
+						to: "executing",
+						action: (ctx) => ({ ...ctx, startedAt: Date.now() }),
+					},
+					RESET: "idle",
+				},
+			},
+			executing: {
+				on: {
+					COMPLETE: "completed",
+					ERROR: "error",
+				},
+			},
+			completed: {
+				on: {
+					REQUEST: "pending",
+					RESET: {
+						to: "idle",
+						action: () => ({}),
+					},
+				},
+			},
+			error: {
+				on: {
+					REQUEST: "pending",
+					RESET: {
+						to: "idle",
+						action: () => ({}),
+					},
+				},
+			},
 		},
 	},
 );
 
 // ── Derived views ────────────────────────────────────────────
 
-const _isExecuting = derived([toolFSM.store], () => toolFSM.store.get().status === "executing", {
+const _isExecuting = derived([toolFSM.current], () => toolFSM.current.get() === "executing", {
 	name: "isExecuting",
 });
 
 const lastResult = derived(
-	[toolFSM.store],
+	[toolFSM.context],
 	() => {
-		const s = toolFSM.store.get();
-		return s.status === "completed" ? s.result : null;
+		const ctx = toolFSM.context.get();
+		return ctx.result ?? null;
 	},
 	{ name: "lastResult" },
 );
@@ -115,28 +110,30 @@ const tools: Record<string, (args: Record<string, unknown>) => Promise<unknown>>
 // ── Execute tool calls ───────────────────────────────────────
 
 async function handleToolCall(call: ToolCall) {
-	toolFSM.send({ type: "REQUEST", call });
+	toolFSM.send("REQUEST", { call });
 	console.log(`[PENDING] Tool call: ${call.name}(${JSON.stringify(call.args)})`);
 
-	toolFSM.send({ type: "EXECUTE" });
+	toolFSM.send("EXECUTE");
 	console.log(`[EXECUTING] ${call.name}...`);
 
 	const handler = tools[call.name];
 	if (!handler) {
-		toolFSM.send({ type: "ERROR", error: `Unknown tool: ${call.name}` });
+		toolFSM.send("ERROR", { error: `Unknown tool: ${call.name}` });
 		return;
 	}
 
 	try {
 		const startMs = Date.now();
 		const result = await handler(call.args);
-		toolFSM.send({
-			type: "COMPLETE",
-			result: { name: call.name, result, durationMs: Date.now() - startMs },
-		});
+		const toolResult: ToolResult = {
+			name: call.name,
+			result,
+			durationMs: Date.now() - startMs,
+		};
+		toolFSM.send("COMPLETE", { result: toolResult });
 		console.log(`[COMPLETED] ${call.name} →`, result);
 	} catch (e) {
-		toolFSM.send({ type: "ERROR", error: String(e) });
+		toolFSM.send("ERROR", { error: String(e) });
 		console.log(`[ERROR] ${call.name}: ${e}`);
 	}
 }
@@ -156,7 +153,11 @@ await handleToolCall({ name: "get_weather", args: { location: "San Francisco" } 
 // LLM says: "Now search for restaurants"
 await handleToolCall({ name: "search_web", args: { query: "best restaurants SF" } });
 
-toolFSM.send({ type: "RESET" });
-console.log("\nFinal state:", toolFSM.store.get().status);
+toolFSM.send("RESET");
+console.log("\nFinal state:", toolFSM.current.get());
+
+// Show the FSM graph
+console.log("\n── State Machine Diagram ──");
+console.log(toolFSM.toMermaid());
 
 dispose();

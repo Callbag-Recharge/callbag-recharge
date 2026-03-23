@@ -36,7 +36,7 @@ callbag-recharge's `fromCron()` is a reactive source that emits on schedule. Com
 Make the pipeline survive restarts with `checkpoint()`:
 
 ```ts
-import { checkpoint, sqliteAdapter } from 'callbag-recharge/orchestrate'
+import { checkpoint, sqliteAdapter } from 'callbag-recharge/utils'
 
 const adapter = sqliteAdapter({ path: './pipeline.db' })
 

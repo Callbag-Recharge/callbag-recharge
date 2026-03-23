@@ -35,7 +35,7 @@ export type {
 export { fileLogAdapter, indexedDBLogAdapter, sqliteLogAdapter } from "./executionLogAdapters";
 export type { ForEachOpts, ForEachStepDef } from "./forEach";
 export { forEach } from "./forEach";
-export type { GatedStore, GateOptions } from "./gate";
+export type { GateController, GatedStore, GateOptions } from "./gate";
 export { gate } from "./gate";
 export type {
 	AppendStrategy,
@@ -57,7 +57,7 @@ export type {
 	StepDef,
 	StepMeta,
 } from "./pipeline";
-export { pipeline, step } from "./pipeline";
+export { pipeline, source, step } from "./pipeline";
 export type {
 	ManagedPipeline,
 	PipelineRunnerConfig,

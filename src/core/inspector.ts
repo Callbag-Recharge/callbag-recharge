@@ -14,7 +14,7 @@
 // ---------------------------------------------------------------------------
 
 import type { NodeStatus, Signal } from "./protocol";
-import { DATA, DIRTY, END, RESOLVED, START, STATE } from "./protocol";
+import { DATA, DIRTY, END, isBatching, RESOLVED, START, STATE } from "./protocol";
 import type { Store } from "./types";
 
 export interface StoreInfo<T = unknown> {
@@ -39,8 +39,8 @@ export interface ObserveResult<T> {
 	values: T[];
 	/** All STATE (type 3) payloads received (DIRTY, RESOLVED, or unknown) */
 	signals: Signal[];
-	/** All events in protocol order: { type, data } */
-	events: Array<{ type: "data" | "signal" | "end"; data: unknown }>;
+	/** All events in protocol order: { type, data, inBatch } */
+	events: Array<{ type: "data" | "signal" | "end"; data: unknown; inBatch: boolean }>;
 	/** Whether END (type 2) has been received */
 	ended: boolean;
 	/** Error payload from END, if any */
@@ -66,6 +66,38 @@ export interface ObserveResult<T> {
 	dispose: () => void;
 	/** Disconnect and return a fresh observation on the same store */
 	reconnect: () => ObserveResult<T>;
+}
+
+export interface TimelineEntry<T = unknown> {
+	/** Timestamp (ms since epoch). */
+	timestamp: number;
+	/** Protocol event type. */
+	type: "data" | "signal" | "end";
+	/** Payload (value for data, signal for signal, error for end). */
+	data: T | Signal | unknown;
+	/** Whether this event occurred during batch(). */
+	inBatch: boolean;
+}
+
+export interface TimelineResult<T> {
+	/** All timeline entries, in chronological order. */
+	entries: TimelineEntry<T>[];
+	/** Disconnect the timeline observer. */
+	dispose: () => void;
+}
+
+export interface DerivedObserveEntry<T> {
+	/** The computed result. */
+	result: T;
+	/** Snapshot of all dep values at the time of computation. */
+	depValues: unknown[];
+	/** Timestamp (ms since epoch). */
+	timestamp: number;
+}
+
+export interface DerivedObserveResult<T> extends ObserveResult<T> {
+	/** Per-evaluation snapshots: result + dep values. */
+	evaluations: DerivedObserveEntry<T>[];
 }
 
 // Static-only class is intentional API for Inspector namespace
@@ -342,14 +374,15 @@ export class Inspector {
 				talkback = data;
 				return;
 			}
+			const batched = isBatching();
 			if (type === DATA) {
 				result.values.push(data);
-				result.events.push({ type: "data", data });
+				result.events.push({ type: "data", data, inBatch: batched });
 				_eventLog.push(data as T);
 				if (log) log(`[${name}] DATA:`, data);
 			} else if (type === STATE) {
 				result.signals.push(data);
-				result.events.push({ type: "signal", data });
+				result.events.push({ type: "signal", data, inBatch: batched });
 				_eventLog.push(Inspector._signalLabel(data));
 				if (data === DIRTY) result.dirtyCount++;
 				else if (data === RESOLVED) result.resolvedCount++;
@@ -358,7 +391,7 @@ export class Inspector {
 				result.ended = true;
 				result.endError = data;
 				_hasError = data !== undefined;
-				result.events.push({ type: "end", data });
+				result.events.push({ type: "end", data, inBatch: batched });
 				_eventLog.push(_hasError ? ["END", data] : "END");
 				if (log) log(`[${name}] END`, data !== undefined ? data : "");
 				talkback = null;
@@ -674,6 +707,96 @@ export class Inspector {
 		Inspector._traceLog = [];
 		Inspector._traceHead = 0;
 		Inspector._traceFull = false;
+	}
+
+	/**
+	 * Per-store event timeline with timestamps and batch context.
+	 * Each entry records what happened and when — ideal for debugging
+	 * ordering issues and batch drain behavior.
+	 *
+	 * ```ts
+	 * const tl = Inspector.timeline(myStore);
+	 * myState.set(5);
+	 * tl.entries // [{ timestamp, type: "signal", data: DIRTY, inBatch: false },
+	 * //            { timestamp, type: "data", data: 5, inBatch: false }]
+	 * tl.dispose();
+	 * ```
+	 */
+	static timeline<T>(store: Store<T>): TimelineResult<T> {
+		let talkback: ((type: number) => void) | null = null;
+		const entries: TimelineEntry<T>[] = [];
+
+		store.source(START, (type: number, data: any) => {
+			if (type === START) {
+				talkback = data;
+				return;
+			}
+			const entry: TimelineEntry<T> = {
+				timestamp: Date.now(),
+				type: type === DATA ? "data" : type === STATE ? "signal" : "end",
+				data,
+				inBatch: isBatching(),
+			};
+			entries.push(entry);
+			if (type === END) talkback = null;
+		});
+
+		return {
+			entries,
+			dispose: () => talkback?.(END),
+		};
+	}
+
+	/**
+	 * Observe a derived store with per-evaluation dep snapshots.
+	 * Temporarily wraps the derived's computation function to capture
+	 * dep values on each evaluation. Opt-in — removed on dispose.
+	 *
+	 * ```ts
+	 * const obs = Inspector.observeDerived(myDerived);
+	 * source.set(5);
+	 * obs.evaluations[0].depValues // [5] — snapshot of deps when derived recomputed
+	 * obs.evaluations[0].result    // computed result
+	 * obs.dispose();
+	 * ```
+	 */
+	static observeDerived<T>(store: Store<T>): DerivedObserveResult<T> {
+		const evaluations: DerivedObserveEntry<T>[] = [];
+		const impl = store as any;
+
+		// Wrap _fn to capture dep values + result on each evaluation
+		const originalFn = impl._fn;
+		if (typeof originalFn !== "function" || !Array.isArray(impl._deps)) {
+			// Not a derived — fall back to regular observe
+			const base = Inspector.observe<T>(store);
+			return { ...base, evaluations };
+		}
+
+		impl._fn = () => {
+			const depValues = (impl._deps as Store<unknown>[]).map((d: Store<unknown>) => d.get());
+			const result = originalFn();
+			evaluations.push({ result, depValues, timestamp: Date.now() });
+			return result;
+		};
+
+		const base = Inspector._observe<T>(store);
+
+		const originalDispose = base.dispose;
+		const result: DerivedObserveResult<T> = {
+			...base,
+			evaluations,
+			dispose: () => {
+				impl._fn = originalFn;
+				originalDispose();
+			},
+			reconnect: () => {
+				impl._fn = originalFn;
+				originalDispose();
+				return Inspector.observeDerived(store);
+			},
+		};
+
+		return result;
 	}
 
 	/** Reset all state (for testing) */

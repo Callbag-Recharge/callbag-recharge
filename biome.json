@@ -17,6 +17,19 @@
 			"!release.config.mjs"
 		]
 	},
+	"overrides": [
+		{
+			"includes": ["**/*.vue"],
+			"linter": {
+				"rules": {
+					"correctness": {
+						"noUnusedVariables": "off",
+						"noUnusedImports": "off"
+					}
+				}
+			}
+		}
+	],
 	"linter": {
 		"enabled": true,
 		"rules": {

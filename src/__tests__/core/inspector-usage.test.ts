@@ -42,10 +42,10 @@ describe("Example 1: observe() — protocol-level state inspection", () => {
 
 		// Protocol order: DIRTY, DATA, DIRTY, DATA
 		expect(obs.events).toEqual([
-			{ type: "signal", data: DIRTY },
-			{ type: "data", data: 1 },
-			{ type: "signal", data: DIRTY },
-			{ type: "data", data: 2 },
+			{ type: "signal", data: DIRTY, inBatch: false },
+			{ type: "data", data: 1, inBatch: false },
+			{ type: "signal", data: DIRTY, inBatch: false },
+			{ type: "data", data: 2, inBatch: false },
 		]);
 
 		// Name from Inspector registration
@@ -168,8 +168,8 @@ describe("Example 5: observe() — batch coalescing proof", () => {
 		// Single DIRTY (sent immediately), single DATA (deferred to batch end)
 		expect(obs.dirtyCount).toBe(1);
 		expect(obs.events).toEqual([
-			{ type: "signal", data: DIRTY },
-			{ type: "data", data: 3 },
+			{ type: "signal", data: DIRTY, inBatch: true },
+			{ type: "data", data: 3, inBatch: false },
 		]);
 
 		obs.dispose();

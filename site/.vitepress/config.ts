@@ -30,6 +30,12 @@ export default defineConfig({
 				"callbag-recharge/utils": resolve(root, "src/utils"),
 				"callbag-recharge/memory": resolve(root, "src/memory"),
 				"callbag-recharge/messaging": resolve(root, "src/messaging"),
+				"callbag-recharge/patterns/agentLoop": resolve(root, "src/patterns/agentLoop"),
+				"callbag-recharge/patterns/formField": resolve(root, "src/patterns/formField"),
+				"callbag-recharge/compat/vue": resolve(root, "src/compat/vue"),
+				"callbag-recharge/compat/jotai": resolve(root, "src/compat/jotai"),
+				"callbag-recharge/compat/zustand": resolve(root, "src/compat/zustand"),
+				"callbag-recharge/compat/signals": resolve(root, "src/compat/signals"),
 				"callbag-recharge": resolve(root, "src"),
 			},
 		},
@@ -82,7 +88,7 @@ export default defineConfig({
 			{ text: "Recipes", link: "/recipes/" },
 			{ text: "Comparisons", link: "/comparisons/" },
 			{ text: "Edge AI", link: "/edge-ai" },
-			{ text: "Demos", link: "/demos/airflow" },
+			{ text: "Demos", link: "/recipes/" },
 			{ text: "Architecture", link: "/architecture/" },
 		],
 
@@ -201,7 +207,20 @@ export default defineConfig({
 			},
 			{
 				text: "Demos",
-				items: [{ text: "Airflow in TypeScript", link: "/demos/airflow" }],
+				items: [
+					{ text: "Airflow in TypeScript", link: "/demos/airflow" },
+					{ text: "Form Builder", link: "/demos/form-builder" },
+					{ text: "Agent Loop", link: "/demos/agent-loop" },
+					{
+						text: "Real-time Dashboard",
+						link: "/demos/realtime-dashboard",
+					},
+					{ text: "State Machine", link: "/demos/state-machine" },
+					{
+						text: "Compat Comparison",
+						link: "/demos/compat-comparison",
+					},
+				],
 			},
 			{
 				text: "Architecture",

@@ -8,7 +8,7 @@
 
 import { derived, pipe, state } from "callbag-recharge";
 import { filter, scan, subscribe, switchMap } from "callbag-recharge/extra";
-import { fromAbortable } from "callbag-recharge/utils";
+import { fromAbortable } from "callbag-recharge/utils/cancellableStream";
 
 // ── State ────────────────────────────────────────────────────
 

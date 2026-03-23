@@ -12,7 +12,8 @@ import type { NodeV0 } from "../data/types";
 /** @internal Symbol key for pipeline auto-detection of task state. */
 export const TASK_STATE: unique symbol = Symbol.for("callbag-recharge:taskState");
 
-export type TaskStatus = "idle" | "running" | "success" | "error";
+/** Task execution status. "skipped" is a terminal state when a task's skip predicate returned true. */
+export type TaskStatus = "idle" | "running" | "success" | "error" | "skipped";
 
 export interface TaskMeta<T = unknown> {
 	status: TaskStatus;
@@ -52,6 +53,12 @@ export interface TaskState<T = unknown> extends NodeV0 {
 	 * or destroy(). Users can forward it to fetch(), etc. for cancellation.
 	 */
 	run(fn: (signal: AbortSignal) => T | Promise<T>): Promise<T>;
+
+	/**
+	 * Mark this task as skipped (e.g., circuit breaker open, guard predicate false).
+	 * Pipeline treats "skipped" as a terminal status — the task completed without running.
+	 */
+	markSkipped(): void;
 
 	/** Reset to idle state (clears result, error, timing, runCount). */
 	reset(): void;

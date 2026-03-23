@@ -86,8 +86,14 @@ export type { DelayStrategy, RetryMeta, RetryOptions } from "./retry";
 export { retry } from "./retry";
 // State machine
 export type {
+	D2Opts as StateMachineD2Opts,
+	MermaidOpts as StateMachineMermaidOpts,
 	StateMachineConfig,
 	StateMachineResult,
+	StateNode,
+	Transition,
+	TransitionDef,
+	TransitionEdge,
 } from "./stateMachine";
 export { stateMachine } from "./stateMachine";
 // Tiered storage
@@ -129,6 +135,9 @@ export type {
 	WithConnectionStatusStore,
 } from "./withConnectionStatus";
 export { withConnectionStatus } from "./withConnectionStatus";
+// With meta (reactive companion stores for protocol events)
+export type { MetaResult } from "./withMeta";
+export { withMeta } from "./withMeta";
 // With status (async metadata wrapper)
 export type { WithStatusOptions, WithStatusStatus, WithStatusStore } from "./withStatus";
 export { withStatus } from "./withStatus";

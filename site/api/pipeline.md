@@ -29,7 +29,7 @@ function pipeline<S extends Record<string, StepDef>>(
 |--------|-----------|-------------|
 | `steps` | `Record` | Access step stores by name. |
 | `status` | `Store\&lt;PipelineStatus\&gt;` | Pipeline status: idle → active → completed/errored. |
-| `reset()` | `() =&gt; void` | Reset all steps and tasks to idle for re-trigger. |
+| `reset(opts?)` | `(opts?: \{ resetExternalTasks?: boolean \}) =&gt; void` | Reset all steps and tasks to idle. External tasks reset by default; pass `{ resetExternalTasks: false }` to skip. |
 | `destroy()` | `() =&gt; void` | Dispose subscriptions and destroy auto-detected task states. |
 | `inner` | `PipelineInner` | Expert-level stream internals (streamStatus, stepMeta, order). |
 
@@ -40,8 +40,8 @@ import { pipeline, step, task, fromTrigger } from 'callbag-recharge/orchestrate'
 
 const wf = pipeline({
     trigger: step(fromTrigger<string>()),
-    fetch:   task(["trigger"], async (v) => fetchData(v), { retry: 3 }),
-    process: task(["fetch"], async (data) => transform(data)),
+    fetch:   task(["trigger"], async (signal, [v]) => fetchData(v), { retry: 3 }),
+    process: task(["fetch"], async (signal, [data]) => transform(data)),
   });
 
 wf.steps.trigger.fire("go");

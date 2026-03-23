@@ -235,6 +235,139 @@ describe("agentLoop", () => {
 		expect(history[0].context).toBe("second");
 	});
 
+	// ---------------------------------------------------------------------------
+	// Gate support
+	// ---------------------------------------------------------------------------
+	it("gate pauses at awaiting_approval after plan", async () => {
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => "do_something",
+			act: (_a, ctx) => `${ctx}+acted`,
+			gate: true,
+		});
+
+		agent.start("test");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+
+		// Action is pending
+		expect((agent as any).pending.get()).toEqual(["do_something"]);
+		expect(agent.lastAction.get()).toBe("do_something");
+	});
+
+	it("gate approve() resumes act phase", async () => {
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => "action1",
+			act: (action, ctx) => `${ctx}+${action}`,
+			gate: true,
+		});
+
+		agent.start("start");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+
+		(agent as any).approve();
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("completed"));
+
+		expect(agent.context.get()).toBe("start+action1");
+	});
+
+	it("gate modify() transforms action before act", async () => {
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => "original",
+			act: (action, ctx) => `${ctx}+${action}`,
+			gate: true,
+		});
+
+		agent.start("start");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+
+		(agent as any).modify((a: string) => `modified_${a}`);
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("completed"));
+
+		expect(agent.context.get()).toBe("start+modified_original");
+	});
+
+	it("gate reject() causes loop to re-observe and re-plan", async () => {
+		let planCount = 0;
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => {
+				planCount++;
+				return `action_${planCount}`;
+			},
+			act: (action, ctx) => `${ctx}+${action}`,
+			gate: true,
+		});
+
+		agent.start("start");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+		expect(planCount).toBe(1);
+
+		// Reject first action — loop re-plans on next iteration
+		(agent as any).reject();
+		// Wait for the re-plan to run (planCount increments before phase returns to awaiting_approval)
+		await vi.waitFor(() => expect(planCount).toBe(2));
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+
+		// Approve second action
+		(agent as any).approve();
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("completed"));
+
+		expect(agent.context.get()).toBe("start+action_2");
+	});
+
+	it("gate history includes awaiting_approval phase", async () => {
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => "action1",
+			act: (_a, ctx) => ctx,
+			gate: true,
+		});
+
+		agent.start("test");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+		(agent as any).approve();
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("completed"));
+
+		const phases = agent.history.get().map((h) => h.phase);
+		expect(phases).toEqual(["observe", "plan", "awaiting_approval", "act", "completed"]);
+	});
+
+	it("gate open() auto-approves future actions", async () => {
+		const agent = agentLoop<number, string>({
+			observe: (n) => n + 1,
+			plan: (n) => `action:${n}`,
+			act: (_a, n) => n,
+			shouldContinue: (_n, iter) => iter < 2,
+			gate: true,
+		});
+
+		// Open gate before starting — should auto-approve
+		(agent as any).open();
+		agent.start(0);
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("completed"));
+
+		expect(agent.iteration.get()).toBe(2);
+	});
+
+	it("stop() during awaiting_approval unblocks cleanly", async () => {
+		const agent = agentLoop<string, string>({
+			observe: (ctx) => ctx,
+			plan: () => "action1",
+			act: (_a, ctx) => ctx,
+			gate: true,
+		});
+
+		agent.start("test");
+		await vi.waitFor(() => expect(agent.phase.get()).toBe("awaiting_approval"));
+
+		agent.stop();
+		// Should complete, not hang
+		expect(agent.phase.get()).toBe("completed");
+		expect(agent.error.get()).toBeUndefined();
+	});
+
 	it("stop() during plan phase halts cleanly", async () => {
 		const agent = agentLoop<string, string>({
 			observe: (ctx) => ctx,

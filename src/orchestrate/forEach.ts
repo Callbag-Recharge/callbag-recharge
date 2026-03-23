@@ -8,7 +8,7 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string[]>()),
-//     results: forEach(["trigger"], async (item) => processItem(item)),
+//     results: forEach("trigger", async (signal, item) => processItem(item)),
 //   });
 // ---------------------------------------------------------------------------
 
@@ -76,7 +76,7 @@ export interface ForEachStepDef<R = any> extends StepDef<R[]> {
  *
  * const wf = pipeline({
  *   trigger: step(fromTrigger<string[]>()),
- *   results: forEach("trigger", async (url) => {
+ *   results: forEach("trigger", async (signal, url) => {
  *     const res = await fetch(url);
  *     return res.json();
  *   }, { concurrency: 5 }),

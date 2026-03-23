@@ -12,8 +12,8 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     fetch:   task(["trigger"], async (v) => fetchData(v), { retry: 3 }),
-//     join:    task(["a", "b"], async (a, b) => merge(a, b)),
+//     fetch:   task(["trigger"], async (signal, [v]) => fetchData(v), { retry: 3 }),
+//     join:    task(["a", "b"], async (signal, [a, b]) => merge(a, b)),
 //   });
 // ---------------------------------------------------------------------------
 
@@ -47,6 +47,14 @@ export interface TaskOpts<T> {
 	retry?: number | RetryOptions;
 	/** Timeout in milliseconds. */
 	timeout?: number;
+	/** Called when the task is skipped (skip predicate returned true). */
+	onSkip?: (values: any[]) => void;
+	/** Called when the task starts running. */
+	onStart?: (values: any[]) => void;
+	/** Called when the task completes successfully. */
+	onSuccess?: (result: T) => void;
+	/** Called when the task errors (after retries exhausted). */
+	onError?: (error: unknown) => void;
 }
 
 /** Extended StepDef that carries task metadata as flat companion stores. */
@@ -181,6 +189,9 @@ export function task<T>(
 
 				// Skip predicate
 				if (skipPred?.(values)) {
+					ts.restart(); // bump generation so any in-flight run is discarded
+					ts.markSkipped();
+					opts?.onSkip?.(values);
 					return producer<T | null>(({ emit, complete }) => {
 						emit(null);
 						complete();
@@ -192,6 +203,7 @@ export function task<T>(
 				// producer, but the old task.run() may still be in-flight. Reset ensures
 				// the new run() won't throw "Task is already running".
 				ts.restart();
+				opts?.onStart?.(values);
 
 				// Run the task with cancellation support
 				return producer<T | null>(({ emit, complete }) => {
@@ -234,11 +246,11 @@ export function task<T>(
 								}
 
 								const r = await maybePromise;
+								opts?.onSuccess?.(r);
 								safeEmit(r);
 								safeComplete();
 								return r;
 							});
-							// Result already emitted inside task.run body
 							void result;
 						} catch (e) {
 							if (stopped) return;
@@ -267,6 +279,7 @@ export function task<T>(
 
 					const handleError = (e: unknown) => {
 						if (stopped) return;
+						opts?.onError?.(e);
 						if (fallbackOpt !== undefined) {
 							const val =
 								typeof fallbackOpt === "function"
@@ -299,8 +312,9 @@ export function task<T>(
 				return (_dep, type, data) => {
 					if (type === STATE) {
 						if (data === RESET) {
-							ts.reset();
-							// Don't forward RESET downstream — operator already handled it
+							// restart() preserves runCount/result/lastRun so
+							// cumulative metrics survive pipeline re-triggers.
+							ts.restart();
 							return;
 						}
 						if (data === TEARDOWN) {

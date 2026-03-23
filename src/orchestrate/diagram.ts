@@ -8,8 +8,8 @@
 // Usage:
 //   const steps = {
 //     trigger: step(fromTrigger<string>()),
-//     fetch:   task(["trigger"], async (v) => fetchData(v)),
-//     process: task(["fetch"], async (data) => transform(data)),
+//     fetch:   task(["trigger"], async (signal, [v]) => fetchData(v)),
+//     process: task(["fetch"], async (signal, [data]) => transform(data)),
 //   };
 //   const wf = pipeline(steps);
 //   console.log(toMermaid(steps));
@@ -99,7 +99,7 @@ export interface MermaidOpts {
  *
  * const steps = {
  *   trigger: step(fromTrigger<string>()),
- *   fetch:   task(["trigger"], async (v) => fetchData(v)),
+ *   fetch:   task(["trigger"], async (signal, [v]) => fetchData(v)),
  * };
  * const wf = pipeline(steps);
  * console.log(toMermaid(steps));
@@ -216,7 +216,7 @@ export interface D2Opts {
  *
  * const steps = {
  *   trigger: step(fromTrigger<string>()),
- *   fetch:   task(["trigger"], async (v) => fetchData(v)),
+ *   fetch:   task(["trigger"], async (signal, [v]) => fetchData(v)),
  * };
  * console.log(toD2(steps));
  * // direction: down

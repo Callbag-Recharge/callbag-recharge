@@ -165,6 +165,14 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			}
 		},
 
+		markSkipped() {
+			if (destroyed) return;
+			batch(() => {
+				_status.set("skipped");
+				_error.set(undefined);
+			});
+		},
+
 		reset() {
 			if (destroyed) return;
 			if (abortController) {

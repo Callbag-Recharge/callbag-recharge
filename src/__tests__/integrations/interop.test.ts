@@ -406,8 +406,8 @@ describe("wrap() — source wrapping (tier 2)", () => {
 
 		raw.push(5);
 		expect(obs.events).toEqual([
-			{ type: "signal", data: DIRTY },
-			{ type: "data", data: 5 },
+			{ type: "signal", data: DIRTY, inBatch: false },
+			{ type: "data", data: 5, inBatch: false },
 		]);
 		obs.dispose();
 	});
@@ -489,8 +489,8 @@ describe("wrap() — operator wrapping (tier 1)", () => {
 		// skips DIRTY for single-dep subscribers in unbatched paths)
 		batch(() => s.set(5));
 		expect(obs.events).toEqual([
-			{ type: "signal", data: DIRTY },
-			{ type: "data", data: 10 },
+			{ type: "signal", data: DIRTY, inBatch: true },
+			{ type: "data", data: 10, inBatch: false },
 		]);
 		obs.dispose();
 	});

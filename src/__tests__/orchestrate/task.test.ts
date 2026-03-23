@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { derived } from "../../core/derived";
+import { Inspector } from "../../core/inspector";
 import { fromTrigger } from "../../extra/fromTrigger";
 import { subscribe } from "../../extra/subscribe";
-import { pipeline, step, task } from "../../orchestrate";
+import { pipeline, source, step, task } from "../../orchestrate";
 import type { PipelineStatus } from "../../orchestrate/pipeline";
 import { TASK_STATE } from "../../orchestrate/types";
 
@@ -451,6 +452,349 @@ describe("task — async generator guard", () => {
 		const meta = wf.steps.stream.get();
 		expect(meta).toBeNull(); // fallback null on error
 		expect(wf.status.get()).toBe("errored");
+
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// task() — reset preserves runCount (restart semantics)
+// ==========================================================================
+describe("task — reset preserves runCount", () => {
+	it("pipeline reset uses restart, keeping cumulative runCount", async () => {
+		const trigger = fromTrigger<string>();
+
+		const workDef = task(["trigger"], async (_signal, [_v]) => {
+			await new Promise((r) => setTimeout(r, 10));
+			return "done";
+		});
+		const ts = workDef[TASK_STATE];
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: workDef,
+		});
+
+		subscribe(wf.status, () => {});
+
+		// Run 1
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 50));
+		expect(wf.status.get()).toBe("completed");
+		expect(ts.runCount.get()).toBe(1);
+
+		// Reset + Run 2
+		wf.reset();
+		expect(wf.status.get()).toBe("idle");
+		// runCount preserved by restart() semantics
+		expect(ts.runCount.get()).toBe(1);
+
+		trigger.fire("go2");
+		await new Promise((r) => setTimeout(r, 50));
+		expect(wf.status.get()).toBe("completed");
+		expect(ts.runCount.get()).toBe(2);
+
+		// Reset + Run 3
+		wf.reset();
+		trigger.fire("go3");
+		await new Promise((r) => setTimeout(r, 50));
+		expect(ts.runCount.get()).toBe(3);
+
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// task() — Inspector.observe on pipeline steps
+// ==========================================================================
+describe("task — Inspector.observe", () => {
+	it("observe captures task output values", async () => {
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async (_signal, [v]: [string]) => {
+				return `result:${v}`;
+			}),
+		});
+
+		const obs = Inspector.observe(wf.steps.work);
+
+		trigger.fire("hello");
+		await new Promise((r) => setTimeout(r, 50));
+
+		// Should see null (undefined guard) and the real result
+		expect(obs.values).toContain("result:hello");
+
+		obs.dispose();
+		wf.destroy();
+	});
+
+	it("observe captures task status transitions", async () => {
+		const trigger = fromTrigger<string>();
+
+		const workDef = task(["trigger"], async (_signal) => {
+			await new Promise((r) => setTimeout(r, 20));
+			return "done";
+		});
+		const ts = workDef[TASK_STATE];
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: workDef,
+		});
+
+		const statusObs = Inspector.observe(ts.status);
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 80));
+
+		// Should see idle → running → success
+		expect(statusObs.values).toContain("running");
+		expect(statusObs.values).toContain("success");
+
+		statusObs.dispose();
+		wf.destroy();
+	});
+
+	it("observe captures pipeline status lifecycle", async () => {
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async (_signal) => {
+				await new Promise((r) => setTimeout(r, 10));
+				return "done";
+			}),
+		});
+
+		const statusObs = Inspector.observe(wf.status);
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(statusObs.values).toContain("active");
+		expect(statusObs.values).toContain("completed");
+
+		statusObs.dispose();
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// task() — diamond with error propagation (airflow-demo pattern)
+// ==========================================================================
+describe("task — diamond with error propagation", () => {
+	it("downstream receives null when upstream errors (no fallback)", async () => {
+		const trigger = fromTrigger<string>();
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			failing: task(["trigger"], async () => {
+				throw new Error("upstream fail");
+			}),
+			downstream: task(["failing"], async (_signal, [v]) => `got:${v}`, {
+				skip: ([v]) => v === null,
+			}),
+		});
+
+		const downstreamDef = wf as any;
+		const statusObs = Inspector.observe(wf.status);
+
+		subscribe(wf.steps.downstream, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 80));
+
+		// Pipeline should be errored (failing task errored)
+		expect(wf.status.get()).toBe("errored");
+
+		statusObs.dispose();
+		wf.destroy();
+	});
+
+	it("partial failure in diamond: one branch fails, aggregate still runs", async () => {
+		const trigger = fromTrigger<string>();
+		let aggCalls = 0;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			branchA: task(["trigger"], async () => {
+				throw new Error("A fails");
+			}),
+			branchB: task(["trigger"], async (_signal) => {
+				await new Promise((r) => setTimeout(r, 10));
+				return "B-ok";
+			}),
+			aggregate: task(
+				["branchA", "branchB"],
+				async (_signal, [a, b]) => {
+					aggCalls++;
+					return `merged:${a}+${b}`;
+				},
+				{
+					skip: ([a, b]) => a === null && b === null,
+				},
+			),
+		});
+
+		subscribe(wf.steps.aggregate, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 100));
+
+		// Aggregate should have run (only A failed, B succeeded)
+		expect(aggCalls).toBeGreaterThanOrEqual(1);
+
+		wf.destroy();
+	});
+
+	it("all branches fail: aggregate skipped via predicate", async () => {
+		const trigger = fromTrigger<string>();
+		let aggCalls = 0;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			branchA: task(["trigger"], async () => {
+				throw new Error("A fails");
+			}),
+			branchB: task(["trigger"], async () => {
+				throw new Error("B fails");
+			}),
+			aggregate: task(
+				["branchA", "branchB"],
+				async (_signal, [a, b]) => {
+					aggCalls++;
+					return `${a}+${b}`;
+				},
+				{ skip: ([a, b]) => a === null && b === null },
+			),
+		});
+
+		subscribe(wf.steps.aggregate, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 80));
+
+		// Aggregate should not have run (both null → skipped)
+		// Note: combine fires when each dep emits null, the first time
+		// one dep is still undefined (guard), second time both are null (skip)
+		expect(aggCalls).toBe(0);
+
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// task() — full airflow-demo pattern: re-trigger lifecycle
+// ==========================================================================
+describe("task — airflow-demo re-trigger pattern", () => {
+	it("full pipeline lifecycle: trigger → run → complete → re-trigger", async () => {
+		const triggerSrc = fromTrigger<string>();
+		let runCounter = 0;
+
+		const wf = pipeline({
+			trigger: source(triggerSrc),
+			cron: task(["trigger"], async (_signal) => {
+				return "triggered";
+			}),
+			fetchA: task(["cron"], async (_signal) => {
+				await new Promise((r) => setTimeout(r, 20));
+				return "A";
+			}),
+			fetchB: task(["cron"], async (_signal) => {
+				await new Promise((r) => setTimeout(r, 30));
+				return "B";
+			}),
+			merge: task(
+				["fetchA", "fetchB"],
+				async (_signal, [a, b]) => {
+					runCounter++;
+					return `${a}+${b}`;
+				},
+				{ skip: ([a, b]) => a === null && b === null },
+			),
+		});
+
+		const statuses: PipelineStatus[] = [];
+		const unsub = subscribe(wf.status, (s) => statuses.push(s));
+
+		// Run 1
+		triggerSrc.fire("go");
+		await new Promise((r) => setTimeout(r, 150));
+		expect(wf.status.get()).toBe("completed");
+
+		// Reset + Run 2 — reset cascades RESET to source which re-emits initial
+		// value, causing a transient ripple. Wait for it to settle before re-triggering.
+		wf.reset();
+		await new Promise((r) => setTimeout(r, 100));
+
+		triggerSrc.fire("go2");
+		await new Promise((r) => setTimeout(r, 200));
+		expect(wf.status.get()).toBe("completed");
+
+		// merge ran at least once per pipeline execution
+		expect(runCounter).toBeGreaterThanOrEqual(2);
+
+		unsub.unsubscribe();
+		wf.destroy();
+	});
+
+	it("task lifecycle hooks fire in correct order", async () => {
+		const trigger = fromTrigger<string>();
+		const hooks: string[] = [];
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async (_signal) => {
+					await new Promise((r) => setTimeout(r, 10));
+					return "done";
+				},
+				{
+					onStart: () => hooks.push("start"),
+					onSuccess: () => hooks.push("success"),
+					onError: () => hooks.push("error"),
+				},
+			),
+		});
+
+		subscribe(wf.status, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 150));
+
+		expect(hooks).toEqual(["start", "success"]);
+
+		wf.destroy();
+	});
+
+	it("task onError fires on failure", async () => {
+		const trigger = fromTrigger<string>();
+		const hooks: string[] = [];
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async () => {
+					throw new Error("fail");
+				},
+				{
+					onStart: () => hooks.push("start"),
+					onSuccess: () => hooks.push("success"),
+					onError: () => hooks.push("error"),
+				},
+			),
+		});
+
+		subscribe(wf.status, () => {});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 50));
+
+		expect(hooks).toEqual(["start", "error"]);
 
 		wf.destroy();
 	});

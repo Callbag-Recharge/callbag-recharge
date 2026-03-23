@@ -422,7 +422,33 @@ No probe, no double-load, no `instanceof Promise` branching at the API level.
 
 These are not yet implemented but represent concrete opportunities for improvement.
 
-### 1. Compile-time Inspector removal
+### 1. Atomic batch drain
+
+**Status:** Not implemented. **Impact:** Medium (correctness). **Priority:** Medium — only affects orchestration code that sends RESET inside `batch()`.
+
+During `batch()` drain, `batchDepth === 0` and `isBatching()` returns false. Any `set()` triggered by a drain callback fires synchronously (DIRTY + DATA immediately) rather than being deferred. This can cause derived stores to evaluate mid-drain with partially-settled state.
+
+**Scenario:** `pipeline.reset()` previously wrapped its RESET signals in `batch()`. RESET causes producers to re-emit initial values (deferred). During drain, those re-emissions trigger subscribe callbacks that call `meta.set()` — which fires synchronously since `batchDepth === 0`. This caused the status derived to evaluate with intermediate state.
+
+**Current workaround:** Pipeline now derives status from `taskState.status` (not stream-level meta counts), so RESET re-emissions don't affect status. The batch drain issue is bypassed, not fixed.
+
+**Proposed fix:** Increment `batchDepth` during drain so that emissions triggered by drain callbacks are deferred to the same drain pass:
+
+```ts
+// In batch() finally block:
+draining = true;
+batchDepth++;  // ← keep batching during drain
+for (let i = 0; i < deferredEmissions.length; i++) {
+    deferredEmissions[i]();
+}
+batchDepth--;
+deferredEmissions.length = 0;
+draining = false;
+```
+
+This would make drain fully atomic — all side-effect emissions are appended to `deferredEmissions` and processed in the same loop. Requires thorough testing since it changes fundamental batch drain semantics.
+
+### 2. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
@@ -517,6 +543,7 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Shared timer runtime (`createTicker`) | Built-in | Deduplicated timer lifecycle code; lower maintenance risk | Timer utils |
 | `keyedAsync` (concurrent async dedup) | Built-in (utils) | Coalesces concurrent async calls per key | General-purpose async call dedup |
 | `cascadingCache` (singleton reactive cache) | Built-in (utils) | N-tier cascading, singleton state stores, natural dedup, no sync/async branching | tieredStorage, multi-tier caches |
+| Atomic batch drain | Potential (medium) | Correctness for RESET-inside-batch | Orchestration code |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
 
 | ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |

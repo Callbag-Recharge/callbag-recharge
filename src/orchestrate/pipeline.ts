@@ -7,8 +7,8 @@
 // Usage:
 //   const wf = pipeline({
 //     trigger: step(fromTrigger<string>()),
-//     fetch:   task(["trigger"], async (v) => fetchData(v)),
-//     process: task(["fetch"], async (data) => transform(data)),
+//     fetch:   task(["trigger"], async (signal, [v]) => fetchData(v)),
+//     process: task(["fetch"], async (signal, [data]) => transform(data)),
 //   });
 //   wf.steps.trigger.fire("hello");
 //   wf.status.get(); // "idle" → "active" → "completed"
@@ -64,7 +64,7 @@ export interface PipelineResult<S extends Record<string, StepDef>> {
 	/** Overall pipeline status: idle → active → completed/errored. Derived from task() steps automatically. */
 	status: Store<PipelineStatus>;
 	/** Reset all steps and tasks to idle. Call before re-triggering. */
-	reset(): void;
+	reset(opts?: { resetExternalTasks?: boolean }): void;
 	/** Dispose all internal subscriptions. */
 	destroy(): void;
 	/** Expert-level stream internals. Most users don't need this. */
@@ -74,29 +74,14 @@ export interface PipelineResult<S extends Record<string, StepDef>> {
 const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
 
 /**
- * **Advanced / expert-only.** Creates a raw step definition for `pipeline()` using reactive stores.
+ * @internal
  *
- * Most users should use `task()` instead, which handles diamond joins, async lifecycle,
- * and status tracking automatically. Use `step()` only when you need full reactive control
- * (e.g., wrapping existing stores, custom operators, or source steps like `fromTrigger`).
+ * Low-level step definition for `pipeline()`. Most users should use
+ * `source()` for event sources and `task()` for work steps instead.
  *
- * @param factory - A store, or a function that receives dependency stores and returns a store.
- * @param deps - Names of steps this step depends on (default: []).
- * @param opts - Optional configuration.
- *
- * @returns `StepDef<T>` — step definition for pipeline().
- *
- * @example
- * ```ts
- * import { step, task, fromTrigger, pipeline } from 'callbag-recharge/orchestrate';
- *
- * const wf = pipeline({
- *   // step() for source steps (fromTrigger, fromCron, etc.)
- *   trigger: step(fromTrigger<string>()),
- *   // task() for everything else — handles joins, async, status automatically
- *   fetch: task(["trigger"], async (v) => fetchData(v)),
- * });
- * ```
+ * `step()` is internal plumbing — it creates a raw reactive step without
+ * lifecycle tracking, skip detection, retry, or timeout. Using it for work
+ * steps bypasses pipeline's automatic status management.
  *
  * @category orchestrate
  */
@@ -135,6 +120,39 @@ export function step<T>(
 	};
 }
 
+/** @internal Symbol key for explicit source role tagging. */
+export const SOURCE_ROLE: unique symbol = Symbol.for("callbag-recharge:sourceRole");
+
+/**
+ * Declares an event source step for `pipeline()`. Sources are long-lived emitters
+ * (triggers, cron, WebSocket, etc.) that never block pipeline completion.
+ *
+ * Use `source()` for entry points and `task()` for work steps. Together they
+ * cover all pipeline node types — `step()` is internal plumbing.
+ *
+ * @param store - A reactive store (e.g., `fromTrigger()`, `fromCron()`, `interval()`).
+ * @param opts - Optional configuration.
+ *
+ * @returns `StepDef<T>` — step definition tagged as a source for pipeline().
+ *
+ * @example
+ * ```ts
+ * import { source, task, fromTrigger, pipeline } from 'callbag-recharge/orchestrate';
+ *
+ * const wf = pipeline({
+ *   trigger: source(fromTrigger<string>()),
+ *   fetch:   task(["trigger"], async (signal, [v]) => fetchData(v)),
+ * });
+ * ```
+ *
+ * @category orchestrate
+ */
+export function source<T>(store: Store<T>, opts?: { name?: string }): StepDef<T> {
+	const def = step(store, opts);
+	(def as any)[SOURCE_ROLE] = true;
+	return def;
+}
+
 /**
  * Declarative workflow builder. Wire steps into a DAG with automatic status tracking.
  *
@@ -148,7 +166,7 @@ export function step<T>(
  *
  * @returnsTable steps | Record | Access step stores by name.
  * status | Store\<PipelineStatus\> | Pipeline status: idle → active → completed/errored.
- * reset() | () => void | Reset all steps and tasks to idle for re-trigger.
+ * reset(opts?) | (opts?: \{ resetExternalTasks?: boolean \}) => void | Reset all steps and tasks to idle. External tasks reset by default; pass `{ resetExternalTasks: false }` to skip.
  * destroy() | () => void | Dispose subscriptions and destroy auto-detected task states.
  * inner | PipelineInner | Expert-level stream internals (streamStatus, stepMeta, order).
  *
@@ -165,8 +183,8 @@ export function step<T>(
  *
  * const wf = pipeline({
  *   trigger: step(fromTrigger<string>()),
- *   fetch:   task(["trigger"], async (v) => fetchData(v), { retry: 3 }),
- *   process: task(["fetch"], async (data) => transform(data)),
+ *   fetch:   task(["trigger"], async (signal, [v]) => fetchData(v), { retry: 3 }),
+ *   process: task(["fetch"], async (signal, [data]) => transform(data)),
  * });
  *
  * wf.steps.trigger.fire("go");
@@ -315,12 +333,20 @@ export function pipeline<S extends Record<string, StepDef>>(
 	}
 
 	// --- Stream status derived from all step metas (callbag lifecycle) ---
-	// Source steps (no deps) are long-lived event sources — they don't complete.
+	// Source steps are long-lived event sources — they don't complete.
 	// When a pipeline has downstream work steps, source steps are non-blocking
 	// for completion (active or idle source steps are treated as "done").
+	// Explicit source() tag takes precedence; falls back to deps.length === 0 for step() compat.
 	const allMetas = order.map((n) => metaMap.get(n)!);
 	const sourceStepIndices = new Set(
-		order.map((n, i) => (steps[n].deps.length === 0 ? i : -1)).filter((i) => i >= 0),
+		order
+			.map((n, i) =>
+				(steps[n] as any)[SOURCE_ROLE] ||
+				(steps[n].deps.length === 0 && !(steps[n] as any)[TASK_STATE])
+					? i
+					: -1,
+			)
+			.filter((i) => i >= 0),
 	);
 	const hasWorkSteps = sourceStepIndices.size < allMetas.length;
 	const streamStatus = derived(allMetas, () => {
@@ -363,39 +389,43 @@ export function pipeline<S extends Record<string, StepDef>>(
 		const def = steps[name] as any;
 		if (def[TASK_STATE]) autoDetectedTasks.push(def[TASK_STATE]);
 	}
+	const externalTasks: TaskState<any>[] = [];
 	if (opts?.tasks) {
 		for (const ts of Object.values(opts.tasks)) {
-			autoDetectedTasks.push(ts);
+			externalTasks.push(ts);
 		}
 	}
-	// Deduplicate
-	const dedupedTasks = [...new Set(autoDetectedTasks)];
+	// Deduplicate (auto + external merged)
+	const dedupedTasks = [...new Set([...autoDetectedTasks, ...externalTasks])];
 
 	// Primary status: if tasks exist, derive from taskState. Otherwise fall back to stream status.
 	let status: Store<PipelineStatus>;
 	if (dedupedTasks.length > 0) {
-		// Subscribe to status companion stores for task metadata changes.
 		const taskStatusStores = dedupedTasks.map((ts) => ts.status);
-		status = derived(taskStatusStores, () => {
-			let anyRunning = false;
-			let anyError = false;
-			let allSuccess = true;
-			let allIdle = true;
+		status = derived(
+			taskStatusStores,
+			() => {
+				let anyRunning = false;
+				let anyError = false;
+				let allDone = true;
+				let allIdle = true;
 
-			for (const statusStore of taskStatusStores) {
-				const s = statusStore.get();
-				if (s === "running") anyRunning = true;
-				if (s === "error") anyError = true;
-				if (s !== "success") allSuccess = false;
-				if (s !== "idle") allIdle = false;
-			}
+				for (const statusStore of taskStatusStores) {
+					const s = statusStore.get();
+					if (s === "running") anyRunning = true;
+					if (s === "error") anyError = true;
+					if (s !== "success" && s !== "skipped") allDone = false;
+					if (s !== "idle" && s !== "skipped") allIdle = false;
+				}
 
-			if (anyRunning) return "active" as PipelineStatus;
-			if (anyError) return "errored" as PipelineStatus;
-			if (allSuccess) return "completed" as PipelineStatus;
-			if (allIdle) return "idle" as PipelineStatus;
-			return "active" as PipelineStatus;
-		});
+				if (anyRunning) return "active" as PipelineStatus;
+				if (anyError) return "errored" as PipelineStatus;
+				if (allDone) return "completed" as PipelineStatus;
+				if (allIdle) return "idle" as PipelineStatus;
+				return "active" as PipelineStatus;
+			},
+			{ equals: Object.is },
+		);
 		const statusUnsub = subscribe(status, () => {});
 		unsubs.push(statusUnsub);
 		Inspector.register(status, { kind: "pipeline-status", name: `${baseName}:status` });
@@ -425,8 +455,9 @@ export function pipeline<S extends Record<string, StepDef>>(
 	return {
 		steps: stepsResult,
 		status,
-		reset() {
+		reset(resetOpts?: { resetExternalTasks?: boolean }) {
 			if (_destroyed) return;
+			// Reset step metas (stream-level tracking in inner)
 			for (const meta of allMetas) {
 				(meta as any).set({ ...IDLE_STEP_META });
 			}
@@ -437,6 +468,12 @@ export function pipeline<S extends Record<string, StepDef>>(
 			// (task() intercepts RESET and calls ts.reset(), etc.)
 			for (const sub of stepSubs) {
 				sub.signal(RESET);
+			}
+			// Reset externally-provided tasks (not wired to stepSubs, so RESET won't reach them).
+			if (resetOpts?.resetExternalTasks !== false) {
+				for (const ts of externalTasks) {
+					ts.reset();
+				}
 			}
 		},
 		destroy() {
