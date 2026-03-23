@@ -6,7 +6,7 @@ import "@vue-flow/core/dist/theme-default.css";
 import { edges, nodes, runCount, running, stop, trigger } from "@examples/airflow-demo";
 import pipelineRaw from "@examples/airflow-demo.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
-import { computed, onUnmounted, ref, watchEffect } from "vue";
+import { computed, nextTick, onUnmounted, ref, watch, watchEffect } from "vue";
 
 // Extract the display region between #region display and #endregion display
 const REGION_START = "// #region display";
@@ -244,10 +244,20 @@ codeLines.forEach((line: string, i: number) => {
 	}
 });
 
+const codeBodyRef = ref<HTMLElement | null>(null);
+
 function isLineHighlighted(lineIdx: number): boolean {
 	if (!hoveredNode.value) return false;
 	return highlightMap[hoveredNode.value]?.includes(lineIdx) ?? false;
 }
+
+watch(hoveredNode, () => {
+	if (!hoveredNode.value || !codeBodyRef.value) return;
+	nextTick(() => {
+		const el = codeBodyRef.value?.querySelector(".code-line.highlighted");
+		if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	});
+});
 
 const activeNodeId = computed(() => {
 	for (const n of nodes) {
@@ -406,7 +416,7 @@ defineExpose({
 					<span class="code-filename">airflow-demo.ts</span>
 					<span class="code-badge">{{ codeLines.length }} lines</span>
 				</div>
-				<div class="code-body">
+				<div class="code-body" ref="codeBodyRef">
 					<pre><code><template
   v-for="(line, i) in codeLines"
   :key="i"

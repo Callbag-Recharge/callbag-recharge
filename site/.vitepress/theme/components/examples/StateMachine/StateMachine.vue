@@ -9,7 +9,7 @@ import {
 } from "@examples/state-machine";
 import smRaw from "@examples/state-machine.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
-import { ref } from "vue";
+import { nextTick, onMounted, ref, watch } from "vue";
 
 // Source code
 const REGION_START = "// #region display";
@@ -116,6 +116,28 @@ function resetMachine() {
 
 const showCode = ref(false);
 const showMermaid = ref(false);
+const codeBodyRef = ref<HTMLElement | null>(null);
+const mermaidRef = ref<HTMLElement | null>(null);
+const mermaidSvg = ref("");
+
+watch(hoveredState, () => {
+	if (!hoveredState.value || !codeBodyRef.value) return;
+	nextTick(() => {
+		const el = codeBodyRef.value?.querySelector(".code-line.highlighted");
+		if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	});
+});
+
+async function renderMermaid() {
+	const mermaid = (await import("mermaid")).default;
+	mermaid.initialize({ startOnLoad: false, theme: "dark" });
+	const { svg } = await mermaid.render("sm-mermaid", mermaidDiagram);
+	mermaidSvg.value = svg;
+}
+
+watch(showMermaid, (val) => {
+	if (val && !mermaidSvg.value) renderMermaid();
+});
 </script>
 
 <template>
@@ -207,15 +229,16 @@ const showMermaid = ref(false);
       <button @click="showMermaid = !showMermaid" class="btn-code">{{ showMermaid ? 'Hide Diagram' : 'Mermaid Diagram' }}</button>
       <button @click="showCode = !showCode" class="btn-code">{{ showCode ? 'Hide Source' : 'Show Source' }}</button>
     </div>
-    <div v-if="showMermaid" class="code-panel">
-      <pre><code>{{ mermaidDiagram }}</code></pre>
+    <div v-if="showMermaid" class="mermaid-panel">
+      <div v-if="mermaidSvg" v-html="mermaidSvg" class="mermaid-render" />
+      <div v-else class="mermaid-loading">Rendering diagram...</div>
     </div>
     <div v-if="showCode" class="code-panel">
       <div class="code-header">
         <span class="code-filename">state-machine.ts</span>
         <span class="code-badge">{{ codeLines.length }} lines</span>
       </div>
-      <div class="code-body">
+      <div class="code-body" ref="codeBodyRef">
         <pre><code><template
   v-for="(line, i) in codeLines"
   :key="i"
@@ -256,6 +279,10 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .hist-to { color: #58a6ff; }
 .code-toggle { margin-top: 12px; display: flex; gap: 6px; }
 .btn-code { background: transparent; color: #58a6ff; border: 1px solid #21262d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+.mermaid-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; padding: 16px; }
+.mermaid-render { display: flex; justify-content: center; }
+.mermaid-render :deep(svg) { max-width: 100%; height: auto; }
+.mermaid-loading { color: #7d8590; font-size: 13px; text-align: center; padding: 16px; }
 .code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
 .code-panel > pre { margin: 0; padding: 16px; }
 .code-panel > pre code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }

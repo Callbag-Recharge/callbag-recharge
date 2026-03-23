@@ -16,7 +16,7 @@ import {
 } from "@examples/agent-loop";
 import agentRaw from "@examples/agent-loop.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
-import { onUnmounted, ref } from "vue";
+import { nextTick, onUnmounted, ref, watch } from "vue";
 
 // Source code
 const REGION_START = "// #region display";
@@ -76,10 +76,20 @@ codeLines.forEach((line: string, i: number) => {
 	}
 });
 
+const codeBodyRef = ref<HTMLElement | null>(null);
+
 function isLineHighlighted(lineIdx: number): boolean {
 	if (!hoveredSection.value) return false;
 	return highlightMap[hoveredSection.value]?.includes(lineIdx) ?? false;
 }
+
+watch(hoveredSection, () => {
+	if (!hoveredSection.value || !codeBodyRef.value) return;
+	nextTick(() => {
+		const el = codeBodyRef.value?.querySelector(".code-line.highlighted");
+		if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	});
+});
 
 function phaseColor(p: string): string {
 	switch (p) {
@@ -195,7 +205,7 @@ onUnmounted(() => {
         <span class="code-filename">agent-loop.ts</span>
         <span class="code-badge">{{ codeLines.length }} lines</span>
       </div>
-      <div class="code-body">
+      <div class="code-body" ref="codeBodyRef">
         <pre><code><template
   v-for="(line, i) in codeLines"
   :key="i"

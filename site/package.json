@@ -12,6 +12,7 @@
 	},
 	"dependencies": {
 		"@vue-flow/background": "^1.3.2",
-		"@vue-flow/core": "^1.48.2"
+		"@vue-flow/core": "^1.48.2",
+		"mermaid": "^11.13.0"
 	}
 }

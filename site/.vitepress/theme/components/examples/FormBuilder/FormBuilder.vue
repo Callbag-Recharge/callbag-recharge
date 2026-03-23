@@ -12,7 +12,7 @@ import {
 } from "@examples/form-builder";
 import formRaw from "@examples/form-builder.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
-import { onUnmounted, ref } from "vue";
+import { nextTick, onUnmounted, ref, watch } from "vue";
 
 // ---------------------------------------------------------------------------
 // Source code panel
@@ -132,10 +132,20 @@ codeLines.forEach((line: string, i: number) => {
 	}
 });
 
+const codeBodyRef = ref<HTMLElement | null>(null);
+
 function isLineHighlighted(lineIdx: number): boolean {
 	if (!hoveredField.value) return false;
 	return highlightMap[hoveredField.value]?.includes(lineIdx) ?? false;
 }
+
+watch(hoveredField, () => {
+	if (!hoveredField.value || !codeBodyRef.value) return;
+	nextTick(() => {
+		const el = codeBodyRef.value?.querySelector(".code-line.highlighted");
+		if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	});
+});
 
 onUnmounted(() => {
 	disposeAll();
@@ -238,7 +248,7 @@ onUnmounted(() => {
         <span class="code-filename">form-builder.ts</span>
         <span class="code-badge">{{ codeLines.length }} lines</span>
       </div>
-      <div class="code-body">
+      <div class="code-body" ref="codeBodyRef">
         <pre><code><template
   v-for="(line, i) in codeLines"
   :key="i"

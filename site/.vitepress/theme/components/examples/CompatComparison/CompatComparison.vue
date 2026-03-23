@@ -19,7 +19,7 @@ import {
 } from "@examples/compat-comparison";
 import compatRaw from "@examples/compat-comparison.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
-import { onUnmounted, ref } from "vue";
+import { nextTick, onUnmounted, ref, watch } from "vue";
 
 // Source code extraction
 const REGION_START = "// #region display";
@@ -88,10 +88,20 @@ codeLines.forEach((line: string, i: number) => {
 	}
 });
 
+const codeBodyRef = ref<HTMLElement | null>(null);
+
 function isLineHighlighted(lineIdx: number): boolean {
 	if (!hoveredApi.value) return false;
 	return highlightMap[hoveredApi.value]?.includes(lineIdx) ?? false;
 }
+
+watch(hoveredApi, () => {
+	if (!hoveredApi.value || !codeBodyRef.value) return;
+	nextTick(() => {
+		const el = codeBodyRef.value?.querySelector(".code-line.highlighted");
+		if (el) el.scrollIntoView({ block: "nearest", behavior: "smooth" });
+	});
+});
 
 onUnmounted(() => {
 	zUnsub();
@@ -176,7 +186,7 @@ onUnmounted(() => {
         <span class="code-filename">compat-comparison.ts</span>
         <span class="code-badge">{{ codeLines.length }} lines</span>
       </div>
-      <div class="code-body">
+      <div class="code-body" ref="codeBodyRef">
         <pre><code><template
   v-for="(line, i) in codeLines"
   :key="i"
