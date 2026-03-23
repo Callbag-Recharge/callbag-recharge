@@ -5,7 +5,7 @@
  * onEnter/onExit hooks, toMermaid() diagram export.
  */
 
-import { derived } from "callbag-recharge";
+import { derived, effect } from "callbag-recharge";
 import { stateMachine } from "callbag-recharge/utils/stateMachine";
 
 // #region display
@@ -31,7 +31,7 @@ type OrderState =
 	| "delivered"
 	| "cancelled"
 	| "error";
-type OrderEvent = "SUBMIT" | "PAY" | "SHIP" | "DELIVER" | "CANCEL" | "RETRY" | "EDIT";
+type OrderEvent = "SUBMIT" | "PAY" | "SHIP" | "DELIVER" | "CANCEL" | "RETRY" | "EDIT" | "FAIL";
 
 // ── State machine ────────────────────────────────────────────
 
@@ -56,11 +56,23 @@ export const order = stateMachine<OrderContext, OrderState, OrderEvent>(
 				},
 			},
 			processing: {
-				onEnter: (ctx) => ({ ...ctx, attempts: ctx.attempts + 1 }),
+				onEnter: (ctx) => {
+					const updated = { ...ctx, attempts: ctx.attempts + 1 };
+					// 20% chance of payment failure
+					if (Math.random() < 0.2) {
+						return { ...updated, error: "Payment declined" };
+					}
+					return updated;
+				},
 				on: {
 					SHIP: {
 						to: "confirmed",
+						guard: (ctx) => !ctx.error,
 						action: (ctx) => ({ ...ctx, paidAt: Date.now() }),
+					},
+					FAIL: {
+						to: "error",
+						guard: (ctx) => !!ctx.error,
 					},
 					CANCEL: {
 						to: "cancelled",
@@ -103,6 +115,15 @@ export const order = stateMachine<OrderContext, OrderState, OrderEvent>(
 		},
 	},
 );
+
+// Auto-transition: if processing sets an error, fire FAIL reactively
+effect([order.current, order.context], () => {
+	const st = order.current.get();
+	const ctx = order.context.get();
+	if (st === "processing" && ctx.error) {
+		order.send("FAIL");
+	}
+});
 
 // ── Derived views ────────────────────────────────────────────
 

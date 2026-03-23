@@ -38,6 +38,7 @@ callbag-recharge is a reactive state management library where **every store is a
 - **Signal-first for orchestrate**: When implementing any orchestrate node (`task`, `forEach`, `sensor`, etc.), the `signal: AbortSignal` is always the first parameter to user callbacks. Values follow as array (for deps) or positional args (for fixed-arity callbacks).
 - **No raw `new Promise`** (architecture.md §1.16). Use callbag primitives (`fromTimer`, `producer`) and `firstValueFrom` (the ONE bridge in `raw/`) instead of hand-rolling Promises. `src/raw/` is the foundation layer — pure callbag protocol with zero core dependencies. Dependency hierarchy: `raw/` → `core/` → `extra/` → `utils/` → higher layers. `raw/` is importable from any folder.
 - **Push/pull via callbag, never poll** (architecture.md §1.17). Wait for conditions via reactive stores + `firstValueFrom`, not `setInterval` loops.
+- **No `queueMicrotask`/`setTimeout` for reactive coordination** (architecture.md §1.18). Use `effect` or `derived` to chain reactive updates — never `queueMicrotask`, `setTimeout`, or `Promise.resolve().then()`. Microtask scheduling breaks glitch-free guarantees. Timer usage only at true system boundaries (e.g. `fromTimer` for demo latency).
 
 ## Examples & docs (single source of truth)
 

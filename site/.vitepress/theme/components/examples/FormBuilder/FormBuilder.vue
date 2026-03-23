@@ -33,7 +33,13 @@ const minIndent = regionLines
 	}, Infinity);
 const SOURCE =
 	minIndent > 0 && minIndent < Infinity
-		? regionLines.map((l) => l.slice(minIndent).replace(/\t/g, "  ")).join("\n")
+		? regionLines
+				.map((l) => {
+					let s = l;
+					for (let t = 0; t < minIndent && s.startsWith("\t"); t++) s = s.slice(1);
+					return s.replace(/\t/g, "  ");
+				})
+				.join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
 const codeLines = SOURCE.split("\n");

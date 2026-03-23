@@ -15,10 +15,10 @@
 // NOTE: Deep imports to avoid pulling in node:fs from checkpoint adapters.
 
 import type { Store } from "callbag-recharge";
-import { state } from "callbag-recharge";
+import { effect, state } from "callbag-recharge";
 import type { ReactiveLog } from "callbag-recharge/data";
 import { reactiveLog } from "callbag-recharge/data";
-import { firstValueFrom, fromTimer, fromTrigger, subscribe } from "callbag-recharge/extra";
+import { firstValueFrom, fromTimer, fromTrigger } from "callbag-recharge/extra";
 import { pipeline, source } from "callbag-recharge/orchestrate/pipeline";
 import { task } from "callbag-recharge/orchestrate/task";
 import type { TaskState } from "callbag-recharge/orchestrate/types";
@@ -113,8 +113,6 @@ const n = {
 // ---------------------------------------------------------------------------
 export const running = state(false, { name: "pipeline:running" });
 export const runCount = state(0, { name: "pipeline:runCount" });
-
-let _pipelineStatusUnsub: (() => void) | null = null;
 
 // ---------------------------------------------------------------------------
 // Declarative pipeline wiring via pipeline() + task()
@@ -224,6 +222,14 @@ const wf = pipeline({
 });
 // #endregion display
 
+// Reactive completion: when pipeline finishes while running, update state
+effect([running, wf.status], () => {
+	if (running.get() && (wf.status.get() === "completed" || wf.status.get() === "errored")) {
+		running.set(false);
+		runCount.update((n) => n + 1);
+	}
+});
+
 // ---------------------------------------------------------------------------
 // Build PipelineNode array — combine metadata + TaskState from task() defs
 // ---------------------------------------------------------------------------
@@ -244,43 +250,20 @@ export const nodes: PipelineNode[] = [
 // ---------------------------------------------------------------------------
 // Trigger / stop / destroy
 // ---------------------------------------------------------------------------
-function finishRun() {
-	if (!_pipelineStatusUnsub) return;
-	running.set(false);
-	runCount.update((n) => n + 1);
-	const unsub = _pipelineStatusUnsub;
-	_pipelineStatusUnsub = null;
-	queueMicrotask(() => unsub());
-}
-
 export function trigger() {
 	if (running.get()) return;
-	running.set(true);
 	// RESET clears pipeline status and restarts task states (preserving runCount).
 	wf.reset();
-
-	// Subscribe BEFORE firing so no status transitions can be missed.
-	_pipelineStatusUnsub = subscribe(wf.status, (rs) => {
-		if (rs === "completed" || rs === "errored") finishRun();
-	});
-
 	triggerSrc.fire("go");
+	running.set(true);
 }
 
 // Lightweight stop for SPA unmount — does not destroy stores (safe for remount).
 export function stop() {
-	if (_pipelineStatusUnsub) {
-		_pipelineStatusUnsub();
-		_pipelineStatusUnsub = null;
-	}
 	running.set(false);
 }
 
 export function destroy() {
-	if (_pipelineStatusUnsub) {
-		_pipelineStatusUnsub();
-		_pipelineStatusUnsub = null;
-	}
 	wf.destroy();
 	for (const meta of Object.values(n)) {
 		meta.log.destroy();

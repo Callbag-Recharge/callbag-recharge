@@ -38,7 +38,13 @@ const minI = dLines
 	}, Infinity);
 const SOURCE =
 	minI > 0 && minI < Infinity
-		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
+		? dLines
+				.map((l) => {
+					let s = l;
+					for (let t = 0; t < minI && s.startsWith("\t"); t++) s = s.slice(1);
+					return s.replace(/\t/g, "  ");
+				})
+				.join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
 const codeLines = SOURCE.split("\n");

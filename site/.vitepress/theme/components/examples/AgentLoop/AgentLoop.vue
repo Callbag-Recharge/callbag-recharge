@@ -34,7 +34,13 @@ const minI = dLines
 	}, Infinity);
 const SOURCE =
 	minI > 0 && minI < Infinity
-		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
+		? dLines
+				.map((l) => {
+					let s = l;
+					for (let t = 0; t < minI && s.startsWith("\t"); t++) s = s.slice(1);
+					return s.replace(/\t/g, "  ");
+				})
+				.join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
 const codeLines = SOURCE.split("\n");
@@ -122,28 +128,32 @@ onUnmounted(() => {
         <button v-if="currentPhase !== 'idle' && currentPhase !== 'completed'" @click="stop()" class="btn-stop">Stop</button>
       </div>
 
-      <!-- Phase indicator -->
-      <div class="phase-bar"
-        @mouseenter="hoveredSection = currentPhase === 'awaiting_approval' ? 'gate' : currentPhase"
-        @mouseleave="hoveredSection = null">
-        <span class="phase-dot" :style="{ background: phaseColor(currentPhase) }"></span>
-        <span class="phase-label" :style="{ color: phaseColor(currentPhase) }">{{ currentPhase }}</span>
-        <span class="iter-label" v-if="iter > 0">Iteration {{ iter }}</span>
+      <!-- Phase flow -->
+      <div class="phase-flow">
+        <span v-for="(p, i) in ['observe', 'plan', 'gate', 'act']" :key="p"
+          class="flow-step"
+          :class="{ active: currentPhase === p || (currentPhase === 'awaiting_approval' && p === 'gate') }"
+          @mouseenter="hoveredSection = p" @mouseleave="hoveredSection = null">
+          {{ p }}
+          <span v-if="i < 3" class="flow-arrow">&rarr;</span>
+        </span>
+        <span class="iter-label" v-if="iter > 0">iteration {{ iter }}/5</span>
       </div>
 
       <!-- Approval gate -->
       <div v-if="currentPhase === 'awaiting_approval' && pendingActions.length > 0" class="gate-panel"
         @mouseenter="hoveredSection = 'gate'" @mouseleave="hoveredSection = null">
-        <div class="gate-header">Action awaiting approval:</div>
+        <div class="gate-header">The agent wants to run:</div>
         <div class="gate-action">
           <span class="gate-tool">{{ pendingActions[0]?.tool }}</span>
           <span class="gate-query">"{{ pendingActions[0]?.query }}"</span>
         </div>
+        <div class="gate-hint">Choose an action below to continue the loop:</div>
         <div class="gate-buttons">
-          <button @click="approve()" class="btn-approve">Approve</button>
-          <button @click="reject()" class="btn-reject">Reject</button>
-          <button @click="modify((a: ResearchAction) => ({ ...a, query: a.query + ' advanced' }))" class="btn-modify">
-            Modify (add "advanced")
+          <button @click="approve()" class="btn-approve" title="Run this action as-is">Approve</button>
+          <button @click="reject()" class="btn-reject" title="Skip this action and stop the loop">Reject</button>
+          <button @click="modify((a: ResearchAction) => ({ ...a, query: a.query + ' advanced' }))" class="btn-modify" title="Append 'advanced' to the query before running">
+            Modify query
           </button>
         </div>
       </div>
@@ -151,11 +161,15 @@ onUnmounted(() => {
       <!-- Context panel -->
       <div v-if="ctx" class="context-panel"
         @mouseenter="hoveredSection = 'observe'" @mouseleave="hoveredSection = null">
-        <h4>Context</h4>
+        <h4>Accumulated Context</h4>
         <div class="ctx-row"><span class="ctx-key">Question:</span> {{ ctx.question }}</div>
-        <div class="ctx-row"><span class="ctx-key">Results:</span> {{ ctx.searchResults.length }} items</div>
+        <div class="ctx-row"><span class="ctx-key">Refinements:</span> {{ ctx.refinements.length > 0 ? ctx.refinements.join(', ') : 'none yet' }}</div>
+        <div class="ctx-results" v-if="ctx.searchResults.length > 0">
+          <span class="ctx-key">Search results ({{ ctx.searchResults.length }}):</span>
+          <div v-for="(r, i) in ctx.searchResults" :key="i" class="ctx-result-item">{{ r }}</div>
+        </div>
         <div v-if="ctx.answer" class="ctx-answer">
-          <span class="ctx-key">Answer:</span> {{ ctx.answer }}
+          <span class="ctx-key">Final answer:</span> {{ ctx.answer }}
         </div>
       </div>
 
@@ -164,7 +178,7 @@ onUnmounted(() => {
         <h4>Phase History</h4>
         <div v-for="(h, i) in hist" :key="i" class="hist-row">
           <span class="hist-phase" :style="{ color: phaseColor(h.phase) }">{{ h.phase }}</span>
-          <span v-if="h.action" class="hist-action">{{ (h.action as ResearchAction).tool }}: {{ (h.action as ResearchAction).query }}</span>
+          <span v-if="h.action" class="hist-action">{{ (h.action as ResearchAction).tool }}: "{{ (h.action as ResearchAction).query }}"</span>
         </div>
       </div>
 
@@ -207,10 +221,10 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .btn-start { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
 .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-stop { background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
-.phase-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 6px 8px; border-radius: 6px; transition: background 0.15s; }
-.phase-bar:hover { background: rgba(88, 166, 255, 0.04); }
-.phase-dot { width: 10px; height: 10px; border-radius: 50%; }
-.phase-label { font-size: 14px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
+.phase-flow { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; padding: 8px; background: #161b22; border: 1px solid #21262d; border-radius: 8px; }
+.flow-step { color: #484f58; font-size: 12px; font-weight: 600; font-family: 'JetBrains Mono', monospace; padding: 4px 8px; border-radius: 4px; cursor: default; transition: color 0.15s, background 0.15s; }
+.flow-step.active { color: #58a6ff; background: rgba(88, 166, 255, 0.1); }
+.flow-arrow { color: #30363d; margin: 0 2px; }
 .iter-label { color: #7d8590; font-size: 12px; margin-left: auto; }
 .gate-panel { background: #1c1e26; border: 2px solid #f0883e; border-radius: 8px; padding: 14px; margin-bottom: 16px; transition: background 0.15s; }
 .gate-panel:hover { background: #22242e; }
@@ -218,6 +232,7 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .gate-action { margin-bottom: 10px; }
 .gate-tool { color: #d29922; font-family: 'JetBrains Mono', monospace; font-size: 13px; margin-right: 6px; }
 .gate-query { color: #c9d1d9; font-size: 13px; }
+.gate-hint { color: #7d8590; font-size: 11px; margin-bottom: 8px; }
 .gate-buttons { display: flex; gap: 6px; }
 .btn-approve { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .btn-reject { background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
@@ -226,6 +241,8 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .context-panel:hover { background: #1a2230; }
 .ctx-row { color: #c9d1d9; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-bottom: 2px; }
 .ctx-key { color: #7d8590; }
+.ctx-results { margin-top: 4px; }
+.ctx-result-item { color: #8b949e; font-size: 11px; font-family: 'JetBrains Mono', monospace; padding: 2px 0 2px 12px; border-left: 2px solid #21262d; margin: 2px 0; }
 .ctx-answer { color: #3fb950; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-top: 6px; padding-top: 6px; border-top: 1px solid #21262d; }
 .history-panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .hist-row { display: flex; gap: 8px; font-size: 12px; font-family: 'JetBrains Mono', monospace; padding: 2px 0; }

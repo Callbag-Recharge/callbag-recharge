@@ -30,7 +30,13 @@ const minI = dLines
 	}, Infinity);
 const SOURCE =
 	minI > 0 && minI < Infinity
-		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
+		? dLines
+				.map((l) => {
+					let s = l;
+					for (let t = 0; t < minI && s.startsWith("\t"); t++) s = s.slice(1);
+					return s.replace(/\t/g, "  ");
+				})
+				.join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
 const codeLines = SOURCE.split("\n");
@@ -147,11 +153,11 @@ onUnmounted(() => {
         @mouseenter="hoveredSection = 'events'" @mouseleave="hoveredSection = null">
         <h4>Recent Events <span class="event-count">(last 10)</span></h4>
         <div class="events">
-          <div v-for="(ev, i) in recent" :key="i" class="event-row" :class="{ 'event-error': ev.isError }">
-            <span class="ev-time">{{ formatTime(ev.timestamp) }}</span>
-            <span class="ev-svc">{{ ev.service }}</span>
-            <span class="ev-lat">{{ ev.latencyMs }}ms</span>
-            <span v-if="ev.isError" class="ev-err">ERR</span>
+          <div v-for="(ev, i) in recent" :key="i" class="event-row" :class="{ 'event-error': ev.value.isError }">
+            <span class="ev-time">{{ formatTime(ev.value.timestamp) }}</span>
+            <span class="ev-svc">{{ ev.value.service }}</span>
+            <span class="ev-lat">{{ ev.value.latencyMs }}ms</span>
+            <span v-if="ev.value.isError" class="ev-err">ERR</span>
           </div>
           <div v-if="recent.length === 0" class="empty">No events yet</div>
         </div>

@@ -55,8 +55,15 @@ export const confirmField = formField("", {
 export const fields = [nameField, emailField, passwordField, confirmField] as const;
 
 export const allValid = derived(
-	fields.map((f) => f.valid),
-	() => fields.every((f) => f.valid.get()),
+	[...fields.map((f) => f.valid), passwordField.value, confirmField.value],
+	() => {
+		if (!fields.every((f) => f.valid.get())) return false;
+		// Cross-field: confirm must match password (catches stale confirm validation)
+		const pw = passwordField.value.get();
+		const cf = confirmField.value.get();
+		if (pw !== cf) return false;
+		return true;
+	},
 	{ name: "allValid" },
 );
 

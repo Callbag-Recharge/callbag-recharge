@@ -27,7 +27,13 @@ const minI = dLines
 	}, Infinity);
 const SOURCE =
 	minI > 0 && minI < Infinity
-		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
+		? dLines
+				.map((l) => {
+					let s = l;
+					for (let t = 0; t < minI && s.startsWith("\t"); t++) s = s.slice(1);
+					return s.replace(/\t/g, "  ");
+				})
+				.join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
 const codeLines = SOURCE.split("\n");
@@ -170,12 +176,13 @@ const showMermaid = ref(false);
           <span class="ctx-item">Total: ${{ ctx.total }}</span>
           <span class="ctx-item">Attempts: {{ ctx.attempts }}</span>
         </div>
+        <div v-if="ctx.error" class="error-row">{{ ctx.error }}</div>
       </div>
 
       <!-- Event buttons -->
       <div class="event-buttons">
         <button
-          v-for="ev in events" :key="ev"
+          v-for="ev in events.filter(e => e !== 'FAIL')" :key="ev"
           @click="sendEvent(ev)"
           class="btn-event"
         >{{ ev }}</button>
@@ -236,6 +243,7 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .state-value { color: #58a6ff; font-size: 15px; font-weight: 600; margin-left: 8px; font-family: 'JetBrains Mono', monospace; }
 .ctx-row { display: flex; gap: 12px; flex-wrap: wrap; }
 .ctx-item { color: #8b949e; font-size: 12px; font-family: 'JetBrains Mono', monospace; }
+.error-row { color: #f85149; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-top: 4px; padding: 4px 8px; background: rgba(248, 81, 73, 0.1); border-radius: 4px; }
 .event-buttons { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; }
 .btn-event { background: #21262d; color: #58a6ff; border: 1px solid #30363d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; transition: background 0.15s; }
 .btn-event:hover { background: #30363d; }

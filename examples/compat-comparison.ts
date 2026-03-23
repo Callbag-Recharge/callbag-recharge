@@ -63,7 +63,7 @@ export const zustandStore = create<{
 // ── 4. TC39 Signals compat ──────────────────────────────────
 
 export const signalCount = new Signal.State(0);
-export const signalDoubled = new Signal.Computed(() => signalCount.get() * 2, [signalCount._store]);
+export const signalDoubled = new Signal.Computed(() => signalCount.get() * 2, [signalCount]);
 
 export function signalIncrement() {
 	signalCount.set(signalCount.get() + 1);

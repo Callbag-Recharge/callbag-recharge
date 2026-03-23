@@ -40,6 +40,8 @@
 
 17. **Push/pull via callbag, never poll.** When code needs to wait for a condition (e.g. "wait until unpaused"), use a reactive store + `firstValueFrom` so the waiter is notified by push. Do not use `setInterval`/`setTimeout` polling loops to check conditions. Polling is acceptable only at true system boundaries (e.g. checking a pull-based subscription for new messages where no push notification exists).
 
+18. **No `queueMicrotask` / `setTimeout` for reactive coordination.** When one reactive update should trigger another (e.g. auto-transitioning a state machine on error, unsubscribing after a condition is met), use `effect` or `derived` — never schedule via `queueMicrotask`, `setTimeout`, or `Promise.resolve().then()`. Microtask scheduling breaks synchronous glitch-free guarantees, makes behavior timing-dependent, and bypasses the reactive graph. The only acceptable timer usage is at true system boundaries (e.g. simulating network latency in demos via `fromTimer`).
+
 ---
 
 ## 2. Folder & Dependency Hierarchy
