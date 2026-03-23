@@ -282,8 +282,58 @@ The Level 3 data primitives (reactiveMap, reactiveLog, reactiveIndex) are **vali
 
 **Recommendation for collection-heavy workloads:** If sub-microsecond collection operations are needed, consider a lightweight collection variant that skips reactive eviction (reactiveScored) and uses simple FIFO or manual eviction. The current collection design prioritizes reactive score tracking (push-based decay + importance scoring) over raw throughput — this is the right default for agentic memory where scores drive retrieval quality, but a "slim" variant could serve high-throughput scenarios.
 
+## UPDATE: OpenClaw + Mem0 Integration Analysis (March 23, 2026)
+
+### Context
+
+OpenClaw (desktop/cloud AI coding agent) integrated **Mem0** as its built-in memory backend, replacing native in-context memory. Article: "别再硬扛原生记忆了！OpenClaw内置Mem0，让Agent更省token、更智能" (WeChat, March 2026). This validates the agentic memory direction from our original research.
+
+### What Mem0 Does in Practice
+
+Mem0's core value proposition: instead of stuffing full conversation history into the context window (expensive, hits limits), it extracts structured memories via a two-phase pipeline and retrieves only relevant memories per turn. The 91% p95 latency reduction (from our Part 1 research) comes from **not rebuilding full context every turn** — exactly our Pain Point #1.
+
+OpenClaw's integration means: the agent writes to and reads from Mem0 as a structured memory backend. Fewer tokens consumed per turn, more durable recall across sessions.
+
+### Alignment with Our Roadmap
+
+| Mem0 / OpenClaw concept | Our roadmap item | Status |
+|---|---|---|
+| Hybrid vector + graph retrieval | Phase 6b (HNSW) + 6c (knowledge graph) | Backlog |
+| Memory lifecycle: dedup, summarize, forget | Phase 6d (Consolidation + self-editing) | Backlog |
+| Structured memory extraction pipeline | `collection` + `decay` + `node` | **Shipped** |
+| Token reduction via selective retrieval | `derived()` caches context, recomputes on dep change only | **Shipped** |
+| Session transport | Phase 6a (WebSocket/HTTP sink adapters) | Backlog |
+
+### What We Do That Mem0 Cannot
+
+1. **Reactive/push-based memory.** Mem0 is pull-only (query → retrieve → return). Our memory nodes push score changes downstream — cached context views auto-invalidate. No existing agent memory system does this.
+2. **In-process, zero-serialization.** Mem0 requires a service call (HTTP/SDK). Our `state.get()` is ~10ns. At agent turn frequency, memory retrieval is invisible vs being a bottleneck.
+3. **Diamond-safe multi-memory updates.** When message arrives → memory retrieval + context update + token counting + persistence fire simultaneously, two-phase DIRTY→DATA guarantees consistent derived views. Mem0 uses imperative sequencing.
+4. **Transport agnosticism.** Same reactive memory graph works with SSE, WebSocket, terminal. Mem0 is service-oriented.
+5. **First-class observability.** `Inspector.snapshot()` shows every memory node, score, deps, status. "Why did this memory surface?" is answerable.
+
+### What We Should Learn
+
+1. **Admission control deserves a first-class API.** Mem0 uses LLM extraction to decide what becomes a memory. Phase 6d should expose `admissionPolicy` option on `collection` — pluggable `(candidate) => boolean | score`.
+2. **"Slim collection" variant.** Our `collection` at 29.4x overhead is correct for scored/evictable memory. A `lightCollection` skipping `reactiveScored` (using FIFO/LRU) would serve high-throughput paths. Mem0 has no equivalent — everything goes through same pipeline.
+3. **Phase 6b (HNSW) is the biggest concrete gap vs Mem0.** In-process target of ~1-10μs vs external vector store ~50-500μs is a 10-100x win on the most expensive retrieval operation.
+
+### Recommended Phase 6 Priority Order
+
+1. **6b first** (in-process HNSW) — concrete benchmark win over Mem0, most visible missing piece
+2. **6d second** (consolidation + admission control) — makes memory lifecycle autonomous, matches Mem0 extraction pipeline reactively
+3. **6a third** (session transport) — enables same graph to serve web/CLI/desktop agents
+4. **6c last** (knowledge graph) — powerful but XL effort; Mem0g hasn't displaced basic Mem0 widely
+
+### What NOT to Compromise On
+
+- **Don't add LLM extraction calls inside `collection` or `node`** as default behavior. Keep primitives pure. LLM extraction belongs in user-space or a `patterns/` recipe (`memoryExtractor` wrapping `fromLLM` + `collection`).
+- **Don't add external service dependency.** In-process value is the whole point. External vector DBs belong in Phase 7 as optional adapters.
+- **The `decay` scoring formula is the retrieval quality mechanism**, not just a utility. Make it more prominent in positioning.
+
 ## FILES CHANGED
 
 - This file created: `src/archive/docs/SESSION-agentic-memory-research.md`
+- This file updated with OpenClaw/Mem0 analysis: 2026-03-23
 
 ---END SESSION---

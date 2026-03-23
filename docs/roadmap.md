@@ -110,13 +110,23 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 > **Goal:** Reactive agentic memory — vector search, knowledge graphs, memory lifecycle.
 >
 > **Depends on:** Data structures (shipped), memoryNode/collection/decay (shipped).
+>
+> **Market validation (March 2026):** OpenClaw integrated Mem0 (hybrid vector + graph) as
+> built-in agent memory — confirms demand for structured memory backends in AI tools. Our
+> differentiator: reactive/push-based (vs Mem0's pull-only), in-process (vs service call),
+> diamond-safe updates, transport-agnostic. See `SESSION-agentic-memory-research.md` §Update.
+>
+> **Recommended priority order:** 6b → 6d → 6a → 6c (HNSW is the biggest concrete gap vs
+> Mem0; consolidation enables autonomous memory lifecycle; transport enables multi-surface
+> agents; knowledge graph is powerful but XL and Mem0g hasn't displaced basic Mem0 widely).
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
+| 6b | In-process vector index | HNSW-based semantic search. ~1-10 μs vs Mem0/Redis ~50-500 μs. The single biggest performance claim over external memory services. | L |
+| 6d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control (`admissionPolicy` option on `collection`). Matches Mem0's extraction pipeline reactively. | L |
 | 6a | Session transport adapters | WebSocket sink, HTTP sink. Same graph, different edge. | M |
-| 6b | In-process vector index | HNSW-based semantic search. ~1-10 μs vs Redis ~50-500 μs. | L |
 | 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
-| 6d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control. | L |
+| 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. Addresses 29.4x overhead in current `collection`. | S |
 
 ### Phase 7: More Adapters
 

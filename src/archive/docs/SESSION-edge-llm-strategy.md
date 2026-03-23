@@ -228,10 +228,31 @@ Why not: The hybrid cloud+edge pattern is the most common (60%+ of deployments).
 
 6. **The trend is catching up to us, not the other way around.** The library was designed for streaming, cancellation, and coordination before edge LLM made them mainstream.
 
+## UPDATE: OpenClaw/Mem0 Reinforces Edge LLM + Memory Convergence (March 23, 2026)
+
+### Context
+
+OpenClaw (desktop/cloud agent) integrated Mem0 for structured agent memory — validating that edge/local AI agents need dedicated memory management, not just context window stuffing. This reinforces our positioning at the intersection of edge LLM state + reactive memory.
+
+### New competitive signal
+
+OpenClaw + Mem0 confirms the pattern: agent tools are **bolting on** memory backends after the fact. Mem0 is pull-based (query → retrieve → return), requires a service call, and has no reactive propagation. This is exactly the gap our memory layer fills — memory nodes that push score changes downstream, auto-invalidate cached contexts, and run in-process with zero serialization.
+
+### Impact on our edge LLM strategy
+
+1. **`fromLLM` + memory layer = strongest combined pitch.** "Reactive token streaming AND reactive memory in one library" — no competitor offers both. Vercel AI SDK has streaming but no memory. Mem0 has memory but no streaming. LangGraph.js has both loosely but not reactively.
+2. **The H2 AI Chat demo (WebLLM + SharedWorker memory) becomes even more differentiated.** It demonstrates in-browser inference + reactive cross-tab memory — exactly what OpenClaw achieves with cloud services, but running entirely on the user's device.
+3. **New GEO target:** "How to build agent memory without external services" — positions against Mem0's service dependency.
+
+### What this means for Phase 6
+
+Phase 6 (Deep Memory) is now validated by market signal, not just research. The priority order recommended in the agentic memory research update (6b HNSW → 6d consolidation → 6a transport → 6c knowledge graph) should inform the next implementation sprint.
+
 ## FILES CHANGED
 
 - `docs/roadmap.md` — Added Phase 5e-h (edge LLM items), Phase 4f (edge AI positioning page), updated GEO target prompts, added positioning entries vs Vercel AI SDK and edge inference runtimes, added Edge LLM Opportunity section to Strategic Context
 - This file created: `src/archive/docs/SESSION-edge-llm-strategy.md`
+- This file updated with OpenClaw/Mem0 convergence analysis: 2026-03-23
 - `src/archive/docs/DESIGN-ARCHIVE-INDEX.md` — Updated with this session
 
 ---END SESSION---

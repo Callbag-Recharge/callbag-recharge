@@ -13,9 +13,9 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
-import { effect } from "../core/effect";
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
+import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import { reactiveIndex } from "../data/reactiveIndex";
 import { reactiveScored } from "../utils/reactiveEviction";
@@ -74,15 +74,17 @@ export function collection<T>(opts?: CollectionOptions): CollectionInterface<T> 
 	}
 
 	function _trackTags(node: MemoryNodeInterface<T>): void {
-		// Effect depends only on node.meta — fires when this node's tags change.
-		// Not connected to _version (which would cause O(N) spurious re-runs
-		// on every collection structural change).
-		const dispose = effect([node.meta], () => {
-			const currentTags = Array.from(node.meta.get().tags);
-			_tagIndex.update(node.id, currentTags);
-			return undefined;
+		// Subscribe to node.meta — fires when this node's tags change.
+		// Uses subscribe (callbag sink) instead of effect — lighter weight,
+		// no DIRTY/RESOLVED overhead, no cleanup return handling.
+		// Initial tag index update is done inline after subscribe.
+		const currentTags = Array.from(node.meta.get().tags);
+		_tagIndex.update(node.id, currentTags);
+		const sub = subscribe(node.meta, (meta) => {
+			const tags = Array.from(meta.tags);
+			_tagIndex.update(node.id, tags);
 		});
-		_tagEffects.set(node.id, dispose);
+		_tagEffects.set(node.id, () => sub.unsubscribe());
 	}
 
 	function _untrackTags(nodeId: string): void {

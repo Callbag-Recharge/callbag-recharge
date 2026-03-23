@@ -29,7 +29,7 @@
 //   correct relative order among nodes with similar last-touched times.
 // ---------------------------------------------------------------------------
 
-import { effect } from "../core/effect";
+import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import type { EvictionPolicy } from "./eviction";
 
@@ -114,17 +114,18 @@ export function reactiveScored<K, S = number>(
 			_entries.set(key, entry);
 			_siftUp(entry.index);
 
-			// Subscribe: when store emits, compute score and sift to new position
-			const dispose = effect([store], () => {
+			// Subscribe: when store emits, compute score and sift to new position.
+			// Uses subscribe (callbag sink) instead of effect — no DIRTY/RESOLVED
+			// overhead, no eager first run, no cleanup return handling.
+			const sub = subscribe(store, (value) => {
 				const e = _entries.get(key);
-				if (!e) return undefined;
+				if (!e) return;
 				const prev = e.score;
-				e.score = scoreOf(store.get());
+				e.score = scoreOf(value);
 				if (e.score < prev) _siftUp(e.index);
 				else if (e.score > prev) _siftDown(e.index);
-				return undefined;
 			});
-			_disposes.set(key, dispose);
+			_disposes.set(key, () => sub.unsubscribe());
 		},
 
 		delete(key) {

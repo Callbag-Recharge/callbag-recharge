@@ -42,6 +42,8 @@
 
 18. **No `queueMicrotask` / `setTimeout` for reactive coordination.** When one reactive update should trigger another (e.g. auto-transitioning a state machine on error, unsubscribing after a condition is met), use `effect` or `derived` — never schedule via `queueMicrotask`, `setTimeout`, or `Promise.resolve().then()`. Microtask scheduling breaks synchronous glitch-free guarantees, makes behavior timing-dependent, and bypasses the reactive graph. The only acceptable timer usage is at true system boundaries (e.g. simulating network latency in demos via `fromTimer`).
 
+19. **Prefer `subscribe` over `effect` for single-dep data sinks.** `effect` carries the full two-phase DIRTY/RESOLVED protocol overhead: it waits for all dirty deps to resolve before running, performs an eager first run, and expects a cleanup return value. Use `effect` when you need: (a) multi-dep diamond resolution, (b) the DIRTY/RESOLVED guarantee (run only after all deps settle), or (c) a cleanup return. Use `subscribe` when you only need to react to value changes from a single store with no diamond risk — `subscribe` is a lightweight callbag DATA sink with no protocol overhead. Example: `reactiveScored`'s per-key heap update and `collection`'s per-node tag tracking both use `subscribe` — each watches exactly one store, has no cleanup, and needs no diamond guarantee. Replacing `effect` with `subscribe` in these cases yielded a 58x speedup on the eviction hot path.
+
 ---
 
 ## 2. Folder & Dependency Hierarchy
@@ -415,7 +417,9 @@ Pulsar-inspired topic/subscription. `topic` (persistent stream), `subscription` 
 
 ### Memory (`src/memory/`)
 
-`collection` (reactive index for O(1) tag lookups), `decay` (time-based eviction), `node` (memory node with metadata).
+`collection` (reactive node set with O(1) tag lookup via `reactiveIndex`, auto-eviction via `reactiveScored`), `decay` (time-weighted scoring — recency, frequency, importance), `node` (memory node: `content` + `meta` + `scoreStore`).
+
+`reactiveScored` maintains a live min-heap: when a node's `meta` emits, the heap sifts to the new position in O(log n). Eviction is O(log n) extract-min — no O(n) scan. Per-key heap watchers use `subscribe` (not `effect`) — lightweight DATA-only sink, no DIRTY/RESOLVED overhead (§1.19).
 
 ### Worker (`src/worker/`)
 

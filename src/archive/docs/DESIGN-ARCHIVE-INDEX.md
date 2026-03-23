@@ -328,7 +328,7 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through Session worker-bridge-h2-design (March 22, 2026)
+**Archive Status:** Complete through OpenClaw/Mem0 analysis update (March 23, 2026)
 
 ### Gemini Marketing Research (March 21) — Market Positioning & Growth Strategy
 **Topic:** Competitive landscape analysis, agentic AI trends, streaming durability gap, and developer marketing strategy for callbag-recharge
@@ -351,6 +351,20 @@ External deep research (via Gemini Voyager) covering: the 2025–2026 agentic en
 **Growth strategy:** "Reuse flywheel" via 90-9-1 community principle. Utility-first content (architecture deep-dives, durable stream blueprints). Compat wrappers as low-friction Trojan horse. Target niches: local-first AI, edge compute, TypeScript agentic frameworks.
 
 **Source:** `callbag-marketing-research-20260321-161450.md` (Gemini Voyager deep research export, ~1144 lines of iterative analysis across 100+ web sources)
+
+### Session openclaw-mem0-analysis (March 23) — OpenClaw/Mem0 Integration Analysis
+**Topic:** What the OpenClaw + Mem0 integration means for callbag-recharge's memory layer positioning, Phase 6 priority, and competitive differentiation
+
+OpenClaw (desktop/cloud AI agent) integrated Mem0 as built-in memory — validating demand for structured agent memory backends. Analysis cross-referenced with original agentic memory research (March 17) and edge LLM strategy (March 19).
+
+**Key insights:**
+- **Mem0 is pull-only; we're push-based.** Memory nodes that push score changes downstream + auto-invalidate cached contexts is a genuinely novel differentiator no competitor has.
+- **In-process HNSW (Phase 6b) is the biggest concrete gap vs Mem0.** ~1-10μs vs ~50-500μs on the most expensive retrieval operation.
+- **Admission control needs a first-class API.** Phase 6d should expose `admissionPolicy` on `collection`.
+- **"Slim collection" variant (Phase 6e)** for high-throughput paths skipping reactive eviction.
+- **Don't add LLM extraction calls in primitives.** Keep memory primitives pure — LLM extraction belongs in patterns/ layer.
+
+**Outcome:** Phase 6 reordered (6b→6d→6a→6c), 6e added (lightCollection), roadmap updated with market validation context, SESSION-agentic-memory-research.md and SESSION-edge-llm-strategy.md updated.
 
 ### Session worker-bridge-h2-design (March 22) — Worker Bridge + H2 AI Chat Design
 **Topic:** Reactive cross-thread communication — abstracting Web Workers, SharedWorkers, Service Workers behind callbag stores. H2 hero app architecture with three workers.

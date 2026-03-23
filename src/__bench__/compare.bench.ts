@@ -1,6 +1,6 @@
 /**
- * Self-comparison benchmarks — track our own performance across graph shapes.
- * No external package comparisons. Focus on self-improvement.
+ * Consolidated benchmarks — track performance across all graph shapes.
+ * Single source of truth for all core + comparison benchmarks.
  */
 import { afterAll, beforeAll, bench, describe } from "vitest";
 import { filter as rFilter } from "../extra/filter";
@@ -192,6 +192,9 @@ describe("pipe: 3 operators (map → filter → map)", () => {
 	let i = 1;
 	bench("set + get", () => {
 		src.set(i++);
+		piped.get();
+	});
+	bench("get only (cached)", () => {
 		piped.get();
 	});
 });

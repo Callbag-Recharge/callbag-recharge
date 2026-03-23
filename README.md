@@ -171,7 +171,7 @@ const log = reactiveLog<string>({ maxSize: 1000 })
 log.append('event happened')
 const recent = log.slice(-10) // Store<string[]> — reactive
 
-// Reactive Index — dual-key lookup, 1.01x native Map.get speed on reads
+// Reactive Index — dual-key lookup, ~1.2x native Map.get speed on reads
 const index = reactiveIndex<string, string, Item>()
 index.set('pk', 'sk', item)
 const found = index.select('pk', 'sk') // Store<Item | undefined>
@@ -211,7 +211,7 @@ forEach(events, (signal, event) => process(event))
 
 ## Agent memory
 
-Reactive memory primitives for agentic workflows — push-based dirty tracking, decay-scored eviction, tag-based retrieval.
+Reactive memory primitives for agentic workflows — decay-scored eviction, O(1) tag retrieval, push-based score tracking.
 
 ```ts
 import { collection, memoryNode } from 'callbag-recharge/memory'
@@ -219,10 +219,14 @@ import { collection, memoryNode } from 'callbag-recharge/memory'
 const memory = collection<string>({ maxSize: 100 })
 memory.add('User prefers TypeScript', { id: 'pref-1', tags: ['preference'] })
 
-// Tag-based retrieval via reactive index
+// O(1) tag-based retrieval via reactive index
 memory.tagIndex.select('preference').get() // Set{'pref-1'}
 
-// Decay-scored eviction — oldest/least important items evicted first
+// O(log n) eviction — live min-heap, scores update reactively as nodes are
+// touched/tagged. No O(n) scan at eviction time.
+memory.add('Older fact', { tags: ['context'] })
+memory.add('Recent fact', { tags: ['context'] }) // touches bump score
+// When maxSize exceeded, lowest-scoring node evicted automatically
 ```
 
 ---

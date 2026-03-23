@@ -13,7 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Lint:** `pnpm run lint` (biome check)
 - **Lint fix:** `pnpm run lint:fix`
 - **Format:** `pnpm run format`
-- **Benchmarks:** `pnpm run bench` (Vitest + tinybench). Focused: `bench:core`, `bench:compare`, `bench:data`
+- **Benchmarks:** `pnpm run bench` (Vitest + tinybench). Focused: `bench:core`, `bench:data`
 - **Bundle size:** `pnpm run size`
 
 ## Architecture
@@ -39,6 +39,7 @@ callbag-recharge is a reactive state management library where **every store is a
 - **No raw `new Promise`** (architecture.md §1.16). Use callbag primitives (`fromTimer`, `producer`) and `firstValueFrom` (the ONE bridge in `raw/`) instead of hand-rolling Promises. `src/raw/` is the foundation layer — pure callbag protocol with zero core dependencies. Dependency hierarchy: `raw/` → `core/` → `extra/` → `utils/` → higher layers. `raw/` is importable from any folder.
 - **Push/pull via callbag, never poll** (architecture.md §1.17). Wait for conditions via reactive stores + `firstValueFrom`, not `setInterval` loops.
 - **No `queueMicrotask`/`setTimeout` for reactive coordination** (architecture.md §1.18). Use `effect` or `derived` to chain reactive updates — never `queueMicrotask`, `setTimeout`, or `Promise.resolve().then()`. Microtask scheduling breaks glitch-free guarantees. Timer usage only at true system boundaries (e.g. `fromTimer` for demo latency).
+- **Prefer `subscribe` over `effect` for single-dep data sinks** (architecture.md §1.19). Use `subscribe` when: single store dep, no diamond risk, no cleanup return, just react to value changes. Use `effect` for multi-dep diamond resolution or when DIRTY/RESOLVED guarantee is needed. `subscribe` has no DIRTY/RESOLVED overhead — measured 58x faster on the eviction hot path.
 
 ## Examples & docs (single source of truth)
 

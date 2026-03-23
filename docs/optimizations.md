@@ -306,7 +306,7 @@ this._upstreamTalkbacks.length = 0;
 
 Replaced `state<MemoryNode[]>` (which allocated a new array on every add/remove) with a version counter + lazy `derived()` materialization (same pattern as reactiveMap). `_nodesStore` is now `derived([_version], () => Array.from(_nodes.values()))` — only allocates when observed. `_sizeStore` is `derived([_version], () => _nodes.size)` — no array allocation. Also simplified node ID generation by removing `Date.now()` call.
 
-**Measured impact:** collection x50 + byTag improved from **~41.6x → 29.4x** gap. Remaining gap is dominated by per-node overhead: each `memoryNode` creates 3 reactive stores + 1 derived, and collection creates per-node tag-tracking effects + reactive eviction policy. The `reactiveScored` evict+reinsert benchmark shows a 19.6x gap — this is the primary remaining bottleneck.
+**Measured impact:** collection x50 + byTag improved from **~41.6x → 29.4x** gap (further improved to 25.6x by optimization #26). Remaining gap is dominated by per-node overhead: each `memoryNode` creates 3 reactive stores + 1 derived.
 
 ### 22. SINGLE_DEP for `dynamicDerived`
 
@@ -416,6 +416,19 @@ No probe, no double-load, no `instanceof Promise` branching at the API level.
 
 **`keyedAsync`** remains in utils/ as a standalone utility for general-purpose async call dedup outside the cache context.
 
+### 26. Lightweight `subscribe` for reactiveScored and collection tag tracking
+
+Replaced `effect([store], fn)` with `subscribe(store, fn)` (core callbag sink) in `reactiveScored` (eviction policy) and collection's per-node tag tracking. `effect()` was overkill for these use cases — they don't need DIRTY/RESOLVED two-phase protocol, eager first run, or cleanup return handling. `subscribe` is a pure callbag DATA sink with minimal setup cost.
+
+**What changed:**
+- `reactiveEviction.ts`: `effect([store], () => { ... return undefined })` → `subscribe(store, (value) => { ... })`
+- `collection.ts`: `effect([node.meta], () => { ... return undefined })` → `subscribe(node.meta, (meta) => { ... })`
+- Initial tag index update moved from inside the effect (eager first run) to an explicit inline call before subscribe
+
+**Measured impact:**
+- `reactiveScored` evict+reinsert: **15K → 880K ops/sec (58.6x faster)**. Gap vs `scored()` flipped from 17.3x slower to **3.75x faster**.
+- Collection x50 + byTag gap: **42.4x → 25.6x** (remaining gap dominated by per-node store creation).
+
 ---
 
 ## Potential optimizations
@@ -453,6 +466,26 @@ This would make drain fully atomic — all side-effect emissions are appended to
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
+
+### 3. Cleanup orphaned heap entries on store END
+
+**Status:** Not implemented. **Impact:** Low (correctness edge case). **Priority:** Low — `node.meta` stores don't complete independently of collection lifecycle in current usage.
+
+In `reactiveScored`, per-key `subscribe()` calls watch score stores for heap updates. If a score store completes (sends END), the subscribe callback stops firing but the heap entry and `_entries`/`_disposes` maps retain the key — creating a zombie entry that is never evicted or cleaned up.
+
+**Proposed fix:** Pass an `onEnd` handler to `subscribe` (or listen for the unsubscribe signal) that calls `remove(key)` to clean up the heap entry and map references:
+
+```ts
+const sub = subscribe(store, (value) => {
+    // ... existing heap sift logic
+});
+// Also handle store completion:
+sub.signal().addEventListener("abort", () => {
+    remove(key);
+});
+```
+
+This is defensive — no current code path causes `node.meta` to END independently. Only relevant if future orchestration features (e.g., node disposal, hot-swap) start completing individual node stores.
 
 
 ---
@@ -543,8 +576,10 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Shared timer runtime (`createTicker`) | Built-in | Deduplicated timer lifecycle code; lower maintenance risk | Timer utils |
 | `keyedAsync` (concurrent async dedup) | Built-in (utils) | Coalesces concurrent async calls per key | General-purpose async call dedup |
 | `cascadingCache` (singleton reactive cache) | Built-in (utils) | N-tier cascading, singleton state stores, natural dedup, no sync/async branching | tieredStorage, multi-tier caches |
+| Lightweight `subscribe` for eviction/tags | Built-in | reactiveScored 58.6x faster (flipped to 3.75x faster than scored); collection 42.4x→25.6x | reactiveScored, collection |
 | Atomic batch drain | Potential (medium) | Correctness for RESET-inside-batch | Orchestration code |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
+| Cleanup orphaned heap entries on END | Potential (low priority) | Prevents zombie entries if score stores complete | Future node disposal/hot-swap |
 
 | ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |
