@@ -297,7 +297,7 @@ describe("join (merge strategies step)", () => {
 			wf.destroy();
 		});
 
-		it("emits null and tracks error for non-array input", async () => {
+		it("emits undefined and tracks error for non-array input", async () => {
 			const merged = join(["a", "b"], "append");
 
 			const wf = pipeline({
@@ -313,8 +313,8 @@ describe("join (merge strategies step)", () => {
 			(wf.steps.trigger as any).fire("go");
 			await new Promise((r) => setTimeout(r, 50));
 
-			// Should have emitted null at some point
-			expect(results).toContain(null);
+			// Should have emitted undefined at some point
+			expect(results).toContain(undefined);
 
 			// Error should be tracked in taskState
 			expect(merged.error.get()).toBeInstanceOf(TypeError);
@@ -337,7 +337,7 @@ describe("join (merge strategies step)", () => {
 
 			const results: any[] = [];
 			const unsub = subscribe(wf.steps.merged, (v) => {
-				if (v !== null) results.push(v);
+				if (v !== undefined) results.push(v);
 			});
 
 			(wf.steps.trigger as any).fire("go1");

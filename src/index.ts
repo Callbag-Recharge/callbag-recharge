@@ -6,7 +6,14 @@ export { derived } from "./core/derived";
 export type { TrackingFn } from "./core/dynamicDerived";
 export { dynamicDerived } from "./core/dynamicDerived";
 export { effect } from "./core/effect";
-export type { ObserveResult, TraceEntry } from "./core/inspector";
+export type {
+	CausalityEntry,
+	CausalityResult,
+	ObserveResult,
+	TaskStateObserveResult,
+	TaskStateTransition,
+	TraceEntry,
+} from "./core/inspector";
 // Observability
 export { Inspector } from "./core/inspector";
 // General-purpose transform primitive

@@ -116,7 +116,7 @@ export interface ExecutionLogResult {
  * unsub();
  * ```
  *
- * @seeAlso [pipeline](./pipeline) — workflow builder, [reactiveLog](/api/reactiveLog) — underlying data structure
+ * @seeAlso [pipeline](./pipeline) — workflow builder, [reactiveLog](./reactiveLog) — underlying data structure
  *
  * @category orchestrate
  */

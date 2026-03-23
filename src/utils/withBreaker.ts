@@ -65,7 +65,7 @@ export interface WithBreakerStore<T> extends Store<T> {
  * const guarded = pipe(input, withBreaker(breaker));
  * ```
  *
- * @seeAlso [withTimeout](./withTimeout) — timeout guard, [withRetry](./withRetry) — retry on failure
+ * @seeAlso [timeout](./timeout) — timeout guard, [retry](./retry) — retry on failure
  *
  * @category orchestrate
  */

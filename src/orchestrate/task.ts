@@ -39,9 +39,12 @@ import { TASK_STATE } from "./types";
 export interface TaskOpts<T> {
 	/** Debug name for Inspector. */
 	name?: string;
-	/** Skip predicate: when true, emit null without running the task. */
+	/** Skip predicate: when true, emit undefined without running the task.
+	 *  Errors without a fallback also emit undefined. Use `task.status` to
+	 *  distinguish skip from error downstream. */
 	skip?: (values: any[]) => boolean;
-	/** Fallback value or factory on error (after retries exhausted). */
+	/** Fallback value or factory on error (after retries exhausted).
+	 *  If not provided, errors emit undefined (same as skip). */
 	fallback?: T | ((error: unknown) => T);
 	/** Retry count or full retry options. */
 	retry?: number | RetryOptions;
@@ -88,6 +91,7 @@ export interface TaskStepDef<T = any> extends StepDef<T> {
  * @returns `TaskStepDef<T>` — step definition for pipeline() with internal task tracking.
  *
  * @remarks **Auto-join:** Deps wait for ALL deps to emit non-undefined values before calling fn.
+ * @remarks **Error handling:** Errors without a fallback emit `undefined` (same as skip). Downstream undefined guards block automatically. Pipeline marks blocked idle tasks as "skipped".
  * @remarks **Re-trigger:** New upstream values cancel the previous in-flight execution (switchMap semantics).
  * @remarks **Task tracking:** Internal `taskState` tracks status/duration/errors. Pipeline auto-detects it for `runStatus`.
  * @remarks **Cancellation:** The AbortSignal is aborted on re-trigger, reset, or destroy. Forward it to fetch(), etc.
@@ -152,13 +156,13 @@ export function task<T>(
 		retryOpt !== undefined && typeof retryOpt !== "number" ? retryOpt.while : undefined;
 
 	// Build the factory that receives dep stores and returns the output store
-	const factory = (...depStores: Store<any>[]): Store<T | null> => {
+	const factory = (...depStores: Store<any>[]): Store<T | undefined> => {
 		// Source store: combine deps or use single dep directly
 		let source$: Store<any>;
 		if (depStores.length === 0) {
 			// No deps — use a dummy source that emits once
-			source$ = producer<null>(({ emit }) => {
-				emit(null);
+			source$ = producer<true>(({ emit }) => {
+				emit(true);
 				return undefined;
 			});
 		} else if (depStores.length === 1) {
@@ -174,12 +178,12 @@ export function task<T>(
 				const values: any[] =
 					depStores.length > 1 ? (raw as any[]) : depStores.length === 1 ? [raw] : [];
 
-				// Undefined guard: wait for ALL deps to have real values
+				// Undefined guard: wait for ALL deps to have real values.
+				// Don't emit — just complete so switchMap waits for next outer value.
 				if (depStores.length >= 1) {
 					for (const v of values) {
 						if (v === undefined) {
-							return producer<T | null>(({ emit, complete }) => {
-								emit(null);
+							return producer<T | undefined>(({ complete }) => {
 								complete();
 								return undefined;
 							});
@@ -192,8 +196,8 @@ export function task<T>(
 					ts.restart(); // bump generation so any in-flight run is discarded
 					ts.markSkipped();
 					opts?.onSkip?.(values);
-					return producer<T | null>(({ emit, complete }) => {
-						emit(null);
+					return producer<T | undefined>(({ emit, complete }) => {
+						emit(undefined);
 						complete();
 						return undefined;
 					});
@@ -206,10 +210,10 @@ export function task<T>(
 				opts?.onStart?.(values);
 
 				// Run the task with cancellation support
-				return producer<T | null>(({ emit, complete }) => {
+				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
 
-					const safeEmit = (v: T | null) => {
+					const safeEmit = (v: T | undefined) => {
 						if (!stopped) emit(v);
 					};
 					const safeComplete = () => {
@@ -288,7 +292,7 @@ export function task<T>(
 							safeEmit(val);
 							safeComplete();
 						} else {
-							safeEmit(null);
+							safeEmit(undefined);
 							safeComplete();
 						}
 					};
@@ -301,12 +305,12 @@ export function task<T>(
 					};
 				});
 			}),
-		) as Store<T | null>;
+		) as Store<T | undefined>;
 
 		// Wrap with lifecycle signal interceptor — when RESET/TEARDOWN arrives
 		// via talkback, delegate to taskState so pipeline doesn't need a flat task list.
 		// OperatorImpl._handleLifecycleSignal dispatches signal to handler via STATE.
-		return operator<T | null>(
+		return operator<T | undefined>(
 			[switched] as Store<unknown>[],
 			({ emit, signal, complete, error: actionsError }) => {
 				return (_dep, type, data) => {
@@ -324,14 +328,14 @@ export function task<T>(
 						}
 						signal(data);
 					} else if (type === DATA) {
-						emit(data as T | null);
+						emit(data as T | undefined);
 					} else if (type === END) {
 						data !== undefined ? actionsError(data) : complete();
 					}
 				};
 			},
 			{ kind: "task", name: opts?.name },
-		) as Store<T | null>;
+		) as Store<T | undefined>;
 	};
 
 	const def: TaskStepDef<T> = {

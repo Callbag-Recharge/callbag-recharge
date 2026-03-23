@@ -45,6 +45,41 @@ taskState.from = function from<T>(snap: TaskStateSnapshot<T>): TaskState<T> {
 	return task;
 };
 
+/**
+ * Creates a reactive task execution tracker with automatic status, duration, and error tracking.
+ *
+ * @param opts - Optional configuration.
+ *
+ * @returns `TaskState<T>` — a task tracker with the following API:
+ *
+ * @returnsTable run(fn) | (fn: (signal: AbortSignal) => T \| Promise<T>) => Promise<T> | Execute an async function with lifecycle tracking.
+ * get() | () => TaskMeta<T> | Returns the current metadata snapshot (status, result, error, duration, runCount).
+ * status | Store<TaskStatus> | Reactive store: 'idle' \| 'running' \| 'success' \| 'error'.
+ * result | Store<T \| undefined> | Reactive store of the last successful result.
+ * error | Store<unknown \| undefined> | Reactive store of the last error.
+ * duration | Store<number \| undefined> | Reactive store of the last run duration in ms.
+ * runCount | Store<number> | Reactive store of total run count.
+ * reset() | () => void | Reset to idle state and abort any running task.
+ * destroy() | () => void | Tear down all reactive stores.
+ *
+ * @remarks **Signal-first:** The `run()` callback receives an `AbortSignal` as its first argument for cooperative cancellation.
+ * @remarks **Companion stores:** Each metadata field is an individual reactive store, independently subscribable.
+ * @remarks **Generation tracking:** Concurrent `reset()` during a `run()` silently discards the stale result.
+ *
+ * @example
+ * ```ts
+ * import { taskState } from 'callbag-recharge';
+ *
+ * const task = taskState<string>();
+ * await task.run((signal) => fetch('/api', { signal }).then(r => r.text()));
+ * task.status.get(); // 'success'
+ * task.duration.get(); // e.g. 120
+ * ```
+ *
+ * @seeAlso [track](./track) — lifecycle tracking, [pipeline](./pipeline) — workflow builder
+ *
+ * @category orchestrate
+ */
 export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 	const counter = ++taskCounter;
 	const nodeId = opts?.id ?? `task-${counter}`;

@@ -12,9 +12,10 @@
 //   });
 // ---------------------------------------------------------------------------
 
+import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { teardown } from "../core/protocol";
+import { DATA, END, RESET, STATE, TEARDOWN, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 import { firstValueFrom } from "../extra/firstValueFrom";
@@ -42,7 +43,7 @@ export interface SensorOpts {
 }
 
 /** Extended StepDef that carries task metadata as flat companion stores. */
-export interface SensorStepDef<T = any> extends StepDef<T | null> {
+export interface SensorStepDef<T = any> extends StepDef<T | undefined> {
 	/** Reactive task status: idle → running → success/error. */
 	readonly status: Store<import("./types").TaskStatus>;
 	/** Last error, if any. */
@@ -72,7 +73,7 @@ export interface SensorStepDef<T = any> extends StepDef<T | null> {
  * @returns `SensorStepDef<T>` — step definition for pipeline() with task tracking.
  *
  * @remarks **Polling:** Calls `poll(value)` every `interval` ms (default 5000). Stops on first truthy return.
- * @remarks **Timeout:** If `timeout` is set and the condition is not met within that time, the task errors.
+ * @remarks **Timeout:** If `timeout` is set and the condition is not met within that time, the task errors and emits `undefined`.
  * @remarks **Re-trigger:** New upstream values cancel the current polling loop (switchMap semantics).
  * @remarks **Passthrough:** On success, emits the upstream value (not the poll result).
  *
@@ -102,14 +103,13 @@ export function sensor<T>(
 	const timeout = opts?.timeout;
 	const ts = taskState<T>({ id: opts?.name });
 
-	const factory = (depStore: Store<T>): Store<T | null> => {
-		return pipe(
+	const factory = (depStore: Store<T>): Store<T | undefined> => {
+		const switched = pipe(
 			depStore,
 			switchMap((value: T) => {
-				// Undefined guard
+				// Undefined guard: don't emit, just complete so switchMap waits
 				if (value === undefined) {
-					return producer<T | null>(({ emit, complete }) => {
-						emit(null);
+					return producer<T | undefined>(({ complete }) => {
 						complete();
 						return undefined;
 					});
@@ -117,7 +117,7 @@ export function sensor<T>(
 
 				ts.restart();
 
-				return producer<T | null>(({ emit, complete }) => {
+				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
 					let emitted = false;
 					let polling = false;
@@ -134,7 +134,7 @@ export function sensor<T>(
 						}
 					};
 
-					const safeEmit = (v: T | null) => {
+					const safeEmit = (v: T | undefined) => {
 						if (!stopped && !emitted) {
 							emitted = true;
 							emit(v);
@@ -219,7 +219,7 @@ export function sensor<T>(
 					}).catch(() => {
 						// Error tracked by taskState
 						if (!stopped) {
-							safeEmit(null);
+							safeEmit(undefined);
 							safeComplete();
 						}
 					});
@@ -227,7 +227,31 @@ export function sensor<T>(
 					return cleanup;
 				});
 			}),
-		) as Store<T | null>;
+		) as Store<T | undefined>;
+
+		return operator<T | undefined>(
+			[switched] as Store<unknown>[],
+			({ emit, signal, complete, error: actionsError }) => {
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						if (data === RESET) {
+							ts.restart();
+							return;
+						}
+						if (data === TEARDOWN) {
+							ts.destroy();
+							return;
+						}
+						signal(data);
+					} else if (type === DATA) {
+						emit(data as T | undefined);
+					} else if (type === END) {
+						data !== undefined ? actionsError(data) : complete();
+					}
+				};
+			},
+			{ kind: "sensor", name: opts?.name },
+		) as Store<T | undefined>;
 	};
 
 	const def: SensorStepDef<T> = {

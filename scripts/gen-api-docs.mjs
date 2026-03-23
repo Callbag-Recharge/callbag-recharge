@@ -137,7 +137,14 @@ const REGISTRY = {
 	withStatus: "src/utils/withStatus.ts",
 	dag: "src/utils/dag.ts",
 
+	// Data
+	reactiveLog: "src/data/reactiveLog.ts",
+
+	// Adapters
+	fromLLM: "src/adapters/llm.ts",
+
 	// Orchestrate — workflow nodes
+	taskState: "src/orchestrate/taskState.ts",
 	pipeline: "src/orchestrate/pipeline.ts",
 	source: "src/orchestrate/pipeline.ts",
 	task: "src/orchestrate/task.ts",

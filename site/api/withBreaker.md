@@ -42,5 +42,5 @@ const guarded = pipe(input, withBreaker(breaker));
 
 ## See Also
 
-- [withTimeout](./withTimeout) — timeout guard
-- [withRetry](./withRetry) — retry on failure
+- [timeout](./timeout) — timeout guard
+- [retry](./retry) — retry on failure

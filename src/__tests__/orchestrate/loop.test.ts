@@ -6,14 +6,14 @@ import { loop } from "../../orchestrate/loop";
 import { pipeline, step } from "../../orchestrate/pipeline";
 import { task } from "../../orchestrate/task";
 
-/** Collect non-undefined values from a store subscription. */
+/** Collect all emitted values from a store subscription. */
 function collect<T>(store: import("../../core/types").Store<T>): {
 	values: T[];
 	unsub: () => void;
 } {
 	const values: T[] = [];
 	const unsub = subscribe(store, (v) => {
-		if (v !== undefined) values.push(v);
+		values.push(v);
 	});
 	return { values, unsub };
 }
@@ -83,7 +83,7 @@ describe("loop", () => {
 
 		trigger.fire(0);
 		await vi.waitFor(() => {
-			expect(values).toContain(null); // error → null emission
+			expect(values).toContain(undefined); // error → undefined emission
 			expect(steps.iterate.error.get()).toBeDefined();
 		});
 
@@ -117,7 +117,7 @@ describe("loop", () => {
 
 		// The second trigger starts at 99, so 99+1=100 (done in 1 iteration)
 		await vi.waitFor(() => {
-			const meaningful = values.filter((v) => v !== null);
+			const meaningful = values.filter((v) => v !== undefined);
 			expect(meaningful).toContain(100);
 		});
 

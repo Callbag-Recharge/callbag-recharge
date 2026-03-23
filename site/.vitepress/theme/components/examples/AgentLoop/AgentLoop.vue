@@ -1,12 +1,16 @@
 <script setup lang="ts">
+import type { ResearchAction } from "@examples/agent-loop";
 import {
+	approve,
 	context,
 	error,
 	history,
 	iteration,
 	lastAction,
+	modify,
 	pending,
 	phase,
+	reject,
 	startResearch,
 	stop,
 } from "@examples/agent-loop";
@@ -28,24 +32,50 @@ const minI = dLines
 		const x = l.match(/^(\t+)/);
 		return x ? Math.min(m, x[1].length) : m;
 	}, Infinity);
-const _SOURCE =
+const SOURCE =
 	minI > 0 && minI < Infinity
 		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
+const codeLines = SOURCE.split("\n");
+
 // Reactive bindings
-const _currentPhase = useSubscribe(phase);
-const _ctx = useSubscribe(context);
-const _action = useSubscribe(lastAction);
-const _iter = useSubscribe(iteration);
-const _err = useSubscribe(error);
-const _hist = useSubscribe(history);
-const _pendingActions = useSubscribe(pending);
+const currentPhase = useSubscribe(phase);
+const ctx = useSubscribe(context);
+const action = useSubscribe(lastAction);
+const iter = useSubscribe(iteration);
+const err = useSubscribe(error);
+const hist = useSubscribe(history);
+const pendingActions = useSubscribe(pending);
 
 const query = ref("TypeScript reactive state management");
-const _showCode = ref(false);
+const showCode = ref(false);
 
-function _phaseColor(p: string): string {
+// Highlight: map phase names to code line ranges
+const hoveredSection = ref<string | null>(null);
+const SECTION_PATTERNS: Record<string, RegExp> = {
+	observe: /\bobserve\b/,
+	plan: /\bplan\b/,
+	act: /\bact\b/,
+	gate: /\bgate\b|approve|reject/,
+};
+
+const highlightMap: Record<string, number[]> = {};
+codeLines.forEach((line: string, i: number) => {
+	for (const [id, pattern] of Object.entries(SECTION_PATTERNS)) {
+		if (pattern.test(line)) {
+			if (!highlightMap[id]) highlightMap[id] = [];
+			highlightMap[id].push(i);
+		}
+	}
+});
+
+function isLineHighlighted(lineIdx: number): boolean {
+	if (!hoveredSection.value) return false;
+	return highlightMap[hoveredSection.value]?.includes(lineIdx) ?? false;
+}
+
+function phaseColor(p: string): string {
 	switch (p) {
 		case "idle":
 			return "#484f58";
@@ -66,7 +96,7 @@ function _phaseColor(p: string): string {
 	}
 }
 
-function _handleStart() {
+function handleStart() {
 	if (query.value.trim()) {
 		startResearch(query.value.trim());
 	}
@@ -93,14 +123,17 @@ onUnmounted(() => {
       </div>
 
       <!-- Phase indicator -->
-      <div class="phase-bar">
+      <div class="phase-bar"
+        @mouseenter="hoveredSection = currentPhase === 'awaiting_approval' ? 'gate' : currentPhase"
+        @mouseleave="hoveredSection = null">
         <span class="phase-dot" :style="{ background: phaseColor(currentPhase) }"></span>
         <span class="phase-label" :style="{ color: phaseColor(currentPhase) }">{{ currentPhase }}</span>
         <span class="iter-label" v-if="iter > 0">Iteration {{ iter }}</span>
       </div>
 
       <!-- Approval gate -->
-      <div v-if="currentPhase === 'awaiting_approval' && pendingActions.length > 0" class="gate-panel">
+      <div v-if="currentPhase === 'awaiting_approval' && pendingActions.length > 0" class="gate-panel"
+        @mouseenter="hoveredSection = 'gate'" @mouseleave="hoveredSection = null">
         <div class="gate-header">Action awaiting approval:</div>
         <div class="gate-action">
           <span class="gate-tool">{{ pendingActions[0]?.tool }}</span>
@@ -116,7 +149,8 @@ onUnmounted(() => {
       </div>
 
       <!-- Context panel -->
-      <div v-if="ctx" class="context-panel">
+      <div v-if="ctx" class="context-panel"
+        @mouseenter="hoveredSection = 'observe'" @mouseleave="hoveredSection = null">
         <h4>Context</h4>
         <div class="ctx-row"><span class="ctx-key">Question:</span> {{ ctx.question }}</div>
         <div class="ctx-row"><span class="ctx-key">Results:</span> {{ ctx.searchResults.length }} items</div>
@@ -138,11 +172,25 @@ onUnmounted(() => {
       <div v-if="err" class="error-panel">{{ err }}</div>
     </div>
 
+    <!-- Code panel -->
     <div class="code-toggle">
       <button @click="showCode = !showCode" class="btn-code">{{ showCode ? 'Hide Source' : 'Show Source' }}</button>
     </div>
     <div v-if="showCode" class="code-panel">
-      <pre><code>{{ SOURCE }}</code></pre>
+      <div class="code-header">
+        <span class="code-filename">agent-loop.ts</span>
+        <span class="code-badge">{{ codeLines.length }} lines</span>
+      </div>
+      <div class="code-body">
+        <pre><code><template
+  v-for="(line, i) in codeLines"
+  :key="i"
+><span
+  class="code-line"
+  :class="{ highlighted: isLineHighlighted(i) }"
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
+</span></template></code></pre>
+      </div>
     </div>
   </div>
 </template>
@@ -159,11 +207,13 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .btn-start { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 8px 16px; font-size: 13px; cursor: pointer; }
 .btn-start:disabled { opacity: 0.5; cursor: not-allowed; }
 .btn-stop { background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 8px 12px; font-size: 13px; cursor: pointer; }
-.phase-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; }
+.phase-bar { display: flex; align-items: center; gap: 8px; margin-bottom: 16px; padding: 6px 8px; border-radius: 6px; transition: background 0.15s; }
+.phase-bar:hover { background: rgba(88, 166, 255, 0.04); }
 .phase-dot { width: 10px; height: 10px; border-radius: 50%; }
 .phase-label { font-size: 14px; font-weight: 600; font-family: 'JetBrains Mono', monospace; }
 .iter-label { color: #7d8590; font-size: 12px; margin-left: auto; }
-.gate-panel { background: #1c1e26; border: 2px solid #f0883e; border-radius: 8px; padding: 14px; margin-bottom: 16px; }
+.gate-panel { background: #1c1e26; border: 2px solid #f0883e; border-radius: 8px; padding: 14px; margin-bottom: 16px; transition: background 0.15s; }
+.gate-panel:hover { background: #22242e; }
 .gate-header { color: #f0883e; font-size: 13px; font-weight: 600; margin-bottom: 8px; }
 .gate-action { margin-bottom: 10px; }
 .gate-tool { color: #d29922; font-family: 'JetBrains Mono', monospace; font-size: 13px; margin-right: 6px; }
@@ -172,7 +222,8 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .btn-approve { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .btn-reject { background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .btn-modify { background: #21262d; color: #d29922; border: 1px solid #30363d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.context-panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+.context-panel { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; margin-bottom: 12px; transition: background 0.15s; }
+.context-panel:hover { background: #1a2230; }
 .ctx-row { color: #c9d1d9; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-bottom: 2px; }
 .ctx-key { color: #7d8590; }
 .ctx-answer { color: #3fb950; font-size: 12px; font-family: 'JetBrains Mono', monospace; margin-top: 6px; padding-top: 6px; border-top: 1px solid #21262d; }
@@ -183,7 +234,14 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .error-panel { background: rgba(248, 81, 73, 0.1); border: 1px solid #f85149; border-radius: 6px; color: #f85149; padding: 10px; font-size: 13px; }
 .code-toggle { margin-top: 12px; }
 .btn-code { background: transparent; color: #58a6ff; border: 1px solid #21262d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 16px; overflow-x: auto; }
-.code-panel pre { margin: 0; }
-.code-panel code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.code-filename { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #58a6ff; }
+.code-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #7d8590; padding: 2px 8px; border: 1px solid #21262d; border-radius: 4px; }
+.code-body { overflow: auto; max-height: 400px; padding: 12px 0; }
+.code-body pre { margin: 0; background: transparent !important; border: none !important; box-shadow: none !important; }
+.code-body code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.6; background: transparent !important; border: none !important; color: #8b949e !important; padding: 0 !important; }
+.code-line { display: block; padding: 0 16px; transition: background 0.2s, color 0.2s; }
+.code-line.highlighted { background: rgba(77, 232, 194, 0.08); color: #4de8c2 !important; }
+.line-num { display: inline-block; width: 36px; min-width: 36px; color: #3a4a5e; user-select: none; text-align: right; margin-right: 16px; }
 </style>

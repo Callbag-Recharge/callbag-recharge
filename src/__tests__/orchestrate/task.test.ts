@@ -223,7 +223,7 @@ describe("task — skip predicate", () => {
 // task() — error + fallback
 // ==========================================================================
 describe("task — error handling", () => {
-	it("emits null on error by default", async () => {
+	it("emits undefined on error by default", async () => {
 		const trigger = fromTrigger<string>();
 
 		const wf = pipeline({
@@ -239,7 +239,7 @@ describe("task — error handling", () => {
 		trigger.fire("go");
 		await new Promise((r) => setTimeout(r, 50));
 
-		expect(values).toContain(null);
+		expect(values).toContain(undefined);
 
 		wf.destroy();
 	});
@@ -450,7 +450,7 @@ describe("task — async generator guard", () => {
 
 		// task should have errored — taskState captures the throw
 		const meta = wf.steps.stream.get();
-		expect(meta).toBeNull(); // fallback null on error
+		expect(meta).toBeUndefined(); // fallback undefined on error
 		expect(wf.status.get()).toBe("errored");
 
 		wf.destroy();
@@ -585,7 +585,7 @@ describe("task — Inspector.observe", () => {
 // task() — diamond with error propagation (airflow-demo pattern)
 // ==========================================================================
 describe("task — diamond with error propagation", () => {
-	it("downstream receives null when upstream errors (no fallback)", async () => {
+	it("downstream receives undefined when upstream errors (no fallback)", async () => {
 		const trigger = fromTrigger<string>();
 
 		const wf = pipeline({
@@ -594,11 +594,10 @@ describe("task — diamond with error propagation", () => {
 				throw new Error("upstream fail");
 			}),
 			downstream: task(["failing"], async (_signal, [v]) => `got:${v}`, {
-				skip: ([v]) => v === null,
+				skip: ([v]) => v === undefined,
 			}),
 		});
 
-		const downstreamDef = wf as any;
 		const statusObs = Inspector.observe(wf.status);
 
 		subscribe(wf.steps.downstream, () => {});
@@ -613,7 +612,7 @@ describe("task — diamond with error propagation", () => {
 		wf.destroy();
 	});
 
-	it("partial failure in diamond: one branch fails, aggregate still runs", async () => {
+	it("partial failure in diamond: one branch fails, aggregate skipped by undefined guard", async () => {
 		const trigger = fromTrigger<string>();
 		let aggCalls = 0;
 
@@ -633,7 +632,7 @@ describe("task — diamond with error propagation", () => {
 					return `merged:${a}+${b}`;
 				},
 				{
-					skip: ([a, b]) => a === null && b === null,
+					skip: ([a, b]) => a === undefined && b === undefined,
 				},
 			),
 		});
@@ -643,8 +642,11 @@ describe("task — diamond with error propagation", () => {
 		trigger.fire("go");
 		await new Promise((r) => setTimeout(r, 100));
 
-		// Aggregate should have run (only A failed, B succeeded)
-		expect(aggCalls).toBeGreaterThanOrEqual(1);
+		// Aggregate should be skipped — branchA emits undefined on error,
+		// and the undefined guard catches it before the task fn runs
+		expect(aggCalls).toBe(0);
+		// Pipeline status is "errored" because branchA errored
+		expect(wf.status.get()).toBe("errored");
 
 		wf.destroy();
 	});
@@ -667,7 +669,7 @@ describe("task — diamond with error propagation", () => {
 					aggCalls++;
 					return `${a}+${b}`;
 				},
-				{ skip: ([a, b]) => a === null && b === null },
+				{ skip: ([a, b]) => a === undefined && b === undefined },
 			),
 		});
 
@@ -676,9 +678,9 @@ describe("task — diamond with error propagation", () => {
 		trigger.fire("go");
 		await new Promise((r) => setTimeout(r, 80));
 
-		// Aggregate should not have run (both null → skipped)
-		// Note: combine fires when each dep emits null, the first time
-		// one dep is still undefined (guard), second time both are null (skip)
+		// Aggregate should not have run (both undefined → skipped)
+		// Note: combine fires when each dep emits undefined, the first time
+		// one dep is still undefined (guard), second time both are undefined (skip)
 		expect(aggCalls).toBe(0);
 
 		wf.destroy();
@@ -712,7 +714,7 @@ describe("task — airflow-demo re-trigger pattern", () => {
 					runCounter++;
 					return `${a}+${b}`;
 				},
-				{ skip: ([a, b]) => a === null && b === null },
+				{ skip: ([a, b]) => a === undefined && b === undefined },
 			),
 		});
 

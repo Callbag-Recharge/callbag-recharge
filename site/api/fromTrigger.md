@@ -50,4 +50,4 @@ trigger.fire("go"); // logs "go" again
 
 ## See Also
 
-- [producer](../core/producer) — general-purpose source
+- [producer](./producer) — general-purpose source

@@ -21,6 +21,7 @@ import { RESET, TEARDOWN } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
+import { ON_FAILURE_ROLE } from "./onFailure";
 import type { TaskState } from "./types";
 import { TASK_STATE } from "./types";
 
@@ -173,6 +174,7 @@ export function source<T>(store: Store<T>, opts?: { name?: string }): StepDef<T>
  * @remarks **Auto-wiring:** Step deps are resolved by name. Factory functions receive dep stores in declared order.
  * @remarks **Topological sort:** Steps are wired in dependency order. Cycles are detected and throw.
  * @remarks **Auto status:** When using `task()` steps, `status` automatically tracks work execution (idle → active → completed/errored). Falls back to stream lifecycle tracking when no tasks are detected.
+ * @remarks **Skip propagation:** When a task's upstream deps all reach terminal states (success/error/skipped) with at least one non-success, the pipeline automatically marks the idle downstream task as "skipped". This cascades transitively through the DAG.
  * @remarks **opts.tasks:** Pass additional `TaskState` stores so `status` reflects work outside `task()`-wrapped steps (e.g. UI demos that run `taskState` manually). Duplicates are deduped with auto-detected task states. Note: `destroy()` does NOT destroy externally provided `opts.tasks` — the caller owns their lifecycle.
  * @remarks **Destroy ownership:** `destroy()` tears down subscriptions, destroys auto-detected `task()` states, and invalidates approval controls. Externally provided `opts.tasks` are left alive since the caller owns them.
  * @remarks **Branch support:** Use `branch()` steps with compound deps like `"validate.fail"` for conditional routing.
@@ -385,33 +387,123 @@ export function pipeline<S extends Record<string, StepDef>>(
 	// --- Task status derived from taskState instances ---
 	// Auto-detect task states from task() step defs (via TASK_STATE symbol), merge with explicitly provided tasks.
 	const autoDetectedTasks: TaskState<any>[] = [];
+	const taskStateByName = new Map<string, TaskState<any>>();
+	// Steps tagged as error handlers (onFailure) are excluded from skip propagation
+	const errorHandlerSteps = new Set<string>();
 	for (const name of stepNames) {
 		const def = steps[name] as any;
-		if (def[TASK_STATE]) autoDetectedTasks.push(def[TASK_STATE]);
+		if (def[TASK_STATE]) {
+			autoDetectedTasks.push(def[TASK_STATE]);
+			taskStateByName.set(name, def[TASK_STATE]);
+		}
+		if (def[ON_FAILURE_ROLE]) {
+			errorHandlerSteps.add(name);
+		}
 	}
 	const externalTasks: TaskState<any>[] = [];
+	const externalTasksByName = new Map<string, TaskState<any>>();
 	if (opts?.tasks) {
-		for (const ts of Object.values(opts.tasks)) {
+		for (const [name, ts] of Object.entries(opts.tasks)) {
 			externalTasks.push(ts);
+			externalTasksByName.set(name, ts);
 		}
 	}
 	// Deduplicate (auto + external merged)
 	const dedupedTasks = [...new Set([...autoDetectedTasks, ...externalTasks])];
 
+	// Merged name→taskState map for skip propagation (includes external tasks)
+	const allTasksByName = new Map<string, TaskState<any>>([
+		...taskStateByName,
+		...externalTasksByName,
+	]);
+
 	// Primary status: if tasks exist, derive from taskState. Otherwise fall back to stream status.
 	let status: Store<PipelineStatus>;
 	if (dedupedTasks.length > 0) {
 		const taskStatusStores = dedupedTasks.map((ts) => ts.status);
+
+		// --- Skip propagation (two-phase: pure compute + deferred mutation) ---
+		// Phase 1 (pure): Compute which idle tasks should be skipped based on
+		// upstream terminal states. Uses a virtual set to handle cascading without
+		// mutating stores. onFailure steps are excluded — they activate on error.
+		const computeSkips = (): Map<string, string[]> => {
+			const skipped = new Map<string, string[]>();
+			const maxIter = allTasksByName.size;
+			let changed = true;
+			let iter = 0;
+			while (changed) {
+				if (++iter > maxIter) break; // safety: max cascading depth = number of tasks
+				changed = false;
+				for (const [name, ts] of allTasksByName) {
+					if (skipped.has(name)) continue;
+					if (errorHandlerSteps.has(name)) continue;
+					if (ts.status.get() !== "idle") continue;
+
+					const depNames = steps[name]
+						? steps[name].deps.map((d) => (d.includes(".") ? d.split(".")[0] : d))
+						: [];
+					const taskDeps = depNames.filter((d) => allTasksByName.has(d));
+					if (taskDeps.length === 0) continue;
+
+					const allTerminal = taskDeps.every((d) => {
+						if (skipped.has(d)) return true;
+						const s = allTasksByName.get(d)!.status.get();
+						return s === "success" || s === "error" || s === "skipped";
+					});
+					const anyFailed = taskDeps.some((d) => {
+						if (skipped.has(d)) return true;
+						const s = allTasksByName.get(d)!.status.get();
+						return s === "error" || s === "skipped";
+					});
+
+					if (allTerminal && anyFailed) {
+						const failedDeps = taskDeps.filter((d) => {
+							if (skipped.has(d)) return true;
+							const s = allTasksByName.get(d)!.status.get();
+							return s === "error" || s === "skipped";
+						});
+						skipped.set(name, failedDeps);
+						changed = true;
+					}
+				}
+			}
+			return skipped;
+		};
+
+		// Phase 2 (side effect): Apply markSkipped() mutations. Called from a
+		// subscriber AFTER the derived settles — no re-entrant derived evaluation.
+		const applySkips = () => {
+			const toSkip = computeSkips();
+			for (const [name, failedDeps] of toSkip) {
+				const ts = allTasksByName.get(name)!;
+				if (ts.status.get() !== "idle") continue;
+				Inspector.annotate(
+					ts.status,
+					`skipped: upstream [${failedDeps.join(", ")}] failed/skipped`,
+				);
+				ts.markSkipped();
+			}
+		};
+
 		status = derived(
 			taskStatusStores,
 			() => {
+				// Pure: compute virtual skips for accurate status aggregation
+				const virtualSkips = computeSkips();
+				const virtualSkipStores = new Set<Store<any>>();
+				for (const [name] of virtualSkips) {
+					const ts = allTasksByName.get(name);
+					if (ts) virtualSkipStores.add(ts.status);
+				}
+
 				let anyRunning = false;
 				let anyError = false;
 				let allDone = true;
 				let allIdle = true;
 
 				for (const statusStore of taskStatusStores) {
-					const s = statusStore.get();
+					let s = statusStore.get() as string;
+					if (virtualSkipStores.has(statusStore)) s = "skipped";
 					if (s === "running") anyRunning = true;
 					if (s === "error") anyError = true;
 					if (s !== "success" && s !== "skipped") allDone = false;
@@ -426,7 +518,8 @@ export function pipeline<S extends Record<string, StepDef>>(
 			},
 			{ equals: Object.is },
 		);
-		const statusUnsub = subscribe(status, () => {});
+		// Subscribe to keep status connected + trigger deferred skip mutations
+		const statusUnsub = subscribe(status, () => applySkips());
 		unsubs.push(statusUnsub);
 		Inspector.register(status, { kind: "pipeline-status", name: `${baseName}:status` });
 	} else {

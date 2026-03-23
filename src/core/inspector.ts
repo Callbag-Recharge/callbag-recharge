@@ -100,6 +100,44 @@ export interface DerivedObserveResult<T> extends ObserveResult<T> {
 	evaluations: DerivedObserveEntry<T>[];
 }
 
+export interface TaskStateTransition {
+	/** Previous status. */
+	from: string;
+	/** New status. */
+	to: string;
+	/** Error value (if transitioning to "error"). */
+	error?: unknown;
+	/** Timestamp (ms since epoch). */
+	timestamp: number;
+}
+
+export interface TaskStateObserveResult {
+	/** All status transitions, in order. */
+	transitions: TaskStateTransition[];
+	/** Current status value. */
+	readonly currentStatus: string;
+	/** Disconnect the observer. */
+	dispose: () => void;
+}
+
+export interface CausalityEntry<T = unknown> {
+	/** The computed result. */
+	result: T;
+	/** Index of the dep that triggered this evaluation (-1 if unknown/initial). */
+	triggerDepIndex: number;
+	/** Name of the triggering dep (if registered with Inspector). */
+	triggerDepName: string | undefined;
+	/** Snapshot of all dep values at evaluation time. */
+	depValues: unknown[];
+	/** Timestamp (ms since epoch). */
+	timestamp: number;
+}
+
+export interface CausalityResult<T> extends ObserveResult<T> {
+	/** Per-evaluation causality records. */
+	causality: CausalityEntry<T>[];
+}
+
 // Static-only class is intentional API for Inspector namespace
 /**
  * Opt-in graph observability (`inspect`, `graph`, `trace`, `observe`, …). Metadata in WeakMaps.
@@ -793,6 +831,139 @@ export class Inspector {
 				impl._fn = originalFn;
 				originalDispose();
 				return Inspector.observeDerived(store);
+			},
+		};
+
+		return result;
+	}
+
+	/**
+	 * Observe a taskState's status transitions over time. Captures each
+	 * status change with previous/new status, error (if any), and timestamp.
+	 *
+	 * ```ts
+	 * const obs = Inspector.observeTaskState(myTask);
+	 * await myTask.run(async () => "done");
+	 * obs.transitions
+	 * // [{ from: "idle", to: "running", timestamp: ... },
+	 * //  { from: "running", to: "success", timestamp: ... }]
+	 * obs.dispose();
+	 * ```
+	 */
+	static observeTaskState(taskState: {
+		status: Store<any>;
+		error: Store<any>;
+	}): TaskStateObserveResult {
+		let prevStatus: string = taskState.status.get();
+		const transitions: TaskStateTransition[] = [];
+
+		// Subscribe directly to capture status transitions
+		let talkback: ((type: number) => void) | null = null;
+		taskState.status.source(START, (type: number, data: any) => {
+			if (type === START) {
+				talkback = data;
+				return;
+			}
+			if (type === DATA) {
+				const newStatus = data as string;
+				if (newStatus !== prevStatus) {
+					const entry: TaskStateTransition = {
+						from: prevStatus,
+						to: newStatus,
+						timestamp: Date.now(),
+					};
+					if (newStatus === "error") {
+						entry.error = taskState.error.get();
+					}
+					transitions.push(entry);
+					prevStatus = newStatus;
+				}
+			}
+			if (type === END) talkback = null;
+		});
+
+		return {
+			transitions,
+			get currentStatus() {
+				return taskState.status.get() as string;
+			},
+			dispose: () => {
+				talkback?.(END);
+			},
+		};
+	}
+
+	/**
+	 * Observe a derived store with causality tracking — records which dep
+	 * triggered each recomputation. Wraps the derived's `_fn` to snapshot
+	 * dep values before and after, identifying the changed dep.
+	 *
+	 * ```ts
+	 * const obs = Inspector.causalityTrace(myDerived);
+	 * depA.set(5);
+	 * obs.causality[0].triggerDepIndex // 0 — depA triggered it
+	 * obs.causality[0].triggerDepName  // "depA" (if named)
+	 * obs.dispose();
+	 * ```
+	 *
+	 * @remarks Only one _fn-wrapping observer (`causalityTrace` or `observeDerived`)
+	 * may be active per derived store at a time. Activating a second without
+	 * disposing the first will overwrite the wrapped `_fn`, causing the first
+	 * observer to stop recording and its `dispose()` to restore the wrong original.
+	 */
+	static causalityTrace<T>(store: Store<T>): CausalityResult<T> {
+		const causality: CausalityEntry<T>[] = [];
+		const impl = store as any;
+
+		const originalFn = impl._fn;
+		if (typeof originalFn !== "function" || !Array.isArray(impl._deps)) {
+			// Not a derived — fall back to regular observe with empty causality
+			const base = Inspector.observe<T>(store);
+			return { ...base, causality };
+		}
+
+		const deps: Store<unknown>[] = impl._deps;
+		let prevDepValues: unknown[] = deps.map((d) => d.get());
+
+		impl._fn = () => {
+			const currentDepValues = deps.map((d) => d.get());
+			const result = originalFn();
+
+			// Find which dep changed
+			let triggerIndex = -1;
+			for (let i = 0; i < deps.length; i++) {
+				if (!Object.is(currentDepValues[i], prevDepValues[i])) {
+					triggerIndex = i;
+					break; // First changed dep is the trigger
+				}
+			}
+
+			causality.push({
+				result,
+				triggerDepIndex: triggerIndex,
+				triggerDepName: triggerIndex >= 0 ? Inspector.getName(deps[triggerIndex]) : undefined,
+				depValues: currentDepValues,
+				timestamp: Date.now(),
+			});
+
+			prevDepValues = currentDepValues;
+			return result;
+		};
+
+		const base = Inspector._observe<T>(store);
+
+		const originalDispose = base.dispose;
+		const result: CausalityResult<T> = {
+			...base,
+			causality,
+			dispose: () => {
+				impl._fn = originalFn;
+				originalDispose();
+			},
+			reconnect: () => {
+				impl._fn = originalFn;
+				originalDispose();
+				return Inspector.causalityTrace(store);
 			},
 		};
 

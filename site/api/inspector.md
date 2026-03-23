@@ -26,6 +26,10 @@ class Inspector {
   static spy<T>(store: Store<T>, opts?: { name?: string; log?: Function }): ObserveResult<T>;
   static trace<T>(store: Store<T>, cb: (value: T, prev: T | undefined) => void): () => void;
 
+  // Orchestrate helpers
+  static observeTaskState(taskState: { status: Store<any>; error: Store<any> }): TaskStateObserveResult;
+  static causalityTrace<T>(store: Store<T>): CausalityResult<T>;
+
   // Graph visualization
   static tap<T>(store: Store<T>, name?: string): Store<T>;
 }
@@ -55,6 +59,47 @@ interface ObserveResult<T> {
   resolvedCount: number;
   name: string | undefined;
   dispose: () => void;
+}
+```
+
+### TaskStateTransition
+
+```ts
+interface TaskStateTransition {
+  from: string;
+  to: string;
+  error?: unknown;
+  timestamp: number;
+}
+```
+
+### TaskStateObserveResult
+
+```ts
+interface TaskStateObserveResult {
+  transitions: TaskStateTransition[];
+  readonly currentStatus: string;
+  dispose: () => void;
+}
+```
+
+### CausalityEntry
+
+```ts
+interface CausalityEntry<T = unknown> {
+  result: T;
+  triggerDepIndex: number;
+  triggerDepName: string | undefined;
+  depValues: unknown[];
+  timestamp: number;
+}
+```
+
+### CausalityResult
+
+```ts
+interface CausalityResult<T> extends ObserveResult<T> {
+  causality: CausalityEntry<T>[];
 }
 ```
 
@@ -97,6 +142,13 @@ type NodeStatus =
 | `spy(store, opts?)` | Like `observe()` but also logs each event. Pass custom logger or defaults to `console.log`. |
 | `trace(store, cb)` | Subscribes to value changes only (deduped via `Object.is`). Returns unsubscribe function. |
 | `tap(store, name?)` | Creates a transparent passthrough wrapper for graph visualization. Zero overhead — subscribers connect to original. |
+
+## API — Orchestrate Helpers
+
+| Method | Description |
+|--------|-------------|
+| `observeTaskState(taskState)` | Subscribes to a `taskState`'s status and error stores. Returns live `TaskStateObserveResult` with status transitions. Test-friendly for orchestrate assertions. |
+| `causalityTrace(store)` | Extends `observe()` for derived stores. Records which dep triggered each re-evaluation, with dep values snapshot. Only works on derived stores (throws otherwise). |
 
 ### Properties
 
@@ -192,6 +244,41 @@ const tapped = Inspector.tap(source, 'tap-point');
 
 // tapped appears as a separate node in Inspector.graph()
 // but delegates get()/source() to the original — zero overhead
+```
+
+### observeTaskState() for orchestrate testing
+
+```ts
+import { taskState, Inspector } from 'callbag-recharge';
+
+const task = taskState<string>();
+const obs = Inspector.observeTaskState(task);
+
+await task.run(async () => 'done');
+
+obs.transitions;
+// [{ from: 'idle', to: 'running', timestamp: ... },
+//  { from: 'running', to: 'success', timestamp: ... }]
+obs.currentStatus; // 'success'
+obs.dispose();
+```
+
+### causalityTrace() for derived debugging
+
+```ts
+import { state, derived, Inspector } from 'callbag-recharge';
+
+const a = state(1, { name: 'a' });
+const b = state(2, { name: 'b' });
+const sum = derived([a, b], () => a.get() + b.get());
+
+const trace = Inspector.causalityTrace(sum);
+
+a.set(10);
+trace.causality[0].triggerDepName; // 'a'
+trace.causality[0].depValues;     // [10, 2]
+trace.causality[0].result;        // 12
+trace.dispose();
 ```
 
 ### Disabling in production

@@ -411,7 +411,7 @@ describe("of", () => {
 });
 
 describe("empty", () => {
-	it("works as inner source in switchMap — emits undefined (inner get() before completion)", () => {
+	it("works as inner source in switchMap — no emission when inner completes without emitting (rxjs EMPTY semantics)", () => {
 		const outer = state(0);
 		const mapped = pipe(
 			outer,
@@ -420,10 +420,9 @@ describe("empty", () => {
 		const values: unknown[] = [];
 		subscribe(mapped, (v) => values.push(v));
 
-		// switchMap reads inner.get() on switch, which is undefined for empty()
-		// This is expected — switchMap always emits inner's current value on switch
+		// rxjs semantics: inner completing without emitting produces no output
 		outer.set(1);
-		expect(values).toEqual([undefined]);
+		expect(values).toEqual([]);
 	});
 });
 

@@ -52,7 +52,7 @@ describe("sensor", () => {
 		trigger.fire(42);
 		// Wait for 3 polls: immediate + 2 interval ticks
 		await vi.waitFor(() => {
-			expect(values.filter((v) => v !== null)).toEqual([42]);
+			expect(values).toEqual([42]);
 		});
 
 		wf.destroy();
@@ -69,12 +69,12 @@ describe("sensor", () => {
 		};
 		const wf = pipeline(steps);
 
-		const { values } = collect(wf.steps.ready);
+		collect(wf.steps.ready);
 
 		trigger.fire("test");
 
 		await vi.waitFor(() => {
-			expect(values).toContain(null);
+			expect(steps.ready.status.get()).toBe("error");
 			expect(steps.ready.error.get()).toBeDefined();
 		});
 
@@ -107,8 +107,7 @@ describe("sensor", () => {
 		// Re-trigger cancels previous polling loop
 		trigger.fire("go");
 		await vi.waitFor(() => {
-			const meaningful = values.filter((v) => v !== null);
-			expect(meaningful).toContain("go");
+			expect(values).toContain("go");
 		});
 
 		wf.destroy();
@@ -233,11 +232,11 @@ describe("sensor", () => {
 		};
 		const wf = pipeline(steps);
 
-		const { values } = collect(wf.steps.ready);
+		collect(wf.steps.ready);
 
 		trigger.fire("test");
 		await vi.waitFor(() => {
-			expect(values).toContain(null);
+			expect(steps.ready.status.get()).toBe("error");
 			expect(steps.ready.error.get()).toBeDefined();
 		});
 

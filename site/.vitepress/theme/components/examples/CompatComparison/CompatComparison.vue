@@ -1,11 +1,20 @@
 <script setup lang="ts">
 import {
 	jotaiCount,
+	jotaiDecrement,
 	jotaiDoubled,
+	jotaiIncrement,
+	jotaiReset,
 	nativeCount,
+	nativeDecrement,
 	nativeDoubled,
+	nativeIncrement,
+	nativeReset,
 	signalCount,
+	signalDecrement,
 	signalDoubled,
+	signalIncrement,
+	signalReset,
 	zustandStore,
 } from "@examples/compat-comparison";
 import compatRaw from "@examples/compat-comparison.ts?raw";
@@ -27,30 +36,56 @@ const minI = dLines
 		const x = l.match(/^(\t+)/);
 		return x ? Math.min(m, x[1].length) : m;
 	}, Infinity);
-const _SOURCE =
+const SOURCE =
 	minI > 0 && minI < Infinity
 		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
-// Native — use Vue bindings
-const _natCount = useSubscribe(nativeCount);
-const _natDoubled = useSubscribe(nativeDoubled);
+const codeLines = SOURCE.split("\n");
 
-// Jotai — subscribe manually via the atom's store
-const _jCount = useSubscribe(jotaiCount._store);
-const _jDoubled = useSubscribe(jotaiDoubled._store);
+// Native
+const natCount = useSubscribe(nativeCount);
+const natDoubled = useSubscribe(nativeDoubled);
 
-// Zustand — subscribe to store
+// Jotai
+const jCount = useSubscribe(jotaiCount._store);
+const jDoubled = useSubscribe(jotaiDoubled._store);
+
+// Zustand
 const zState = ref(zustandStore.getState());
 const zUnsub = zustandStore.subscribe((s) => {
 	zState.value = { ...s };
 });
 
-// Signals — subscribe via underlying store
-const _sCount = useSubscribe(signalCount._store);
-const _sDoubled = useSubscribe(signalDoubled._store);
+// Signals
+const sCount = useSubscribe(signalCount._store);
+const sDoubled = useSubscribe(signalDoubled._store);
 
-const _showCode = ref(false);
+const showCode = ref(false);
+
+// Highlight: map API sections to code ranges
+const hoveredApi = ref<string | null>(null);
+const API_PATTERNS: Record<string, RegExp> = {
+	native: /\bnative\w*\b/i,
+	jotai: /\bjotai\w*\b/i,
+	zustand: /\bzustand\w*\b/i,
+	signals: /\bsignal\w*\b/i,
+};
+
+const highlightMap: Record<string, number[]> = {};
+codeLines.forEach((line: string, i: number) => {
+	for (const [id, pattern] of Object.entries(API_PATTERNS)) {
+		if (pattern.test(line)) {
+			if (!highlightMap[id]) highlightMap[id] = [];
+			highlightMap[id].push(i);
+		}
+	}
+});
+
+function isLineHighlighted(lineIdx: number): boolean {
+	if (!hoveredApi.value) return false;
+	return highlightMap[hoveredApi.value]?.includes(lineIdx) ?? false;
+}
 
 onUnmounted(() => {
 	zUnsub();
@@ -65,7 +100,7 @@ onUnmounted(() => {
 
       <div class="grid">
         <!-- Native -->
-        <div class="card">
+        <div class="card" @mouseenter="hoveredApi = 'native'" @mouseleave="hoveredApi = null">
           <div class="card-header native">callbag-recharge</div>
           <div class="card-body">
             <div class="counter-display">{{ natCount }}</div>
@@ -80,7 +115,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Jotai -->
-        <div class="card">
+        <div class="card" @mouseenter="hoveredApi = 'jotai'" @mouseleave="hoveredApi = null">
           <div class="card-header jotai">Jotai compat</div>
           <div class="card-body">
             <div class="counter-display">{{ jCount }}</div>
@@ -95,7 +130,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Zustand -->
-        <div class="card">
+        <div class="card" @mouseenter="hoveredApi = 'zustand'" @mouseleave="hoveredApi = null">
           <div class="card-header zustand">Zustand compat</div>
           <div class="card-body">
             <div class="counter-display">{{ zState.count }}</div>
@@ -110,7 +145,7 @@ onUnmounted(() => {
         </div>
 
         <!-- Signals -->
-        <div class="card">
+        <div class="card" @mouseenter="hoveredApi = 'signals'" @mouseleave="hoveredApi = null">
           <div class="card-header signals">TC39 Signals</div>
           <div class="card-body">
             <div class="counter-display">{{ sCount }}</div>
@@ -126,11 +161,25 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Code panel -->
     <div class="code-toggle">
       <button @click="showCode = !showCode" class="btn-code">{{ showCode ? 'Hide Source' : 'Show Source' }}</button>
     </div>
     <div v-if="showCode" class="code-panel">
-      <pre><code>{{ SOURCE }}</code></pre>
+      <div class="code-header">
+        <span class="code-filename">compat-comparison.ts</span>
+        <span class="code-badge">{{ codeLines.length }} lines</span>
+      </div>
+      <div class="code-body">
+        <pre><code><template
+  v-for="(line, i) in codeLines"
+  :key="i"
+><span
+  class="code-line"
+  :class="{ highlighted: isLineHighlighted(i) }"
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
+</span></template></code></pre>
+      </div>
     </div>
   </div>
 </template>
@@ -141,7 +190,8 @@ onUnmounted(() => {
 h3 { color: #e6edf3; margin: 0 0 4px; font-size: 18px; }
 .subtitle { color: #7d8590; font-size: 13px; margin: 0 0 20px; }
 .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-.card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+.card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; transition: border-color 0.15s; }
+.card:hover { border-color: #30363d; }
 .card-header { padding: 8px 12px; font-size: 12px; font-weight: 600; letter-spacing: 0.3px; }
 .native { background: #1a3a2a; color: #3fb950; }
 .jotai { background: #1a2a3a; color: #58a6ff; }
@@ -157,7 +207,14 @@ h3 { color: #e6edf3; margin: 0 0 4px; font-size: 18px; }
 .api-hint { color: #484f58; font-size: 11px; font-family: 'JetBrains Mono', monospace; }
 .code-toggle { margin-top: 12px; }
 .btn-code { background: transparent; color: #58a6ff; border: 1px solid #21262d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 16px; overflow-x: auto; }
-.code-panel pre { margin: 0; }
-.code-panel code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.code-filename { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #58a6ff; }
+.code-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #7d8590; padding: 2px 8px; border: 1px solid #21262d; border-radius: 4px; }
+.code-body { overflow: auto; max-height: 400px; padding: 12px 0; }
+.code-body pre { margin: 0; background: transparent !important; border: none !important; box-shadow: none !important; }
+.code-body code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.6; background: transparent !important; border: none !important; color: #8b949e !important; padding: 0 !important; }
+.code-line { display: block; padding: 0 16px; transition: background 0.2s, color 0.2s; }
+.code-line.highlighted { background: rgba(77, 232, 194, 0.08); color: #4de8c2 !important; }
+.line-num { display: inline-block; width: 36px; min-width: 36px; color: #3a4a5e; user-select: none; text-align: right; margin-right: 16px; }
 </style>

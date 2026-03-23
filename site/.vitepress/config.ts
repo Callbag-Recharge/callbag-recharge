@@ -88,7 +88,7 @@ export default defineConfig({
 			{ text: "Recipes", link: "/recipes/" },
 			{ text: "Comparisons", link: "/comparisons/" },
 			{ text: "Edge AI", link: "/edge-ai" },
-			{ text: "Demos", link: "/recipes/" },
+			{ text: "Demos", link: "/demos/" },
 			{ text: "Architecture", link: "/architecture/" },
 		],
 
@@ -208,6 +208,7 @@ export default defineConfig({
 			{
 				text: "Demos",
 				items: [
+					{ text: "Overview", link: "/demos/" },
 					{ text: "Airflow in TypeScript", link: "/demos/airflow" },
 					{ text: "Form Builder", link: "/demos/form-builder" },
 					{ text: "Agent Loop", link: "/demos/agent-loop" },

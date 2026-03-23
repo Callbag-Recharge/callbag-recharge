@@ -77,7 +77,7 @@ export function switchMap<A, B>(
 							},
 						},
 					);
-					if (!innerEmitted) {
+					if (!innerEmitted && !innerEnded) {
 						emit(innerStore.get());
 					}
 					if (innerEnded) innerUnsub = null;

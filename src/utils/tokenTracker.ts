@@ -85,7 +85,7 @@ const EMPTY_META: TokenMeta = Object.freeze({
  * });
  * ```
  *
- * @seeAlso [track](./track) — lifecycle tracking, [fromLLM](/api/fromLLM) — LLM adapter
+ * @seeAlso [track](./track) — lifecycle tracking, [fromLLM](./fromLLM) — LLM adapter
  *
  * @category orchestrate
  */

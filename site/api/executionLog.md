@@ -55,4 +55,4 @@ unsub();
 ## See Also
 
 - [pipeline](./pipeline) — workflow builder
-- [reactiveLog](/api/reactiveLog) — underlying data structure
+- [reactiveLog](./reactiveLog) — underlying data structure

@@ -18,8 +18,10 @@
 //   });
 // ---------------------------------------------------------------------------
 
+import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
+import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { firstValueFrom } from "../extra/firstValueFrom";
@@ -53,7 +55,7 @@ export interface LoopOpts {
 }
 
 /** Extended StepDef that carries task metadata as flat companion stores. */
-export interface LoopStepDef<T = any> extends StepDef<T | null> {
+export interface LoopStepDef<T = any> extends StepDef<T | undefined> {
 	/** Reactive task status: idle → running → success/error. */
 	readonly status: Store<import("./types").TaskStatus>;
 	/** Last error, if any. */
@@ -120,12 +122,12 @@ export function loop<T>(
 	const maxIterations = opts?.maxIterations ?? 100;
 	const ts = taskState<T>({ id: opts?.name });
 
-	const stepFactory = (...depStores: Store<any>[]): Store<T | null> => {
+	const stepFactory = (...depStores: Store<any>[]): Store<T | undefined> => {
 		// Source store: combine deps or use single dep directly
 		let source$: Store<any>;
 		if (depStores.length === 0) {
-			source$ = producer<null>(({ emit }) => {
-				emit(null);
+			source$ = producer<true>(({ emit }) => {
+				emit(true);
 				return undefined;
 			});
 		} else if (depStores.length === 1) {
@@ -134,19 +136,18 @@ export function loop<T>(
 			source$ = combine(...depStores);
 		}
 
-		return pipe(
+		const switched = pipe(
 			source$,
 			switchMap((raw: any) => {
 				// Unpack values from combine tuple or single value
 				const values: any[] =
 					depStores.length > 1 ? (raw as any[]) : depStores.length === 1 ? [raw] : [];
 
-				// Undefined guard: wait for ALL deps to have real values
+				// Undefined guard: don't emit, just complete so switchMap waits
 				if (depStores.length >= 1) {
 					for (const v of values) {
 						if (v === undefined) {
-							return producer<T | null>(({ emit, complete }) => {
-								emit(null);
+							return producer<T | undefined>(({ complete }) => {
 								complete();
 								return undefined;
 							});
@@ -156,12 +157,12 @@ export function loop<T>(
 
 				ts.restart();
 
-				return producer<T | null>(({ emit, complete }) => {
+				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
 
-					const safeEmit = (v: T | null) => {
+					const safeEmit = (v: T | undefined) => {
 						if (!stopped && !emitted) {
 							emitted = true;
 							emit(v);
@@ -244,7 +245,7 @@ export function loop<T>(
 					}).catch(() => {
 						// Error tracked by taskState
 						if (!stopped) {
-							safeEmit(null);
+							safeEmit(undefined);
 							safeComplete();
 						}
 					});
@@ -252,7 +253,33 @@ export function loop<T>(
 					return cleanup;
 				});
 			}),
-		) as Store<T | null>;
+		) as Store<T | undefined>;
+
+		// Wrap with lifecycle signal interceptor — when RESET/TEARDOWN arrives
+		// via talkback, delegate to taskState so pipeline doesn't need a flat task list.
+		return operator<T | undefined>(
+			[switched] as Store<unknown>[],
+			({ emit, signal, complete, error: actionsError }) => {
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						if (data === RESET) {
+							ts.restart();
+							return;
+						}
+						if (data === TEARDOWN) {
+							ts.destroy();
+							return;
+						}
+						signal(data);
+					} else if (type === DATA) {
+						emit(data as T | undefined);
+					} else if (type === END) {
+						data !== undefined ? actionsError(data) : complete();
+					}
+				};
+			},
+			{ kind: "loop", name: opts?.name },
+		) as Store<T | undefined>;
 	};
 
 	const def: LoopStepDef<T> = {

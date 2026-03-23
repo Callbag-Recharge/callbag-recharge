@@ -12,8 +12,10 @@
 //   });
 // ---------------------------------------------------------------------------
 
+import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
+import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { switchMap } from "../extra/switchMap";
 import type { StepDef } from "./pipeline";
@@ -65,7 +67,7 @@ export interface ForEachStepDef<R = any> extends StepDef<R[]> {
  *
  * @returns `ForEachStepDef<R>` — step definition for pipeline() with task tracking.
  *
- * @remarks **Single dep:** Exactly one dep required. Use task() to combine multiple deps first.
+ * @remarks **Single dep:** Exactly one dep required. Use task() to combine multiple deps first. Undefined dep values are guarded (waits for real values). Errors emit `undefined`.
  * @remarks **Parallel execution:** All items run concurrently by default. Set `concurrency` to limit.
  * @remarks **Task tracking:** Internal `taskState` tracks overall batch status/duration/errors. Pipeline auto-detects it.
  * @remarks **Re-trigger:** New upstream arrays cancel any in-flight batch (switchMap semantics). `runCount` accumulates across re-triggers.
@@ -94,24 +96,22 @@ export function forEach<T, R>(
 	const concurrency = opts?.concurrency ?? Number.POSITIVE_INFINITY;
 	const fallbackOpt = opts?.fallback;
 
-	const factory = (...depStores: Store<any>[]): Store<R[] | null> => {
+	const factory = (...depStores: Store<any>[]): Store<R[] | undefined> => {
 		const source$ = depStores[0];
 
-		return pipe(
+		const switched = pipe(
 			source$,
 			switchMap((items: any) => {
-				// Undefined guard
-				if (items === undefined || items === null) {
-					return producer<R[] | null>(({ emit, complete }) => {
-						emit(null);
+				// Undefined guard: don't emit, just complete so switchMap waits
+				if (items === undefined) {
+					return producer<R[] | undefined>(({ complete }) => {
 						complete();
 						return undefined;
 					});
 				}
 
 				if (!Array.isArray(items)) {
-					return producer<R[] | null>(({ emit, complete }) => {
-						emit(null);
+					return producer<R[] | undefined>(({ complete }) => {
 						complete();
 						return undefined;
 					});
@@ -120,10 +120,10 @@ export function forEach<T, R>(
 				// Restart for re-trigger: preserves cumulative runCount
 				ts.restart();
 
-				return producer<R[] | null>(({ emit, complete }) => {
+				return producer<R[] | undefined>(({ emit, complete }) => {
 					let stopped = false;
 
-					const safeEmit = (v: R[] | null) => {
+					const safeEmit = (v: R[] | undefined) => {
 						if (!stopped) emit(v);
 					};
 					const safeComplete = () => {
@@ -145,7 +145,7 @@ export function forEach<T, R>(
 					}).catch(() => {
 						// Error already tracked by taskState
 						if (!stopped) {
-							safeEmit(null);
+							safeEmit(undefined);
 							safeComplete();
 						}
 					});
@@ -155,7 +155,36 @@ export function forEach<T, R>(
 					};
 				});
 			}),
-		) as Store<R[] | null>;
+		) as Store<R[] | undefined>;
+
+		// Wrap with lifecycle signal interceptor — when RESET/TEARDOWN arrives
+		// via talkback, delegate to taskState so pipeline doesn't need a flat task list.
+		return operator<R[] | undefined>(
+			[switched] as Store<unknown>[],
+			({ emit, signal, complete, error: actionsError }) => {
+				return (_dep, type, data) => {
+					if (type === STATE) {
+						if (data === RESET) {
+							// restart() preserves runCount/result/lastRun so
+							// cumulative metrics survive pipeline re-triggers.
+							ts.restart();
+							return;
+						}
+						if (data === TEARDOWN) {
+							ts.destroy();
+							// Don't forward — operator will call complete() after this
+							return;
+						}
+						signal(data);
+					} else if (type === DATA) {
+						emit(data as R[] | undefined);
+					} else if (type === END) {
+						data !== undefined ? actionsError(data) : complete();
+					}
+				};
+			},
+			{ kind: "forEach", name: opts?.name },
+		) as Store<R[] | undefined>;
 	};
 
 	const def: ForEachStepDef<R> = {

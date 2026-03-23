@@ -8,6 +8,7 @@ import {
 	emailField,
 	nameField,
 	passwordField,
+	resetAll,
 } from "@examples/form-builder";
 import formRaw from "@examples/form-builder.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
@@ -23,54 +24,56 @@ const end = formRaw.indexOf(REGION_END);
 const after = start >= 0 ? formRaw.indexOf("\n", start) : -1;
 const rawRegion =
 	start >= 0 && end > start && after >= 0 ? formRaw.slice(after + 1, end).trimEnd() : formRaw;
-const lines = rawRegion.split("\n");
-const minIndent = lines
+const regionLines = rawRegion.split("\n");
+const minIndent = regionLines
 	.filter((l) => l.trim().length > 0)
 	.reduce((min, l) => {
 		const m = l.match(/^(\t+)/);
 		return m ? Math.min(min, m[1].length) : min;
 	}, Infinity);
-const _SOURCE =
+const SOURCE =
 	minIndent > 0 && minIndent < Infinity
-		? lines.map((l) => l.slice(minIndent).replace(/\t/g, "  ")).join("\n")
+		? regionLines.map((l) => l.slice(minIndent).replace(/\t/g, "  ")).join("\n")
 		: rawRegion.replace(/\t/g, "  ");
+
+const codeLines = SOURCE.split("\n");
 
 // ---------------------------------------------------------------------------
 // Reactive bindings via useSubscribe
 // ---------------------------------------------------------------------------
-const _name = useSubscribe(nameField.value);
-const _nameError = useSubscribe(nameField.error);
-const _nameDirty = useSubscribe(nameField.dirty);
-const _nameTouched = useSubscribe(nameField.touched);
+const name = useSubscribe(nameField.value);
+const nameError = useSubscribe(nameField.error);
+const nameDirty = useSubscribe(nameField.dirty);
+const nameTouched = useSubscribe(nameField.touched);
 
-const _email = useSubscribe(emailField.value);
-const _emailError = useSubscribe(emailField.error);
-const _emailDirty = useSubscribe(emailField.dirty);
-const _emailValidating = useSubscribe(emailField.validating);
+const email = useSubscribe(emailField.value);
+const emailError = useSubscribe(emailField.error);
+const emailDirty = useSubscribe(emailField.dirty);
+const emailValidating = useSubscribe(emailField.validating);
 
-const _password = useSubscribe(passwordField.value);
-const _passwordError = useSubscribe(passwordField.error);
-const _passwordDirty = useSubscribe(passwordField.dirty);
+const password = useSubscribe(passwordField.value);
+const passwordError = useSubscribe(passwordField.error);
+const passwordDirty = useSubscribe(passwordField.dirty);
 
-const _confirm = useSubscribe(confirmField.value);
-const _confirmError = useSubscribe(confirmField.error);
-const _confirmDirty = useSubscribe(confirmField.dirty);
+const confirm = useSubscribe(confirmField.value);
+const confirmError = useSubscribe(confirmField.error);
+const confirmDirty = useSubscribe(confirmField.dirty);
 
 const formValid = useSubscribe(allValid);
-const _formDirty = useSubscribe(anyDirty);
+const formDirty = useSubscribe(anyDirty);
 const formValidating = useSubscribe(anyValidating);
 
 const submitted = ref(false);
 
-function _onInput(field: { set: (v: string) => void; touch: () => void }, e: Event) {
+function onInput(field: { set: (v: string) => void; touch: () => void }, e: Event) {
 	field.set((e.target as HTMLInputElement).value);
 }
 
-function _onBlur(field: { touch: () => void }) {
+function onBlur(field: { touch: () => void }) {
 	field.touch();
 }
 
-function _handleSubmit() {
+function handleSubmit() {
 	if (formValid.value && !formValidating.value) {
 		submitted.value = true;
 		setTimeout(() => (submitted.value = false), 2000);
@@ -78,7 +81,55 @@ function _handleSubmit() {
 }
 
 // Code panel
-const _showCode = ref(false);
+const showCode = ref(false);
+
+// Highlight: map field names to code line ranges
+const hoveredField = ref<string | null>(null);
+const FIELD_PATTERNS: Record<string, RegExp> = {
+	name: /\bnameField\b/,
+	email: /\bemailField\b/,
+	password: /\bpasswordField\b/,
+	confirm: /\bconfirmField\b/,
+};
+
+const highlightMap: Record<string, number[]> = {};
+let blockStart = -1;
+let blockId: string | null = null;
+let depth = 0;
+
+codeLines.forEach((line: string, i: number) => {
+	if (blockStart < 0) {
+		for (const [id, pattern] of Object.entries(FIELD_PATTERNS)) {
+			if (pattern.test(line) && /=\s*formField\(/.test(line)) {
+				blockStart = i;
+				blockId = id;
+				depth = 0;
+				break;
+			}
+		}
+	}
+	if (blockStart >= 0) {
+		for (const ch of line) {
+			if (ch === "(" || ch === "{") depth++;
+			if (ch === ")" || ch === "}") depth--;
+		}
+		if (depth <= 0) {
+			if (blockId) {
+				highlightMap[blockId] = Array.from(
+					{ length: i - blockStart + 1 },
+					(_, j) => blockStart + j,
+				);
+			}
+			blockStart = -1;
+			blockId = null;
+		}
+	}
+});
+
+function isLineHighlighted(lineIdx: number): boolean {
+	if (!hoveredField.value) return false;
+	return highlightMap[hoveredField.value]?.includes(lineIdx) ?? false;
+}
 
 onUnmounted(() => {
 	disposeAll();
@@ -93,7 +144,8 @@ onUnmounted(() => {
 
       <form @submit.prevent="handleSubmit" class="form">
         <!-- Name -->
-        <div class="field" :class="{ error: nameTouched && nameError, valid: nameDirty && !nameError }">
+        <div class="field" :class="{ error: nameTouched && nameError, valid: nameDirty && !nameError }"
+          @mouseenter="hoveredField = 'name'" @mouseleave="hoveredField = null">
           <label>Name</label>
           <input
             :value="name"
@@ -105,7 +157,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Email -->
-        <div class="field" :class="{ error: emailDirty && emailError && !emailValidating, valid: emailDirty && !emailError && !emailValidating }">
+        <div class="field" :class="{ error: emailDirty && emailError && !emailValidating, valid: emailDirty && !emailError && !emailValidating }"
+          @mouseenter="hoveredField = 'email'" @mouseleave="hoveredField = null">
           <label>
             Email
             <span v-if="emailValidating" class="validating">checking...</span>
@@ -121,7 +174,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Password -->
-        <div class="field" :class="{ error: passwordDirty && passwordError, valid: passwordDirty && !passwordError }">
+        <div class="field" :class="{ error: passwordDirty && passwordError, valid: passwordDirty && !passwordError }"
+          @mouseenter="hoveredField = 'password'" @mouseleave="hoveredField = null">
           <label>Password</label>
           <input
             :value="password"
@@ -134,7 +188,8 @@ onUnmounted(() => {
         </div>
 
         <!-- Confirm Password -->
-        <div class="field" :class="{ error: confirmDirty && confirmError, valid: confirmDirty && !confirmError }">
+        <div class="field" :class="{ error: confirmDirty && confirmError, valid: confirmDirty && !confirmError }"
+          @mouseenter="hoveredField = 'confirm'" @mouseleave="hoveredField = null">
           <label>Confirm Password</label>
           <input
             :value="confirm"
@@ -166,14 +221,27 @@ onUnmounted(() => {
       </form>
     </div>
 
-    <!-- Code panel toggle -->
+    <!-- Code panel -->
     <div class="code-toggle">
       <button @click="showCode = !showCode" class="btn-code">
         {{ showCode ? 'Hide Source' : 'Show Source' }}
       </button>
     </div>
     <div v-if="showCode" class="code-panel">
-      <pre><code>{{ SOURCE }}</code></pre>
+      <div class="code-header">
+        <span class="code-filename">form-builder.ts</span>
+        <span class="code-badge">{{ codeLines.length }} lines</span>
+      </div>
+      <div class="code-body">
+        <pre><code><template
+  v-for="(line, i) in codeLines"
+  :key="i"
+><span
+  class="code-line"
+  :class="{ highlighted: isLineHighlighted(i) }"
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
+</span></template></code></pre>
+      </div>
     </div>
   </div>
 </template>
@@ -195,7 +263,12 @@ h3 { color: #e6edf3; margin: 0 0 4px; font-size: 18px; }
 .form { display: flex; flex-direction: column; gap: 16px; }
 .field {
   display: flex; flex-direction: column; gap: 4px;
+  transition: background 0.15s;
+  padding: 8px;
+  margin: -8px;
+  border-radius: 8px;
 }
+.field:hover { background: rgba(88, 166, 255, 0.04); }
 .field label {
   color: #c9d1d9; font-size: 13px; font-weight: 500;
   display: flex; align-items: center; gap: 8px;
@@ -235,11 +308,38 @@ h3 { color: #e6edf3; margin: 0 0 4px; font-size: 18px; }
 }
 .code-panel {
   margin-top: 8px; background: #0d1117; border: 1px solid #21262d;
-  border-radius: 8px; padding: 16px; overflow-x: auto;
+  border-radius: 8px; overflow: hidden;
 }
-.code-panel pre { margin: 0; }
-.code-panel code {
-  color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px;
-  line-height: 1.5; white-space: pre;
+.code-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 16px; border-bottom: 1px solid #21262d;
+}
+.code-filename {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #58a6ff;
+}
+.code-badge {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #7d8590;
+  padding: 2px 8px; border: 1px solid #21262d; border-radius: 4px;
+}
+.code-body {
+  overflow: auto; max-height: 400px; padding: 12px 0;
+}
+.code-body pre { margin: 0; background: transparent !important; border: none !important; box-shadow: none !important; }
+.code-body code {
+  font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.6;
+  background: transparent !important; border: none !important;
+  color: #8b949e !important; padding: 0 !important;
+}
+.code-line {
+  display: block; padding: 0 16px;
+  transition: background 0.2s, color 0.2s;
+}
+.code-line.highlighted {
+  background: rgba(77, 232, 194, 0.08);
+  color: #4de8c2 !important;
+}
+.line-num {
+  display: inline-block; width: 36px; min-width: 36px;
+  color: #3a4a5e; user-select: none; text-align: right; margin-right: 16px;
 }
 </style>

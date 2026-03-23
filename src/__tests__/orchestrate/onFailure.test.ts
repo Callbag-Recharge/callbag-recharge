@@ -24,7 +24,7 @@ describe("onFailure (dead letter step)", () => {
 		await new Promise((r) => setTimeout(r, 100));
 
 		// onFailure handler should have received the error
-		const last = results.filter((r) => r !== null).pop();
+		const last = results.filter((r) => r !== undefined).pop();
 		expect(last).toEqual({ handled: true, message: "fetch failed" });
 
 		unsub.unsubscribe();
@@ -50,8 +50,8 @@ describe("onFailure (dead letter step)", () => {
 
 		// Fetch should have succeeded
 		expect(fetchResults.some((r) => r === "result: hello")).toBe(true);
-		// DLQ should not have fired with a real value (only null from undefined skip)
-		expect(dlqResults.every((r) => r === null)).toBe(true);
+		// DLQ should not have fired — no error guard completes without emitting
+		expect(dlqResults.every((r) => r === undefined)).toBe(true);
 
 		unsub1.unsubscribe();
 		unsub2.unsubscribe();
@@ -107,7 +107,7 @@ describe("onFailure (dead letter step)", () => {
 		// Should have retried 2 times + initial = 3 attempts total
 		expect(attempts).toBe(3);
 		// DLQ should have caught the final error
-		const last = results.filter((r) => r !== null).pop();
+		const last = results.filter((r) => r !== undefined).pop();
 		expect(last).toBe("fail #3");
 
 		unsub.unsubscribe();
@@ -136,8 +136,8 @@ describe("onFailure (dead letter step)", () => {
 		(wf.steps.trigger as any).fire("second");
 		await new Promise((r) => setTimeout(r, 100));
 
-		const nonNull = results.filter((r) => r !== null);
-		expect(nonNull.length).toBeGreaterThanOrEqual(2);
+		const nonUndefined = results.filter((r) => r !== undefined);
+		expect(nonUndefined.length).toBeGreaterThanOrEqual(2);
 
 		unsub.unsubscribe();
 		wf.destroy();

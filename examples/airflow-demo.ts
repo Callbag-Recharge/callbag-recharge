@@ -171,17 +171,17 @@ const fetchCardsDef = task(
 const aggregateDef = task(
 	["fetchBank", "fetchCards"],
 	async (_signal, [bankVal, cardsVal]) => {
-		const bankOk = bankVal !== null;
-		const cardsOk = cardsVal !== null;
 		n.aggregate.log.append(
-			`[START] Merging: bank=${bankOk ? "ok" : "fail"}, cards=${cardsOk ? "ok" : "fail"}`,
+			`[START] Merging: bank=${bankVal ? "ok" : "fail"}, cards=${cardsVal ? "ok" : "fail"}`,
 		);
 		return simulateWork(n.aggregate, [300, 800], 0.05);
 	},
 	{
 		name: "aggregate",
-		skip: ([bankVal, cardsVal]) => bankVal === null && cardsVal === null,
-		onSkip: () => n.aggregate.log.append("[SKIP] Both sources failed"),
+		// No skip predicate needed — the undefined guard automatically blocks
+		// when either upstream emits undefined (error/skip). Pipeline skip
+		// propagation marks this task as "skipped".
+		onStart: () => n.aggregate.log.append("[START] Aggregating..."),
 	},
 );
 
@@ -190,7 +190,6 @@ const anomalyDef = task(
 	async (_signal, [_v]) => simulateWork(n.anomaly, [200, 600], 0.1),
 	{
 		name: "anomaly",
-		skip: ([v]) => v === null,
 		onStart: () => n.anomaly.log.append("[START] Running..."),
 	},
 );
@@ -200,7 +199,6 @@ const batchWriteDef = task(
 	async (_signal, [_v]) => simulateWork(n.batchWrite, [400, 1000], 0.08),
 	{
 		name: "batchWrite",
-		skip: ([v]) => v === null,
 		onStart: () => n.batchWrite.log.append("[START] Running..."),
 	},
 );
@@ -210,7 +208,6 @@ const alertDef = task(
 	async (_signal, [_v]) => simulateWork(n.alert, [100, 300], 0.02),
 	{
 		name: "alert",
-		skip: ([v]) => v === null,
 		onStart: () => n.alert.log.append("[START] Running..."),
 	},
 );

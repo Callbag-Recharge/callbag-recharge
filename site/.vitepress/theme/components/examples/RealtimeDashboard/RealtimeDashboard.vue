@@ -6,6 +6,8 @@ import {
 	resetDashboard,
 	running,
 	services,
+	startSimulation,
+	stopSimulation,
 	totalEvents,
 } from "@examples/realtime-dashboard";
 import dashRaw from "@examples/realtime-dashboard.ts?raw";
@@ -26,36 +28,60 @@ const minI = dLines
 		const x = l.match(/^(\t+)/);
 		return x ? Math.min(m, x[1].length) : m;
 	}, Infinity);
-const _SOURCE =
+const SOURCE =
 	minI > 0 && minI < Infinity
 		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
+const codeLines = SOURCE.split("\n");
+
 // Reactive bindings
-const _isRunning = useSubscribe(running);
-const _health = useSubscribe(healthSummary);
-const _eventCount = useSubscribe(totalEvents);
-const _recent = useSubscribe(recentEvents);
-const _svcSize = useSubscribe(services.sizeStore);
+const isRunning = useSubscribe(running);
+const health = useSubscribe(healthSummary);
+const eventCount = useSubscribe(totalEvents);
+const recent = useSubscribe(recentEvents);
+const svcSize = useSubscribe(services.sizeStore);
+const svcEntries = useSubscribe(services.keysStore);
 
-// Re-render service cards reactively
-const _svcEntries = useSubscribe(services.keysStore);
-
-function _getService(key: string): ServiceMetric | undefined {
+function getService(key: string): ServiceMetric | undefined {
 	return services.get(key);
 }
 
-function _healthColor(m: ServiceMetric): string {
+function healthColor(m: ServiceMetric): string {
 	if (m.errorRate > 0.05 || m.latencyMs > 1000) return "#f85149";
 	if (m.errorRate > 0.02 || m.latencyMs > 500) return "#d29922";
 	return "#3fb950";
 }
 
-function _formatTime(ts: number): string {
+function formatTime(ts: number): string {
 	return new Date(ts).toLocaleTimeString();
 }
 
-const _showCode = ref(false);
+const showCode = ref(false);
+
+// Highlight: map UI sections to code ranges
+const hoveredSection = ref<string | null>(null);
+const SECTION_PATTERNS: Record<string, RegExp> = {
+	services: /\bservices\b|reactiveMap/,
+	events: /\beventLog\b|reactiveLog|recentEvents/,
+	health: /\bhealthSummary\b|healthy|warning|critical/,
+	simulation: /\bstartSimulation\b|\bstopSimulation\b|simulate/,
+};
+
+const highlightMap: Record<string, number[]> = {};
+codeLines.forEach((line: string, i: number) => {
+	for (const [id, pattern] of Object.entries(SECTION_PATTERNS)) {
+		if (pattern.test(line)) {
+			if (!highlightMap[id]) highlightMap[id] = [];
+			highlightMap[id].push(i);
+		}
+	}
+});
+
+function isLineHighlighted(lineIdx: number): boolean {
+	if (!hoveredSection.value) return false;
+	return highlightMap[hoveredSection.value]?.includes(lineIdx) ?? false;
+}
 
 onUnmounted(() => {
 	resetDashboard();
@@ -79,7 +105,8 @@ onUnmounted(() => {
       </div>
 
       <!-- Health summary -->
-      <div class="summary-row">
+      <div class="summary-row"
+        @mouseenter="hoveredSection = 'health'" @mouseleave="hoveredSection = null">
         <div class="summary-card ok">
           <div class="summary-num">{{ health.healthy }}</div>
           <div class="summary-label">Healthy</div>
@@ -99,7 +126,8 @@ onUnmounted(() => {
       </div>
 
       <!-- Service cards -->
-      <div class="services">
+      <div class="services"
+        @mouseenter="hoveredSection = 'services'" @mouseleave="hoveredSection = null">
         <div v-for="key in svcEntries" :key="key" class="svc-card" v-if="getService(key)">
           <div class="svc-header">
             <span class="svc-dot" :style="{ background: healthColor(getService(key)!) }"></span>
@@ -115,7 +143,8 @@ onUnmounted(() => {
       </div>
 
       <!-- Event tail -->
-      <div class="event-log">
+      <div class="event-log"
+        @mouseenter="hoveredSection = 'events'" @mouseleave="hoveredSection = null">
         <h4>Recent Events <span class="event-count">(last 10)</span></h4>
         <div class="events">
           <div v-for="(ev, i) in recent" :key="i" class="event-row" :class="{ 'event-error': ev.isError }">
@@ -129,11 +158,25 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <!-- Code panel -->
     <div class="code-toggle">
       <button @click="showCode = !showCode" class="btn-code">{{ showCode ? 'Hide Source' : 'Show Source' }}</button>
     </div>
     <div v-if="showCode" class="code-panel">
-      <pre><code>{{ SOURCE }}</code></pre>
+      <div class="code-header">
+        <span class="code-filename">realtime-dashboard.ts</span>
+        <span class="code-badge">{{ codeLines.length }} lines</span>
+      </div>
+      <div class="code-body">
+        <pre><code><template
+  v-for="(line, i) in codeLines"
+  :key="i"
+><span
+  class="code-line"
+  :class="{ highlighted: isLineHighlighted(i) }"
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
+</span></template></code></pre>
+      </div>
     </div>
   </div>
 </template>
@@ -149,7 +192,8 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 14px; }
 .btn-start { background: #238636; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .btn-stop { background: #da3633; color: #fff; border: none; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .btn-reset { background: transparent; color: #7d8590; border: 1px solid #30363d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; }
+.summary-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 16px; padding: 4px; border-radius: 8px; transition: background 0.15s; }
+.summary-row:hover { background: rgba(88, 166, 255, 0.04); }
 .summary-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; text-align: center; }
 .summary-num { font-size: 24px; font-weight: 600; }
 .summary-label { font-size: 11px; color: #7d8590; margin-top: 2px; }
@@ -157,7 +201,8 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 14px; }
 .warn .summary-num { color: #d29922; }
 .crit .summary-num { color: #f85149; }
 .total .summary-num { color: #58a6ff; }
-.services { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 16px; }
+.services { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; margin-bottom: 16px; padding: 4px; border-radius: 8px; transition: background 0.15s; }
+.services:hover { background: rgba(88, 166, 255, 0.04); }
 .svc-card { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 10px 12px; }
 .svc-header { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .svc-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
@@ -165,7 +210,8 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 14px; }
 .svc-metrics { display: flex; flex-direction: column; gap: 2px; }
 .metric-label { color: #7d8590; font-size: 11px; }
 .metric-val { color: #c9d1d9; font-size: 11px; float: right; }
-.event-log { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; }
+.event-log { background: #161b22; border: 1px solid #21262d; border-radius: 8px; padding: 12px; transition: background 0.15s; }
+.event-log:hover { background: #1a2230; }
 .event-count { color: #7d8590; font-weight: 400; }
 .events { display: flex; flex-direction: column; gap: 2px; }
 .event-row { display: flex; gap: 8px; font-size: 11px; padding: 3px 0; font-family: 'JetBrains Mono', monospace; }
@@ -177,7 +223,14 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 14px; }
 .empty { color: #484f58; font-size: 13px; text-align: center; padding: 16px; }
 .code-toggle { margin-top: 12px; }
 .btn-code { background: transparent; color: #58a6ff; border: 1px solid #21262d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 16px; overflow-x: auto; }
-.code-panel pre { margin: 0; }
-.code-panel code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.code-filename { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #58a6ff; }
+.code-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #7d8590; padding: 2px 8px; border: 1px solid #21262d; border-radius: 4px; }
+.code-body { overflow: auto; max-height: 400px; padding: 12px 0; }
+.code-body pre { margin: 0; background: transparent !important; border: none !important; box-shadow: none !important; }
+.code-body code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.6; background: transparent !important; border: none !important; color: #8b949e !important; padding: 0 !important; }
+.code-line { display: block; padding: 0 16px; transition: background 0.2s, color 0.2s; }
+.code-line.highlighted { background: rgba(77, 232, 194, 0.08); color: #4de8c2 !important; }
+.line-num { display: inline-block; width: 36px; min-width: 36px; color: #3a4a5e; user-select: none; text-align: right; margin-right: 16px; }
 </style>

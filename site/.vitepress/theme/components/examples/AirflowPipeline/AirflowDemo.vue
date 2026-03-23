@@ -172,23 +172,67 @@ const dynamicEdges = computed(() =>
 // ---------------------------------------------------------------------------
 const codeLines = PIPELINE_SOURCE.split("\n");
 
-const NODE_PATTERNS: Record<string, RegExp> = {
-	cron: /\bcron\b/,
-	"fetch-bank": /\bfetchBank\b/,
-	"fetch-cards": /\bfetchCards\b/,
-	aggregate: /\baggregate\b/,
-	anomaly: /\banomaly\b/,
-	"batch-write": /\bbatchWrite\b/,
-	alert: /\balert\b/,
+// Map task option name → graph node id
+const NAME_TO_NODE: Record<string, string> = {
+	cron: "cron",
+	fetchBank: "fetch-bank",
+	fetchCards: "fetch-cards",
+	aggregate: "aggregate",
+	anomaly: "anomaly",
+	batchWrite: "batch-write",
+	alert: "alert",
 };
 
+// Build highlight ranges by finding task() definition blocks
 const highlightMap: Record<string, number[]> = {};
+let blockStart = -1;
+let blockNodeId: string | null = null;
+let braceDepth = 0;
+
 codeLines.forEach((line: string, i: number) => {
-	if (!/\bstep\(/.test(line) && !/\bnodeProducer\(/.test(line) && !/\/\/\s*Step/.test(line)) return;
-	for (const [id, pattern] of Object.entries(NODE_PATTERNS)) {
-		if (pattern.test(line)) {
-			if (!highlightMap[id]) highlightMap[id] = [];
-			highlightMap[id].push(i);
+	if (blockStart < 0) {
+		// Detect start of a task definition: const <name>Def = task(
+		const defMatch = line.match(/^const\s+(\w+?)(?:Def)?\s*=\s*task\(/);
+		if (defMatch) {
+			blockStart = i;
+			blockNodeId = null;
+			braceDepth = 0;
+		}
+		// Also detect pipeline definition lines
+		if (
+			/^\s*\w+:\s+(?:source\(|cronDef|fetchBankDef|fetchCardsDef|aggregateDef|anomalyDef|batchWriteDef|alertDef)/.test(
+				line,
+			)
+		) {
+			for (const [name, nodeId] of Object.entries(NAME_TO_NODE)) {
+				if (new RegExp(`\\b${name}\\b`).test(line)) {
+					if (!highlightMap[nodeId]) highlightMap[nodeId] = [];
+					highlightMap[nodeId].push(i);
+				}
+			}
+		}
+	}
+	if (blockStart >= 0) {
+		// Detect name inside task options: name: "xxx"
+		const nameMatch = line.match(/name:\s*"(\w+)"/);
+		if (nameMatch && NAME_TO_NODE[nameMatch[1]]) {
+			blockNodeId = NAME_TO_NODE[nameMatch[1]];
+		}
+		// Track braces/parens to detect block end
+		for (const ch of line) {
+			if (ch === "(" || ch === "{") braceDepth++;
+			if (ch === ")" || ch === "}") braceDepth--;
+		}
+		// Block ends when we return to depth 0 (the closing );)
+		if (braceDepth <= 0 && blockStart >= 0) {
+			if (blockNodeId) {
+				highlightMap[blockNodeId] = Array.from(
+					{ length: i - blockStart + 1 },
+					(_, j) => blockStart + j,
+				);
+			}
+			blockStart = -1;
+			blockNodeId = null;
 		}
 	}
 });
@@ -365,7 +409,7 @@ defineExpose({
     highlighted: isLineHighlighted(i),
     active: isLineActive(i),
   }"
-><span class="line-num">{{ String(i + 1).padStart(2, ' ') }}</span>{{ line }}
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
 </span></template></code></pre>
 				</div>
 			</div>
@@ -706,7 +750,8 @@ defineExpose({
 
 .line-num {
 	display: inline-block;
-	width: 28px;
+	width: 36px;
+	min-width: 36px;
 	color: #3a4a5e;
 	user-select: none;
 	text-align: right;

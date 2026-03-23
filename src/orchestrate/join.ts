@@ -153,7 +153,7 @@ function applyIntersect<T extends Record<string, any>>(
  * @returns `JoinStepDef<T>` — step definition for pipeline() with task tracking.
  *
  * @remarks **Requires 2+ deps.** For single-dep transforms, use `task()`.
- * @remarks **Array inputs required.** All deps must emit arrays. Non-array or undefined values are skipped.
+ * @remarks **Array inputs required.** All deps must emit arrays. Undefined dep values are guarded (waits for real values). Non-array values trigger an error tracked by taskState.
  * @remarks **Re-trigger:** New upstream values cancel the previous computation (switchMap semantics).
  * @remarks **Task tracking:** Internal `taskState` tracks status/duration/errors. Pipeline auto-detects it.
  *
@@ -183,17 +183,17 @@ export function join<T>(
 
 	const ts = taskState<T[]>({ id: opts?.name });
 
-	const factory = (...depStores: Store<any>[]): Store<T[] | null> => {
+	const factory = (...depStores: Store<any>[]): Store<T[] | undefined> => {
 		const source$ = combine(...depStores);
 
 		const switched = pipe(
 			source$,
 			switchMap((raw: any[]) => {
-				// Undefined guard: wait for ALL deps to have real array values
+				// Undefined guard: wait for ALL deps to have real array values.
+				// Don't emit — just complete so switchMap waits for next outer value.
 				for (const v of raw) {
-					if (v === undefined || v === null) {
-						return producer<T[] | null>(({ emit, complete }) => {
-							emit(null);
+					if (v === undefined) {
+						return producer<T[] | undefined>(({ complete }) => {
 							complete();
 							return undefined;
 						});
@@ -205,13 +205,13 @@ export function join<T>(
 					if (!Array.isArray(raw[i])) {
 						const badIndex = i;
 						ts.restart();
-						return producer<T[] | null>(({ emit, complete }) => {
+						return producer<T[] | undefined>(({ emit, complete }) => {
 							ts.run(async (_signal) => {
 								throw new TypeError(
 									`join(): dep ${badIndex} emitted non-array value (${typeof raw[badIndex]})`,
 								);
 							}).catch(() => {
-								emit(null);
+								emit(undefined);
 								complete();
 							});
 							return undefined;
@@ -223,7 +223,7 @@ export function join<T>(
 
 				ts.restart();
 
-				return producer<T[] | null>(({ emit, complete }) => {
+				return producer<T[] | undefined>(({ emit, complete }) => {
 					let stopped = false;
 
 					ts.run(async (_signal) => {
@@ -250,7 +250,7 @@ export function join<T>(
 						return result;
 					}).catch(() => {
 						if (!stopped) {
-							emit(null);
+							emit(undefined);
 							complete();
 						}
 					});
@@ -260,11 +260,11 @@ export function join<T>(
 					};
 				});
 			}),
-		) as Store<T[] | null>;
+		) as Store<T[] | undefined>;
 
 		// Lifecycle signal interceptor — RESET/TEARDOWN cascade through the graph
 		// instead of requiring flat task list iteration.
-		return operator<T[] | null>(
+		return operator<T[] | undefined>(
 			[switched] as Store<unknown>[],
 			({ emit, signal, complete, error: actionsError }) => {
 				return (_dep, type, data) => {
@@ -279,14 +279,14 @@ export function join<T>(
 						}
 						signal(data);
 					} else if (type === DATA) {
-						emit(data as T[] | null);
+						emit(data as T[] | undefined);
 					} else if (type === END) {
 						data !== undefined ? actionsError(data) : complete();
 					}
 				};
 			},
 			{ kind: "join", name: opts?.name },
-		) as Store<T[] | null>;
+		) as Store<T[] | undefined>;
 	};
 
 	const def: JoinStepDef<T> = {

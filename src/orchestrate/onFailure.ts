@@ -24,6 +24,9 @@ import { taskState } from "./taskState";
 import type { TaskState } from "./types";
 import { TASK_STATE } from "./types";
 
+/** @internal Symbol key for pipeline to identify error handler steps (excluded from skip propagation). */
+export const ON_FAILURE_ROLE: unique symbol = Symbol.for("callbag-recharge:onFailureRole");
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -34,7 +37,7 @@ export interface OnFailureOpts {
 }
 
 /** Extended StepDef that carries task metadata as flat companion stores. */
-export interface OnFailureStepDef<T = any> extends StepDef<T | null> {
+export interface OnFailureStepDef<T = any> extends StepDef<T | undefined> {
 	/** Reactive task status: idle → running → success/error. */
 	readonly status: Store<import("./types").TaskStatus>;
 	/** Last error from the handler itself (not the upstream error). */
@@ -92,16 +95,16 @@ export function onFailure<T>(
 ): OnFailureStepDef<T> {
 	const ts = taskState<T>({ id: opts?.name });
 
-	const factory = (...depStores: Store<any>[]): Store<T | null> => {
+	const factory = (...depStores: Store<any>[]): Store<T | undefined> => {
 		const errorStore$ = depStores[0]; // Resolved to "dep.error" by pipeline
 
 		const switched = pipe(
 			errorStore$,
 			switchMap((error: unknown) => {
-				// Skip when error is undefined (no failure / reset state)
+				// Skip when error is undefined (no failure / reset state).
+				// Don't emit — just complete so switchMap waits.
 				if (error === undefined) {
-					return producer<T | null>(({ emit, complete }) => {
-						emit(null);
+					return producer<T | undefined>(({ complete }) => {
 						complete();
 						return undefined;
 					});
@@ -109,10 +112,10 @@ export function onFailure<T>(
 
 				ts.restart();
 
-				return producer<T | null>(({ emit, complete }) => {
+				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
 
-					const safeEmit = (v: T | null) => {
+					const safeEmit = (v: T | undefined) => {
 						if (!stopped) emit(v);
 					};
 					const safeComplete = () => {
@@ -127,7 +130,7 @@ export function onFailure<T>(
 					}).catch(() => {
 						// Handler itself failed — error tracked by taskState
 						if (!stopped) {
-							safeEmit(null);
+							safeEmit(undefined);
 							safeComplete();
 						}
 					});
@@ -137,11 +140,11 @@ export function onFailure<T>(
 					};
 				});
 			}),
-		) as Store<T | null>;
+		) as Store<T | undefined>;
 
 		// Lifecycle signal interceptor — RESET/TEARDOWN cascade through the graph
 		// instead of requiring flat task list iteration.
-		return operator<T | null>(
+		return operator<T | undefined>(
 			[switched] as Store<unknown>[],
 			({ emit, signal, complete, error: actionsError }) => {
 				return (_dep, type, data) => {
@@ -156,14 +159,14 @@ export function onFailure<T>(
 						}
 						signal(data);
 					} else if (type === DATA) {
-						emit(data as T | null);
+						emit(data as T | undefined);
 					} else if (type === END) {
 						data !== undefined ? actionsError(data) : complete();
 					}
 				};
 			},
 			{ kind: "onFailure", name: opts?.name },
-		) as Store<T | null>;
+		) as Store<T | undefined>;
 	};
 
 	const def: OnFailureStepDef<T> = {
@@ -175,7 +178,8 @@ export function onFailure<T>(
 		duration: ts.duration,
 		runCount: ts.runCount,
 		[TASK_STATE]: ts,
-	};
+		[ON_FAILURE_ROLE]: true,
+	} as any;
 
 	return def;
 }

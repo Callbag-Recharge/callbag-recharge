@@ -49,7 +49,7 @@ export interface TriggerStore<T> extends Store<T | undefined> {
  * trigger.fire("go"); // logs "go" again
  * ```
  *
- * @seeAlso [producer](../core/producer) — general-purpose source
+ * @seeAlso [producer](./producer) — general-purpose source
  *
  * @category orchestrate
  */

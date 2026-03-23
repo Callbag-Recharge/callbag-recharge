@@ -51,4 +51,4 @@ effect([tracked.tokens], () => {
 ## See Also
 
 - [track](./track) — lifecycle tracking
-- [fromLLM](/api/fromLLM) — LLM adapter
+- [fromLLM](./fromLLM) — LLM adapter

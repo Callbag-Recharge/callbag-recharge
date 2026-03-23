@@ -2,6 +2,7 @@
 import {
 	availableEvents,
 	currentState,
+	mermaidDiagram,
 	order,
 	orderContext,
 	transitions,
@@ -24,18 +25,20 @@ const minI = dLines
 		const x = l.match(/^(\t+)/);
 		return x ? Math.min(m, x[1].length) : m;
 	}, Infinity);
-const _SOURCE =
+const SOURCE =
 	minI > 0 && minI < Infinity
 		? dLines.map((l) => l.slice(minI).replace(/\t/g, "  ")).join("\n")
 		: rawRegion.replace(/\t/g, "  ");
 
+const codeLines = SOURCE.split("\n");
+
 // Reactive bindings
 const state = useSubscribe(currentState);
-const _ctx = useSubscribe(orderContext);
-const _events = useSubscribe(availableEvents);
+const ctx = useSubscribe(orderContext);
+const events = useSubscribe(availableEvents);
 
 // All states for the graph
-const _ALL_STATES = [
+const ALL_STATES = [
 	"draft",
 	"reviewing",
 	"processing",
@@ -47,7 +50,7 @@ const _ALL_STATES = [
 ] as const;
 
 // Graph layout positions (circular-ish)
-const _positions: Record<string, { x: number; y: number }> = {
+const positions: Record<string, { x: number; y: number }> = {
 	draft: { x: 60, y: 40 },
 	reviewing: { x: 220, y: 40 },
 	processing: { x: 380, y: 40 },
@@ -58,15 +61,14 @@ const _positions: Record<string, { x: number; y: number }> = {
 	error: { x: 300, y: 250 },
 };
 
-function _stateColor(s: string): string {
+function stateColor(s: string): string {
 	if (s === state.value) return "#58a6ff";
-	// Check if reachable from current
 	const reachable = transitions.filter((t) => t.from === state.value).map((t) => t.to);
 	if (reachable.includes(s as any)) return "#30363d";
 	return "#1c2128";
 }
 
-function _stateBorder(s: string): string {
+function stateBorder(s: string): string {
 	if (s === state.value) return "2px solid #58a6ff";
 	const reachable = transitions.filter((t) => t.from === state.value).map((t) => t.to);
 	if (reachable.includes(s as any)) return "2px solid #30363d";
@@ -75,7 +77,25 @@ function _stateBorder(s: string): string {
 
 const history = ref<Array<{ from: string; event: string; to: string }>>([]);
 
-function _sendEvent(ev: string) {
+// Hover highlighting
+const hoveredState = ref<string | null>(null);
+
+const highlightMap: Record<string, number[]> = {};
+codeLines.forEach((line: string, i: number) => {
+	for (const st of ALL_STATES) {
+		if (new RegExp(`["']${st}["']`).test(line)) {
+			if (!highlightMap[st]) highlightMap[st] = [];
+			highlightMap[st].push(i);
+		}
+	}
+});
+
+function isLineHighlighted(lineIdx: number): boolean {
+	if (!hoveredState.value) return false;
+	return highlightMap[hoveredState.value]?.includes(lineIdx) ?? false;
+}
+
+function sendEvent(ev: string) {
 	const from = state.value;
 	const ok = order.send(ev as any);
 	if (ok) {
@@ -83,13 +103,13 @@ function _sendEvent(ev: string) {
 	}
 }
 
-function _resetMachine() {
+function resetMachine() {
 	order.reset();
 	history.value = [];
 }
 
-const _showCode = ref(false);
-const _showMermaid = ref(false);
+const showCode = ref(false);
+const showMermaid = ref(false);
 </script>
 
 <template>
@@ -119,7 +139,9 @@ const _showMermaid = ref(false);
             </marker>
           </defs>
           <!-- Nodes -->
-          <g v-for="s in ALL_STATES" :key="s">
+          <g v-for="s in ALL_STATES" :key="s"
+            @mouseenter="hoveredState = s" @mouseleave="hoveredState = null"
+            style="cursor: pointer;">
             <rect
               :x="positions[s].x" :y="positions[s].y"
               width="80" height="36" rx="6"
@@ -165,9 +187,9 @@ const _showMermaid = ref(false);
         <h4>Transition History</h4>
         <div v-for="(h, i) in history" :key="i" class="history-row">
           <span class="hist-from">{{ h.from }}</span>
-          <span class="hist-arrow">→</span>
+          <span class="hist-arrow">&rarr;</span>
           <span class="hist-event">{{ h.event }}</span>
-          <span class="hist-arrow">→</span>
+          <span class="hist-arrow">&rarr;</span>
           <span class="hist-to">{{ h.to }}</span>
         </div>
       </div>
@@ -182,7 +204,20 @@ const _showMermaid = ref(false);
       <pre><code>{{ mermaidDiagram }}</code></pre>
     </div>
     <div v-if="showCode" class="code-panel">
-      <pre><code>{{ SOURCE }}</code></pre>
+      <div class="code-header">
+        <span class="code-filename">state-machine.ts</span>
+        <span class="code-badge">{{ codeLines.length }} lines</span>
+      </div>
+      <div class="code-body">
+        <pre><code><template
+  v-for="(line, i) in codeLines"
+  :key="i"
+><span
+  class="code-line"
+  :class="{ highlighted: isLineHighlighted(i) }"
+><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
+</span></template></code></pre>
+      </div>
     </div>
   </div>
 </template>
@@ -213,7 +248,16 @@ h4 { color: #c9d1d9; margin: 0 0 8px; font-size: 13px; }
 .hist-to { color: #58a6ff; }
 .code-toggle { margin-top: 12px; display: flex; gap: 6px; }
 .btn-code { background: transparent; color: #58a6ff; border: 1px solid #21262d; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
-.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; padding: 16px; overflow-x: auto; }
-.code-panel pre { margin: 0; }
-.code-panel code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.code-panel { margin-top: 8px; background: #0d1117; border: 1px solid #21262d; border-radius: 8px; overflow: hidden; }
+.code-panel > pre { margin: 0; padding: 16px; }
+.code-panel > pre code { color: #c9d1d9; font-family: 'JetBrains Mono', monospace; font-size: 12px; line-height: 1.5; white-space: pre; }
+.code-header { display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid #21262d; }
+.code-filename { font-family: 'JetBrains Mono', monospace; font-size: 0.8rem; color: #58a6ff; }
+.code-badge { font-family: 'JetBrains Mono', monospace; font-size: 0.7rem; color: #7d8590; padding: 2px 8px; border: 1px solid #21262d; border-radius: 4px; }
+.code-body { overflow: auto; max-height: 400px; padding: 12px 0; }
+.code-body pre { margin: 0; background: transparent !important; border: none !important; box-shadow: none !important; }
+.code-body code { font-family: 'JetBrains Mono', monospace; font-size: 0.78rem; line-height: 1.6; background: transparent !important; border: none !important; color: #8b949e !important; padding: 0 !important; }
+.code-line { display: block; padding: 0 16px; transition: background 0.2s, color 0.2s; }
+.code-line.highlighted { background: rgba(77, 232, 194, 0.08); color: #4de8c2 !important; }
+.line-num { display: inline-block; width: 36px; min-width: 36px; color: #3a4a5e; user-select: none; text-align: right; margin-right: 16px; }
 </style>
