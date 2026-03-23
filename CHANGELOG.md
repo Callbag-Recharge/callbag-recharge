@@ -1,3 +1,11 @@
+# [0.18.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.17.0...v0.18.0) (2026-03-23)
+
+
+### Features
+
+* create examples and improve inspector ([0bd203e](https://github.com/Callbag-Recharge/callbag-recharge/commit/0bd203e78cb082937b328e42f34b2cb2c8a8ed0f))
+* fix example round 3 ([dc25b6d](https://github.com/Callbag-Recharge/callbag-recharge/commit/dc25b6dfe294a6c5cbeb0dc3232d9d10fce5212c))
+
 # [0.17.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.16.0...v0.17.0) (2026-03-22)
 
 
