@@ -31,6 +31,14 @@
 
 ---
 
+## Backlog
+
+### Security: Markdown preview XSS via `javascript:` URLs
+
+`markdown-editor-hero.ts` `escapeInline` converts markdown links to `<a href="$2">`. A crafted link like `[click](javascript:alert(1))` creates a live XSS vector when rendered via `v-html`. Fix: sanitize hrefs to only allow `http:`, `https:`, `mailto:` protocols.
+
+---
+
 ## What's Shipped (recent)
 
 ### Phase 5a-0: §1.14 Compliance Pass — Complete
@@ -83,13 +91,13 @@ RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals. All 6 core nodes handle lif
 Full-featured apps. Users interact with them as products — no code panel, no "primitives used"
 legend. The point is "look what you can build", not "look at our API".
 
-| # | App | What the user experiences |
-|---|-----|--------------------------|
-| H1 | **Markdown Editor** | Split-pane: CodeMirror left, live Markdown preview right. Toolbar with undo/redo, word count, cursor position, auto-save dot. Feels like a real editor. |
-| H2 | **AI Chat (WebLLM)** | Chat UI running a model in-browser via WebGPU (no API key). Three workers: Web Worker (WebLLM inference, token streaming), SharedWorker (cross-tab memory — summarization + IndexedDB, via `workerBridge`), Service Worker (model weight caching). Tokens stream in real-time, cancel mid-response, retry, token usage meter, rolling conversation summary. Depends on 5g (worker bridge). Feels like ChatGPT lite. |
-| H3 | **Workflow Builder** | Code-first n8n. Left: CodeMirror editor with `pipeline()` code. Right: live DAG (Vue Flow). Press "Update" → code parses into a visual graph. Fire triggers, watch nodes animate, inspect logs, execution history persists to IndexedDB. Feels like a workflow tool. |
+| # | App | Status | What the user experiences |
+|---|-----|--------|--------------------------|
+| H1 | **Markdown Editor** | **Shipped** | Split-pane: textarea left, live Markdown preview right. Toolbar with undo/redo, heading/bold/italic/code/list formatting, word count, cursor position, auto-save dot. Feels like a real editor. |
+| H2 | **AI Chat (WebLLM)** | Backlog | Chat UI running a model in-browser via WebGPU (no API key). Three workers: Web Worker (WebLLM inference, token streaming), SharedWorker (cross-tab memory — summarization + IndexedDB, via `workerBridge`), Service Worker (model weight caching). Tokens stream in real-time, cancel mid-response, retry, token usage meter, rolling conversation summary. Depends on 5g (worker bridge). Feels like ChatGPT lite. |
+| H3 | **Workflow Builder** | **Shipped** | Code-first n8n. Left: editable script pane with `pipeline()` code. Right: live DAG (Vue Flow). Presets load example code. Press "Update" → code parses into a visual graph. Fire triggers, watch nodes animate through states, inspect per-node logs with circuit breaker controls. Configurable duration/failure sliders. Feels like a workflow tool. |
 
-**Build order:** H1 → H2 → H3 (each builds on confidence from the last; H3 may depend on 5b-1)
+**Build order:** H1 (shipped) → H2 → H3 (shipped)
 
 #### Code Examples (doc pages)
 

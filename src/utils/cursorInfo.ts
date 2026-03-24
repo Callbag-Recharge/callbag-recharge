@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
+import { teardown } from "../core/protocol";
 import type { Store } from "../core/types";
 
 export interface CursorInfo {
@@ -12,6 +13,8 @@ export interface CursorInfo {
 	column: Store<number>;
 	/** Formatted display string, e.g. "Ln 3, Col 12". */
 	display: Store<string>;
+	/** Tear down all derived stores. */
+	dispose(): void;
 }
 
 /**
@@ -61,5 +64,11 @@ export function cursorInfo(
 		name: `${prefix}cursorDisplay`,
 	});
 
-	return { line, column, display };
+	function dispose(): void {
+		teardown(line);
+		teardown(column);
+		teardown(display);
+	}
+
+	return { line, column, display, dispose };
 }

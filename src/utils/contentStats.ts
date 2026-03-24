@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
+import { teardown } from "../core/protocol";
 import type { Store } from "../core/types";
 
 export interface ContentStats {
@@ -12,6 +13,8 @@ export interface ContentStats {
 	charCount: Store<number>;
 	/** Number of lines (split by \n). */
 	lineCount: Store<number>;
+	/** Tear down all derived stores. */
+	dispose(): void;
 }
 
 /**
@@ -47,5 +50,11 @@ export function contentStats(content: Store<string>, opts?: { name?: string }): 
 		name: `${prefix}lineCount`,
 	});
 
-	return { wordCount, charCount, lineCount };
+	function dispose(): void {
+		teardown(wordCount);
+		teardown(charCount);
+		teardown(lineCount);
+	}
+
+	return { wordCount, charCount, lineCount, dispose };
 }

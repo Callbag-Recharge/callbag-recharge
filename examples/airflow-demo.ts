@@ -9,77 +9,30 @@
  * This file is the store layer for the interactive Vue demo at site/demos/airflow.
  * The Vue component imports from here — no library logic lives in the site.
  *
+ * Demonstrates: pipeline, task, source, workflowNode (orchestrate),
+ * fromTrigger (extra).
+ *
  * Run: pnpm exec tsx --tsconfig tsconfig.examples.json examples/airflow-demo.ts
  */
 
-// NOTE: Deep imports to avoid pulling in node:fs from checkpoint adapters.
-
-import type { Store } from "callbag-recharge";
 import { effect, state } from "callbag-recharge";
 import type { ReactiveLog } from "callbag-recharge/data";
-import { reactiveLog } from "callbag-recharge/data";
 import { firstValueFrom, fromTimer, fromTrigger } from "callbag-recharge/extra";
-import { pipeline, source } from "callbag-recharge/orchestrate/pipeline";
-import { task } from "callbag-recharge/orchestrate/task";
-import type { TaskState } from "callbag-recharge/orchestrate/types";
-import { TASK_STATE } from "callbag-recharge/orchestrate/types";
-import { exponential } from "callbag-recharge/utils/backoff";
-import { circuitBreaker } from "callbag-recharge/utils/circuitBreaker";
+import type { TaskState, WorkflowNodeResult } from "callbag-recharge/orchestrate";
+import { pipeline, source, TASK_STATE, task, workflowNode } from "callbag-recharge/orchestrate";
+import type { CircuitBreaker } from "callbag-recharge/utils/circuitBreaker";
 
 // ---------------------------------------------------------------------------
-// Node metadata — circuitBreaker + reactiveLog per task
+// Node metadata — workflowNode bundles log + circuit breaker + simulate
 // ---------------------------------------------------------------------------
 export interface PipelineNode {
 	id: string;
 	label: string;
 	task: TaskState;
 	log: ReactiveLog<string>;
-	breaker: ReturnType<typeof circuitBreaker>;
+	breaker: CircuitBreaker;
 	/** Reactive circuit breaker state ("closed" | "open" | "half-open"). */
-	breakerState: Store<string>;
-}
-
-interface NodeMeta {
-	id: string;
-	label: string;
-	log: ReactiveLog<string>;
-	breaker: ReturnType<typeof circuitBreaker>;
-	breakerState: Store<string>;
-}
-
-function createMeta(id: string, label: string): NodeMeta {
-	return {
-		id,
-		label,
-		log: reactiveLog<string>({ id: `${id}:log`, maxSize: 50 }),
-		breaker: circuitBreaker({
-			failureThreshold: 3,
-			cooldownMs: 5000,
-			cooldown: exponential({ base: 1000, factor: 2, max: 10000 }),
-		}),
-		breakerState: state<string>("closed", { name: `${id}:breakerState` }),
-	};
-}
-
-// Simulate async work with random duration and failure chance
-async function simulateWork(
-	meta: NodeMeta,
-	durationRange: [number, number],
-	failRate = 0.15,
-): Promise<string> {
-	const [min, max] = durationRange;
-	const duration = min + Math.random() * (max - min);
-	await firstValueFrom(fromTimer(duration));
-	if (Math.random() < failRate) {
-		meta.breaker.recordFailure();
-		meta.breakerState.set(meta.breaker.state);
-		meta.log.append(`[ERROR] Failed after ${Math.round(duration)}ms`);
-		throw new Error(`${meta.label} failed`);
-	}
-	meta.breaker.recordSuccess();
-	meta.breakerState.set(meta.breaker.state);
-	meta.log.append(`[OK] Completed in ${Math.round(duration)}ms`);
-	return `${meta.label} result`;
+	breakerState: WorkflowNodeResult["breakerState"];
 }
 
 // ---------------------------------------------------------------------------
@@ -99,13 +52,13 @@ export const edges = [
 // Node metadata instances
 // ---------------------------------------------------------------------------
 const n = {
-	cron: createMeta("cron", "Cron Trigger"),
-	fetchBank: createMeta("fetch-bank", "Fetch Bank"),
-	fetchCards: createMeta("fetch-cards", "Fetch Cards"),
-	aggregate: createMeta("aggregate", "Aggregate"),
-	anomaly: createMeta("anomaly", "Detect Anomaly"),
-	batchWrite: createMeta("batch-write", "Batch Write"),
-	alert: createMeta("alert", "Send Alert"),
+	cron: workflowNode("cron", "Cron Trigger"),
+	fetchBank: workflowNode("fetch-bank", "Fetch Bank"),
+	fetchCards: workflowNode("fetch-cards", "Fetch Cards"),
+	aggregate: workflowNode("aggregate", "Aggregate"),
+	anomaly: workflowNode("anomaly", "Detect Anomaly"),
+	batchWrite: workflowNode("batch-write", "Batch Write"),
+	alert: workflowNode("alert", "Send Alert"),
 };
 
 // ---------------------------------------------------------------------------
@@ -122,19 +75,18 @@ const triggerSrc = fromTrigger<string>({ name: "pipeline:trigger" });
 // #region display
 const cronDef = task(
 	["trigger"],
-	async (_signal, [_v]) => {
+	async (signal, [_v]) => {
 		n.cron.log.append("[TRIGGER] Pipeline started");
-		n.cron.breaker.recordSuccess();
-		n.cron.breakerState.set(n.cron.breaker.state);
-		n.cron.log.append("[OK] Trigger fired");
-		return "triggered";
+		// Cron is a trigger node — use simulate with 0% failure for consistent
+		// breaker bookkeeping (no special-cased manual recordSuccess).
+		return n.cron.simulate([0, 0], 0, signal);
 	},
 	{ name: "cron" },
 );
 
 const fetchBankDef = task(
 	["cron"],
-	async (_signal, [_v]) => simulateWork(n.fetchBank, [800, 2000], 0.2),
+	async (signal, [_v]) => n.fetchBank.simulate([800, 2000], 0.2, signal),
 	{
 		name: "fetchBank",
 		skip: () => !n.fetchBank.breaker.canExecute(),
@@ -143,6 +95,7 @@ const fetchBankDef = task(
 			n.fetchBank.log.append("[CIRCUIT OPEN] Skipped — breaker is open");
 		},
 		onStart: () => {
+			// Sync breakerState after canExecute() may have transitioned to half-open
 			n.fetchBank.breakerState.set(n.fetchBank.breaker.state);
 			n.fetchBank.log.append("[START] Running...");
 		},
@@ -151,7 +104,7 @@ const fetchBankDef = task(
 
 const fetchCardsDef = task(
 	["cron"],
-	async (_signal, [_v]) => simulateWork(n.fetchCards, [600, 1500], 0.15),
+	async (signal, [_v]) => n.fetchCards.simulate([600, 1500], 0.15, signal),
 	{
 		name: "fetchCards",
 		skip: () => !n.fetchCards.breaker.canExecute(),
@@ -160,6 +113,7 @@ const fetchCardsDef = task(
 			n.fetchCards.log.append("[CIRCUIT OPEN] Skipped — breaker is open");
 		},
 		onStart: () => {
+			// Sync breakerState after canExecute() may have transitioned to half-open
 			n.fetchCards.breakerState.set(n.fetchCards.breaker.state);
 			n.fetchCards.log.append("[START] Running...");
 		},
@@ -168,11 +122,11 @@ const fetchCardsDef = task(
 
 const aggregateDef = task(
 	["fetchBank", "fetchCards"],
-	async (_signal, [bankVal, cardsVal]) => {
+	async (signal, [bankVal, cardsVal]) => {
 		n.aggregate.log.append(
 			`[START] Merging: bank=${bankVal ? "ok" : "fail"}, cards=${cardsVal ? "ok" : "fail"}`,
 		);
-		return simulateWork(n.aggregate, [300, 800], 0.05);
+		return n.aggregate.simulate([300, 800], 0.05, signal);
 	},
 	{
 		name: "aggregate",
@@ -185,7 +139,7 @@ const aggregateDef = task(
 
 const anomalyDef = task(
 	["aggregate"],
-	async (_signal, [_v]) => simulateWork(n.anomaly, [200, 600], 0.1),
+	async (signal, [_v]) => n.anomaly.simulate([200, 600], 0.1, signal),
 	{
 		name: "anomaly",
 		onStart: () => n.anomaly.log.append("[START] Running..."),
@@ -194,7 +148,7 @@ const anomalyDef = task(
 
 const batchWriteDef = task(
 	["aggregate"],
-	async (_signal, [_v]) => simulateWork(n.batchWrite, [400, 1000], 0.08),
+	async (signal, [_v]) => n.batchWrite.simulate([400, 1000], 0.08, signal),
 	{
 		name: "batchWrite",
 		onStart: () => n.batchWrite.log.append("[START] Running..."),
@@ -203,7 +157,7 @@ const batchWriteDef = task(
 
 const alertDef = task(
 	["anomaly"],
-	async (_signal, [_v]) => simulateWork(n.alert, [100, 300], 0.02),
+	async (signal, [_v]) => n.alert.simulate([100, 300], 0.02, signal),
 	{
 		name: "alert",
 		onStart: () => n.alert.log.append("[START] Running..."),
@@ -223,7 +177,7 @@ const wf = pipeline({
 // #endregion display
 
 // Reactive completion: when pipeline finishes while running, update state
-effect([running, wf.status], () => {
+const disposeStatusEffect = effect([running, wf.status], () => {
 	if (running.get() && (wf.status.get() === "completed" || wf.status.get() === "errored")) {
 		running.set(false);
 		runCount.update((n) => n + 1);
@@ -233,8 +187,15 @@ effect([running, wf.status], () => {
 // ---------------------------------------------------------------------------
 // Build PipelineNode array — combine metadata + TaskState from task() defs
 // ---------------------------------------------------------------------------
-function buildNode(meta: NodeMeta, def: any): PipelineNode {
-	return { ...meta, task: def[TASK_STATE] as TaskState };
+function buildNode(meta: WorkflowNodeResult, def: any): PipelineNode {
+	return {
+		id: meta.id,
+		label: meta.label,
+		task: def[TASK_STATE] as TaskState,
+		log: meta.log,
+		breaker: meta.breaker,
+		breakerState: meta.breakerState,
+	};
 }
 
 export const nodes: PipelineNode[] = [
@@ -254,6 +215,10 @@ export function trigger() {
 	if (running.get()) return;
 	// RESET clears pipeline status and restarts task states (preserving runCount).
 	wf.reset();
+	// Reset circuit breakers so a fresh run starts with clean breaker state.
+	for (const node of Object.values(n)) {
+		node.reset();
+	}
 	triggerSrc.fire("go");
 	running.set(true);
 }
@@ -264,9 +229,10 @@ export function stop() {
 }
 
 export function destroy() {
+	disposeStatusEffect();
 	wf.destroy();
-	for (const meta of Object.values(n)) {
-		meta.log.destroy();
+	for (const node of Object.values(n)) {
+		node.destroy();
 	}
 }
 

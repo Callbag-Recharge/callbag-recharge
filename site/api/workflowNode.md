@@ -24,9 +24,9 @@ function workflowNode(
 
 ```ts
 const node = workflowNode("extract", "Extract Data");
-// Use in a pipeline task:
-const extractDef = task(["trigger"], async (_signal) => {
+// Use in a pipeline task — forward signal for cancellation:
+const extractDef = task(["trigger"], async (signal) => {
     node.log.append("[START] Extracting...");
-    return node.simulate([300, 1000], 0.1);
+    return node.simulate([300, 1000], 0.1, signal);
   });
 ```

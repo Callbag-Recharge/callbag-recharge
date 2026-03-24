@@ -42,6 +42,8 @@ export interface WorkflowNodeResult {
 		failRate: number,
 		signal?: AbortSignal,
 	): Promise<string>;
+	/** Reset breaker state and reactive store (preserves log history). */
+	reset(): void;
 	/** Clean up log and stores. */
 	destroy(): void;
 }
@@ -61,10 +63,10 @@ export interface WorkflowNodeOpts {
  * @example
  * ```ts
  * const node = workflowNode("extract", "Extract Data");
- * // Use in a pipeline task:
- * const extractDef = task(["trigger"], async (_signal) => {
+ * // Use in a pipeline task — forward signal for cancellation:
+ * const extractDef = task(["trigger"], async (signal) => {
  *   node.log.append("[START] Extracting...");
- *   return node.simulate([300, 1000], 0.1);
+ *   return node.simulate([300, 1000], 0.1, signal);
  * });
  * ```
  */
@@ -94,31 +96,33 @@ export function workflowNode(
 		}
 		const [min, max] = durationRange;
 		const duration = min + Math.random() * (max - min);
-		await Promise.race([
-			firstValueFrom(fromTimer(duration)),
-			...(signal
-				? [
-						new Promise<never>((_, reject) => {
-							signal.addEventListener("abort", () => reject(new Error(`${label} aborted`)), {
-								once: true,
-							});
-						}),
-					]
-				: []),
-		]).catch((err) => {
-			log.append(`[ABORT] Cancelled after ${Math.round(duration)}ms`);
-			throw err;
-		});
+		const start = Date.now();
+		// §1.16: no raw `new Promise` — use callbag primitives only.
+		// The task framework handles cancellation at a higher level (switchMap),
+		// so we just check abort after the timer to avoid stale breaker updates.
+		await firstValueFrom(fromTimer(duration));
+		if (signal?.aborted) {
+			const elapsed = Date.now() - start;
+			log.append(`[ABORT] Cancelled after ${Math.round(elapsed)}ms`);
+			throw new Error(`${label} aborted`);
+		}
 		if (Math.random() < failRate) {
 			breaker.recordFailure();
 			breakerState.set(breaker.state);
-			log.append(`[ERROR] Failed after ${Math.round(duration)}ms`);
+			const elapsed = Date.now() - start;
+			log.append(`[ERROR] Failed after ${Math.round(elapsed)}ms`);
 			throw new Error(`${label} failed`);
 		}
 		breaker.recordSuccess();
 		breakerState.set(breaker.state);
-		log.append(`[OK] Completed in ${Math.round(duration)}ms`);
+		const elapsed = Date.now() - start;
+		log.append(`[OK] Completed in ${Math.round(elapsed)}ms`);
 		return `${label} result`;
+	}
+
+	function reset(): void {
+		breaker.reset();
+		breakerState.set("closed");
 	}
 
 	function destroy(): void {
@@ -126,5 +130,5 @@ export function workflowNode(
 		teardown(breakerState);
 	}
 
-	return { id, label, log, breaker, breakerState, simulate, destroy };
+	return { id, label, log, breaker, breakerState, simulate, reset, destroy };
 }

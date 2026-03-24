@@ -1,3 +1,6 @@
+// Core type re-exports (so utils+ consumers don't need raw core imports)
+export type { Store, WritableStore } from "../core/types";
+
 // Auto-save (debounce + checkpoint + status)
 
 // Async queue

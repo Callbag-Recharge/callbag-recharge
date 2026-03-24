@@ -1,28 +1,110 @@
 import { describe, expect, it, vi } from "vitest";
-import { createWorkflowBuilder, templates } from "../../../examples/workflow-builder";
+import {
+	createWorkflowBuilder,
+	parsePipelineCode,
+	presets,
+} from "../../../examples/workflow-builder";
 
 describe("H3: Workflow Builder — store layer", () => {
 	// -----------------------------------------------------------------------
-	// Template registry
+	// Preset registry
 	// -----------------------------------------------------------------------
-	describe("templates", () => {
-		it("has at least 3 templates", () => {
-			expect(templates.length).toBeGreaterThanOrEqual(3);
+	describe("presets", () => {
+		it("has at least 3 presets", () => {
+			expect(presets.length).toBeGreaterThanOrEqual(3);
 		});
 
-		it("each template has required fields", () => {
-			for (const t of templates) {
-				expect(t.id).toBeTruthy();
-				expect(t.name).toBeTruthy();
-				expect(t.description).toBeTruthy();
-				expect(t.code).toBeTruthy();
-				expect(typeof t.build).toBe("function");
+		it("each preset has required fields", () => {
+			for (const p of presets) {
+				expect(p.id).toBeTruthy();
+				expect(p.name).toBeTruthy();
+				expect(p.description).toBeTruthy();
+				expect(p.code).toBeTruthy();
 			}
 		});
 
-		it("template IDs are unique", () => {
-			const ids = templates.map((t) => t.id);
+		it("preset IDs are unique", () => {
+			const ids = presets.map((p) => p.id);
 			expect(new Set(ids).size).toBe(ids.length);
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// Code parser
+	// -----------------------------------------------------------------------
+	describe("parsePipelineCode", () => {
+		it("parses ETL code into 3 nodes and 2 edges", () => {
+			const result = parsePipelineCode(presets[0].code);
+			expect(result.ok).toBe(true);
+			expect(result.nodes).toHaveLength(3);
+			expect(result.edges).toHaveLength(2);
+		});
+
+		it("parses fan-out code into 4 nodes and 4 edges", () => {
+			const result = parsePipelineCode(presets[1].code);
+			expect(result.ok).toBe(true);
+			expect(result.nodes).toHaveLength(4);
+			expect(result.edges).toHaveLength(4);
+		});
+
+		it("parses full DAG code into 7 nodes and 7 edges", () => {
+			const result = parsePipelineCode(presets[2].code);
+			expect(result.ok).toBe(true);
+			expect(result.nodes).toHaveLength(7);
+			expect(result.edges).toHaveLength(7);
+		});
+
+		it("returns error for code with no pipeline nodes", () => {
+			const result = parsePipelineCode("const x = 42;");
+			expect(result.ok).toBe(false);
+			expect(result.error).toBeTruthy();
+		});
+
+		it("returns error for unknown dependency", () => {
+			const code = `const wf = pipeline({
+				trigger: source(fromTrigger()),
+				step: task(["nonexistent"], async () => "done"),
+			});`;
+			const result = parsePipelineCode(code);
+			expect(result.ok).toBe(false);
+			expect(result.error).toContain("nonexistent");
+		});
+
+		it("parses custom user code", () => {
+			const code = `const wf = pipeline({
+				trigger: source(fromTrigger()),
+				fetch: task(["trigger"], async (s) => getData()),
+				process: task(["fetch"], async (s, [d]) => transform(d)),
+				save: task(["process"], async (s, [d]) => persist(d)),
+			});`;
+			const result = parsePipelineCode(code);
+			expect(result.ok).toBe(true);
+			expect(result.nodes).toHaveLength(3);
+			expect(result.nodes.map((n) => n.id)).toEqual(["fetch", "process", "save"]);
+			expect(result.edges).toHaveLength(2);
+		});
+
+		it("detects cyclic dependencies", () => {
+			const code = `const wf = pipeline({
+				trigger: source(fromTrigger()),
+				a: task(["b"], async () => "done"),
+				b: task(["a"], async () => "done"),
+			});`;
+			const result = parsePipelineCode(code);
+			expect(result.ok).toBe(false);
+			expect(result.error).toContain("ycle");
+		});
+
+		it("skips duplicate node definitions", () => {
+			const code = `const wf = pipeline({
+				trigger: source(fromTrigger()),
+				step: task(["trigger"], async () => "first"),
+				step: task(["trigger"], async () => "second"),
+			});`;
+			const result = parsePipelineCode(code);
+			expect(result.ok).toBe(true);
+			// Should only have 1 node (duplicate skipped)
+			expect(result.nodes).toHaveLength(1);
 		});
 	});
 
@@ -30,7 +112,7 @@ describe("H3: Workflow Builder — store layer", () => {
 	// Pipeline definition → DAG node/edge extraction
 	// -----------------------------------------------------------------------
 	describe("DAG structure", () => {
-		it("ETL template produces 3 nodes and 2 edges (linear)", () => {
+		it("ETL preset produces 3 nodes and 2 edges (linear)", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("etl");
 
@@ -46,7 +128,7 @@ describe("H3: Workflow Builder — store layer", () => {
 			wb.destroy();
 		});
 
-		it("fan-out template produces 4 nodes and 4 edges (diamond)", () => {
+		it("fan-out preset produces 4 nodes and 4 edges (diamond)", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("fanout");
 
@@ -63,7 +145,7 @@ describe("H3: Workflow Builder — store layer", () => {
 			wb.destroy();
 		});
 
-		it("full-dag template produces 7 nodes and 7 edges", () => {
+		it("full-dag preset produces 7 nodes and 7 edges", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("full-dag");
 
@@ -120,6 +202,64 @@ describe("H3: Workflow Builder — store layer", () => {
 			wb.selectTemplate("fanout");
 			expect(wb.running.get()).toBe(false);
 			expect(wb.pipelineStatus.get()).toBe("idle");
+
+			wb.destroy();
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// updateCode (editable script pane)
+	// -----------------------------------------------------------------------
+	describe("updateCode", () => {
+		it("parses and rebuilds pipeline from custom code", () => {
+			const wb = createWorkflowBuilder();
+			const code = `const wf = pipeline({
+				trigger: source(fromTrigger()),
+				fetch: task(["trigger"], async (s) => getData()),
+				process: task(["fetch"], async (s, [d]) => transform(d)),
+			});`;
+
+			const ok = wb.updateCode(code);
+			expect(ok).toBe(true);
+			expect(wb.nodes.get()).toHaveLength(2);
+			expect(wb.edges.get()).toHaveLength(1);
+			expect(wb.parseError.get()).toBe("");
+
+			wb.destroy();
+		});
+
+		it("returns false and sets parseError on invalid code", () => {
+			const wb = createWorkflowBuilder();
+
+			const ok = wb.updateCode("const x = 42;");
+			expect(ok).toBe(false);
+			expect(wb.parseError.get()).toBeTruthy();
+
+			wb.destroy();
+		});
+
+		it("clears selectedTemplate when user edits code", () => {
+			const wb = createWorkflowBuilder();
+			expect(wb.selectedTemplate.get()).toBe("etl");
+
+			wb.updateCode(`const wf = pipeline({
+				trigger: source(fromTrigger()),
+				a: task(["trigger"], async () => "done"),
+			});`);
+			expect(wb.selectedTemplate.get()).toBe("");
+
+			wb.destroy();
+		});
+
+		it("can run pipeline after updateCode", () => {
+			const wb = createWorkflowBuilder();
+			wb.updateCode(`const wf = pipeline({
+				trigger: source(fromTrigger()),
+				step: task(["trigger"], async () => "done"),
+			});`);
+
+			wb.trigger();
+			expect(wb.running.get()).toBe(true);
 
 			wb.destroy();
 		});
@@ -220,13 +360,13 @@ describe("H3: Workflow Builder — store layer", () => {
 			wb.destroy();
 		});
 
-		it("execution log records template name on trigger", () => {
+		it("execution log records trigger event", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("fanout");
 
 			wb.trigger();
 			const entries = wb.executionLog.toArray();
-			expect(entries.some((e) => e.value.includes("fanout"))).toBe(true);
+			expect(entries.some((e) => e.value.includes("Triggered"))).toBe(true);
 
 			wb.destroy();
 		});
@@ -282,8 +422,8 @@ describe("H3: Workflow Builder — store layer", () => {
 		it("code contains pipeline keyword", () => {
 			const wb = createWorkflowBuilder();
 
-			for (const t of templates) {
-				wb.selectTemplate(t.id);
+			for (const p of presets) {
+				wb.selectTemplate(p.id);
 				expect(wb.code.get()).toContain("pipeline");
 			}
 
@@ -293,8 +433,8 @@ describe("H3: Workflow Builder — store layer", () => {
 		it("code contains task keyword", () => {
 			const wb = createWorkflowBuilder();
 
-			for (const t of templates) {
-				wb.selectTemplate(t.id);
+			for (const p of presets) {
+				wb.selectTemplate(p.id);
 				expect(wb.code.get()).toContain("task");
 			}
 

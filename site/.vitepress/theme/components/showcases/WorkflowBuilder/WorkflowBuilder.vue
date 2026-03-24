@@ -3,7 +3,7 @@ import { Background } from "@vue-flow/background";
 import { Position, VueFlow } from "@vue-flow/core";
 import "@vue-flow/core/dist/style.css";
 import "@vue-flow/core/dist/theme-default.css";
-import { createWorkflowBuilder, templates, type WorkflowNode } from "@examples/workflow-builder";
+import { createWorkflowBuilder, presets, type WorkflowNode } from "@examples/workflow-builder";
 import { useSubscribe, useSubscribeRecord } from "callbag-recharge/compat/vue";
 import { computed, onUnmounted, ref, watchEffect } from "vue";
 
@@ -17,7 +17,6 @@ onUnmounted(() => wb.destroy());
 // Reactive refs
 // ---------------------------------------------------------------------------
 const selectedTemplate = useSubscribe(wb.selectedTemplate);
-const code = useSubscribe(wb.code);
 const running = useSubscribe(wb.running);
 const runCount = useSubscribe(wb.runCount);
 const pipelineStatus = useSubscribe(wb.pipelineStatus);
@@ -26,7 +25,24 @@ const edgesRef = useSubscribe(wb.edges);
 const layoutRef = useSubscribe(wb.layout);
 const durationRange = useSubscribe(wb.durationRange);
 const failRate = useSubscribe(wb.failRate);
+const parseError = useSubscribe(wb.parseError);
 const executionLogLatest = useSubscribe(wb.executionLog.latest);
+
+// ---------------------------------------------------------------------------
+// Editable code
+// ---------------------------------------------------------------------------
+const editorCode = ref(wb.code.get());
+const codeChanged = ref(false);
+
+function onCodeInput(e: Event) {
+	editorCode.value = (e.target as HTMLTextAreaElement).value;
+	codeChanged.value = true;
+}
+
+function onUpdateCode() {
+	wb.updateCode(editorCode.value);
+	codeChanged.value = false;
+}
 
 // Per-node reactive stores — auto-managed subscriptions via useSubscribeRecord
 const nodeData = useSubscribeRecord(
@@ -65,12 +81,16 @@ watchEffect(() => {
 });
 
 // ---------------------------------------------------------------------------
-// Template selector
+// Preset selector
 // ---------------------------------------------------------------------------
-function onTemplateChange(e: Event) {
+function onPresetChange(e: Event) {
 	const id = (e.target as HTMLSelectElement).value;
 	wb.selectTemplate(id);
+	editorCode.value = wb.code.get();
+	codeChanged.value = false;
 	executionLogLines.value = [];
+	nodeLogs.value = {};
+	lastLogEntry.clear();
 }
 
 // ---------------------------------------------------------------------------
@@ -203,9 +223,9 @@ function onNodeEnter(id: string, event: MouseEvent) {
 }
 
 // ---------------------------------------------------------------------------
-// Code panel
+// Code line count for display
 // ---------------------------------------------------------------------------
-const codeLines = computed(() => code.value.split("\n"));
+const codeLineCount = computed(() => editorCode.value.split("\n").length);
 </script>
 
 <template>
@@ -217,11 +237,6 @@ const codeLines = computed(() => code.value.split("\n"));
 				Workflow Builder
 			</div>
 			<div class="wb-controls">
-				<select class="template-select" :value="selectedTemplate" @change="onTemplateChange">
-					<option v-for="t in templates" :key="t.id" :value="t.id">
-						{{ t.name }}
-					</option>
-				</select>
 				<button
 					class="run-btn"
 					:class="{ running: running }"
@@ -272,13 +287,44 @@ const codeLines = computed(() => code.value.split("\n"));
 				/>
 				<span class="param-value">{{ Math.round(failRate * 100) }}%</span>
 			</div>
-			<div class="param-info">
-				{{ templates.find((t) => t.id === selectedTemplate)?.description }}
-			</div>
 		</div>
 
-		<!-- Main body: Graph + Code -->
+		<!-- Main body: Code + Graph -->
 		<div class="wb-body">
+			<!-- Script Pane (editable) -->
+			<div class="code-panel">
+				<div class="code-header">
+					<div class="code-header-left">
+						<span class="code-filename">pipeline.ts</span>
+						<span class="code-badge">{{ codeLineCount }} lines</span>
+					</div>
+					<div class="code-header-right">
+						<select class="preset-select" :value="selectedTemplate" @change="onPresetChange">
+							<option value="" disabled>Presets...</option>
+							<option v-for="p in presets" :key="p.id" :value="p.id">
+								{{ p.name }}
+							</option>
+						</select>
+						<button
+							class="update-btn"
+							:class="{ changed: codeChanged }"
+							@click="onUpdateCode"
+						>
+							Update
+						</button>
+					</div>
+				</div>
+				<div v-if="parseError" class="parse-error">{{ parseError }}</div>
+				<div class="code-body">
+					<textarea
+						class="code-textarea"
+						:value="editorCode"
+						spellcheck="false"
+						@input="onCodeInput"
+					/>
+				</div>
+			</div>
+
 			<!-- DAG Graph -->
 			<div class="graph-panel" ref="graphPanelRef">
 				<VueFlow
@@ -295,7 +341,7 @@ const codeLines = computed(() => code.value.split("\n"));
 					:zoom-on-double-click="false"
 					:zoom-on-pinch="false"
 					class="vue-flow-wrapper"
-					:key="selectedTemplate"
+					:key="nodesRef.map(n => n.id).join(',')"
 				>
 					<Background :gap="20" :size="0.5" pattern-color="#1e345033" />
 
@@ -368,21 +414,6 @@ const codeLines = computed(() => code.value.split("\n"));
 					</div>
 				</Transition>
 			</div>
-
-			<!-- Code Panel -->
-			<div class="code-panel">
-				<div class="code-header">
-					<span class="code-filename">pipeline.ts</span>
-					<span class="code-badge">{{ codeLines.length }} lines</span>
-				</div>
-				<div class="code-body">
-					<pre><code><template
-  v-for="(line, i) in codeLines"
-  :key="i"
-><span class="code-line"><span class="line-num">{{ String(i + 1).padStart(3, ' ') }}</span>{{ line }}
-</span></template></code></pre>
-				</div>
-			</div>
 		</div>
 
 		<!-- Execution log -->
@@ -450,22 +481,6 @@ const codeLines = computed(() => code.value.split("\n"));
 	align-items: center;
 	gap: 8px;
 	flex-wrap: wrap;
-}
-
-.template-select {
-	padding: 6px 12px;
-	border: 1px solid var(--cr-border);
-	border-radius: 8px;
-	background: var(--cr-surface);
-	color: var(--cr-text);
-	font-family: var(--vp-font-family-base);
-	font-size: 0.85rem;
-	cursor: pointer;
-	outline: none;
-}
-
-.template-select:focus {
-	border-color: var(--cr-aqua);
 }
 
 .run-btn {
@@ -594,28 +609,147 @@ const codeLines = computed(() => code.value.split("\n"));
 	min-width: 40px;
 }
 
-.param-info {
-	font-size: 0.78rem;
-	color: var(--cr-text-muted);
-	margin-left: auto;
-}
-
 /* ── Body layout ── */
 .wb-body {
 	display: grid;
-	grid-template-columns: 1fr;
+	grid-template-columns: 1fr 1fr;
+}
+
+/* ── Code panel (editable script pane) ── */
+.code-panel {
+	display: flex;
+	flex-direction: column;
+	background: #091322;
+	min-width: 0;
+	border-right: 1px solid var(--cr-border-subtle);
+}
+
+.code-header {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	padding: 10px 16px;
+	border-bottom: 1px solid var(--cr-border-subtle);
+	gap: 8px;
+	flex-wrap: wrap;
+}
+
+.code-header-left {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.code-header-right {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.code-filename {
+	font-family: var(--vp-font-family-mono);
+	font-size: 0.8rem;
+	color: var(--cr-aqua-dim);
+}
+
+.code-badge {
+	font-family: var(--vp-font-family-mono);
+	font-size: 0.7rem;
+	color: var(--cr-text-muted);
+	padding: 2px 8px;
+	border: 1px solid var(--cr-border-subtle);
+	border-radius: 4px;
+}
+
+.preset-select {
+	padding: 4px 8px;
+	border: 1px solid var(--cr-border);
+	border-radius: 6px;
+	background: var(--cr-surface);
+	color: var(--cr-text);
+	font-family: var(--vp-font-family-base);
+	font-size: 0.78rem;
+	cursor: pointer;
+	outline: none;
+}
+
+.preset-select:focus {
+	border-color: var(--cr-aqua);
+}
+
+.update-btn {
+	padding: 4px 14px;
+	border: 1px solid var(--cr-border);
+	border-radius: 6px;
+	background: transparent;
+	color: var(--cr-text-muted);
+	font-family: var(--vp-font-family-base);
+	font-size: 0.78rem;
+	cursor: pointer;
+	transition: all 0.2s;
+}
+
+.update-btn.changed {
+	border-color: var(--cr-aqua);
+	color: var(--cr-aqua);
+	background: rgba(77, 232, 194, 0.08);
+}
+
+.update-btn:hover {
+	border-color: var(--cr-aqua);
+	color: var(--cr-aqua);
+	background: rgba(77, 232, 194, 0.1);
+}
+
+.parse-error {
+	padding: 8px 16px;
+	background: rgba(239, 68, 68, 0.1);
+	border-bottom: 1px solid rgba(239, 68, 68, 0.3);
+	color: #ef4444;
+	font-size: 0.78rem;
+	font-family: var(--vp-font-family-mono);
+	line-height: 1.4;
+}
+
+.code-body {
+	flex: 1;
+	display: flex;
+	min-height: 0;
+}
+
+.code-textarea {
+	flex: 1;
+	width: 100%;
+	padding: 16px;
+	background: transparent;
+	border: none;
+	outline: none;
+	resize: none;
+	color: var(--cr-text-muted);
+	font-family: var(--vp-font-family-mono);
+	font-size: 0.78rem;
+	line-height: 1.6;
+	tab-size: 2;
+	min-height: 480px;
+	white-space: pre;
+	overflow-wrap: normal;
+	overflow-x: auto;
+}
+
+.code-textarea::placeholder {
+	color: #3a4a5e;
 }
 
 /* ── Graph panel ── */
 .graph-panel {
 	position: relative;
 	min-width: 0;
-	border-bottom: 1px solid var(--cr-border-subtle);
 }
 
 .vue-flow-wrapper {
 	width: 100%;
-	height: 480px;
+	height: 100%;
+	min-height: 480px;
 }
 
 /* ── DAG nodes ── */
@@ -746,76 +880,6 @@ const codeLines = computed(() => code.value.split("\n"));
 .log-start { color: #3b82f6; }
 .log-skip { color: var(--cr-accent-warm); }
 
-/* ── Code panel ── */
-.code-panel {
-	display: flex;
-	flex-direction: column;
-	background: #091322;
-	max-height: 350px;
-	min-width: 0;
-}
-
-.code-header {
-	display: flex;
-	align-items: center;
-	justify-content: space-between;
-	padding: 10px 16px;
-	border-bottom: 1px solid var(--cr-border-subtle);
-}
-
-.code-filename {
-	font-family: var(--vp-font-family-mono);
-	font-size: 0.8rem;
-	color: var(--cr-aqua-dim);
-}
-
-.code-badge {
-	font-family: var(--vp-font-family-mono);
-	font-size: 0.7rem;
-	color: var(--cr-text-muted);
-	padding: 2px 8px;
-	border: 1px solid var(--cr-border-subtle);
-	border-radius: 4px;
-}
-
-.code-body {
-	flex: 1;
-	overflow: auto;
-	padding: 16px 0;
-}
-
-.code-body pre {
-	margin: 0;
-	background: transparent !important;
-	border: none !important;
-	box-shadow: none !important;
-}
-
-.code-body code {
-	font-family: var(--vp-font-family-mono);
-	font-size: 0.78rem;
-	line-height: 1.6;
-	background: transparent !important;
-	border: none !important;
-	color: var(--cr-text-muted) !important;
-	padding: 0 !important;
-}
-
-.code-line {
-	display: block;
-	padding: 0 16px;
-}
-
-.line-num {
-	display: inline-block;
-	width: 36px;
-	min-width: 36px;
-	color: #3a4a5e;
-	user-select: none;
-	text-align: right;
-	margin-right: 16px;
-}
-
 /* ── Execution log ── */
 .wb-log {
 	border-top: 1px solid var(--cr-border-subtle);
@@ -884,13 +948,26 @@ const codeLines = computed(() => code.value.split("\n"));
 
 /* ── Responsive ── */
 @media (max-width: 768px) {
+	.wb-body {
+		grid-template-columns: 1fr;
+	}
+
+	.code-panel {
+		border-right: none;
+		border-bottom: 1px solid var(--cr-border-subtle);
+	}
+
+	.code-textarea {
+		min-height: 300px;
+	}
+
+	.vue-flow-wrapper {
+		min-height: 350px;
+	}
+
 	.wb-params {
 		flex-direction: column;
 		align-items: flex-start;
-	}
-
-	.param-info {
-		margin-left: 0;
 	}
 }
 </style>

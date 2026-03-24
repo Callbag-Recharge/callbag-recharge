@@ -1,9 +1,9 @@
 /**
  * H3: Workflow Builder — Hero App store layer
  *
- * Code-first n8n: users pick a pipeline template and customize parameters.
- * Left pane: CodeMirror shows the pipeline code (read-only or editable params).
- * Right pane: Vue Flow renders the live DAG. Fire triggers, watch nodes animate.
+ * Code-first n8n: users write pipeline() code in an editable script pane,
+ * press "Update" to parse it into a live DAG, then run the pipeline.
+ * Presets load example code that users can start from and modify.
  *
  * All library logic lives here; the Vue component is UI-only.
  *
@@ -14,15 +14,16 @@
  * Run: pnpm exec tsx --tsconfig tsconfig.examples.json examples/workflow-builder.ts
  */
 
-import type { Store, WritableStore } from "callbag-recharge";
 import type { ReactiveLog } from "callbag-recharge/data";
 import { reactiveLog } from "callbag-recharge/data";
 import type {
 	DagLayoutEdge,
 	LayoutNode,
 	PipelineStatus,
+	Store,
 	TaskState,
 	WorkflowNodeResult,
+	WritableStore,
 } from "callbag-recharge/orchestrate";
 import {
 	dagLayout,
@@ -47,7 +48,9 @@ export interface WorkflowNode {
 	task: TaskState;
 	log: ReactiveLog<string>;
 	breaker: WorkflowNodeResult["breaker"];
-	breakerState: WritableStore<string>;
+	breakerState: WorkflowNodeResult["breakerState"];
+	reset(): void;
+	destroy(): void;
 }
 
 /** An edge in the visual DAG. */
@@ -56,31 +59,150 @@ export interface WorkflowEdge {
 	target: string;
 }
 
-/** Template definition — what users pick from. */
-export interface PipelineTemplate {
+/** Parsed node from user code. */
+export interface ParsedNode {
+	id: string;
+	label: string;
+	deps: string[];
+	type: "source" | "task";
+}
+
+/** Result of parsing pipeline code. */
+export interface ParseResult {
+	ok: boolean;
+	nodes: ParsedNode[];
+	edges: WorkflowEdge[];
+	error?: string;
+}
+
+/** Preset definition — example code users can start from. */
+export interface PipelinePreset {
 	id: string;
 	name: string;
 	description: string;
-	/** Pipeline code shown in the editor (display only). */
 	code: string;
-	/** Factory that creates the live pipeline. */
-	build(opts: TemplateBuildOpts): BuiltPipeline;
-}
-
-interface TemplateBuildOpts {
-	/** Simulated task duration range [min, max] in ms. */
-	durationRange: [number, number];
-	/** Failure probability 0–1. */
-	failRate: number;
 }
 
 interface BuiltPipeline {
 	nodes: WorkflowNode[];
 	edges: WorkflowEdge[];
-	/** Auto-layout positions for DAG visualization. */
 	layout: LayoutNode[];
 	trigger: ReturnType<typeof fromTrigger<string>>;
+	wfNodes: WorkflowNodeResult[];
 	wf: { status: Store<PipelineStatus>; reset(): void; destroy(): void };
+}
+
+// ---------------------------------------------------------------------------
+// Code parser — extracts pipeline structure from user code
+// ---------------------------------------------------------------------------
+
+/** Convert camelCase id to Title Case label. */
+function idToLabel(id: string): string {
+	return id.replace(/([a-z])([A-Z])/g, "$1 $2").replace(/^./, (c) => c.toUpperCase());
+}
+
+/**
+ * Parse pipeline() code to extract nodes and edges.
+ * Recognizes:
+ *   - `name: source(...)` → source node (implicit trigger)
+ *   - `name: task(["dep1", "dep2"], ...)` → task node with dependencies
+ */
+export function parsePipelineCode(code: string): ParseResult {
+	const nodes: ParsedNode[] = [];
+	const edges: WorkflowEdge[] = [];
+	const seen = new Set<string>();
+
+	// Match source entries:  name: source(...)
+	const sourceRe = /(\w+)\s*:\s*source\s*\(/g;
+	for (let m = sourceRe.exec(code); m !== null; m = sourceRe.exec(code)) {
+		const id = m[1];
+		if (id === "trigger") continue; // skip trigger source
+		if (!seen.has(id)) {
+			seen.add(id);
+			nodes.push({ id, label: idToLabel(id), deps: [], type: "source" });
+		}
+	}
+
+	// Match task entries:  name: task(["dep1", "dep2"], ...)
+	const taskRe = /(\w+)\s*:\s*task\s*\(\s*\[([^\]]*)\]/g;
+	for (let m = taskRe.exec(code); m !== null; m = taskRe.exec(code)) {
+		const id = m[1];
+		if (seen.has(id)) continue; // skip duplicate definitions
+		seen.add(id);
+
+		const depsStr = m[2];
+		const deps = depsStr
+			.split(",")
+			.map((d) => d.trim().replace(/['"]/g, ""))
+			.filter((d) => d.length > 0);
+
+		nodes.push({ id, label: idToLabel(id), deps, type: "task" });
+
+		for (const dep of deps) {
+			if (dep !== "trigger") {
+				edges.push({ source: dep, target: id });
+			}
+		}
+	}
+
+	if (nodes.length === 0) {
+		return {
+			ok: false,
+			nodes: [],
+			edges: [],
+			error:
+				'No pipeline nodes found. Define tasks with: name: task(["deps"], async (signal) => { ... })',
+		};
+	}
+
+	// Validate: check all deps reference known nodes or "trigger"
+	const nodeIds = new Set(nodes.map((n) => n.id));
+	for (const node of nodes) {
+		for (const dep of node.deps) {
+			if (dep !== "trigger" && !nodeIds.has(dep)) {
+				return {
+					ok: false,
+					nodes: [],
+					edges: [],
+					error: `Unknown dependency "${dep}" in task "${node.id}". Available nodes: ${[...nodeIds].join(", ")}`,
+				};
+			}
+		}
+	}
+
+	// Detect cycles via topological sort (Kahn's algorithm)
+	const inDegree = new Map<string, number>();
+	const adj = new Map<string, string[]>();
+	for (const n of nodes) {
+		inDegree.set(n.id, 0);
+		adj.set(n.id, []);
+	}
+	for (const e of edges) {
+		adj.get(e.source)?.push(e.target);
+		inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1);
+	}
+	const queue = [...inDegree.entries()].filter(([, d]) => d === 0).map(([id]) => id);
+	let sorted = 0;
+	while (queue.length > 0) {
+		const cur = queue.shift()!;
+		sorted++;
+		for (const next of adj.get(cur) ?? []) {
+			const d = (inDegree.get(next) ?? 1) - 1;
+			inDegree.set(next, d);
+			if (d === 0) queue.push(next);
+		}
+	}
+	if (sorted < nodes.length) {
+		return {
+			ok: false,
+			nodes: [],
+			edges: [],
+			error:
+				"Cycle detected in pipeline dependencies. Tasks cannot depend on each other in a loop.",
+		};
+	}
+
+	return { ok: true, nodes, edges };
 }
 
 // ---------------------------------------------------------------------------
@@ -95,6 +217,8 @@ function buildNode(meta: WorkflowNodeResult, def: any): WorkflowNode {
 		log: meta.log,
 		breaker: meta.breaker,
 		breakerState: meta.breakerState,
+		reset: () => meta.reset(),
+		destroy: () => meta.destroy(),
 	};
 }
 
@@ -103,286 +227,68 @@ function computeLayout(nodes: { id: string }[], edges: DagLayoutEdge[]): LayoutN
 }
 
 // ---------------------------------------------------------------------------
-// Template 1: ETL Pipeline (3 stages — simple linear)
+// Build pipeline dynamically from parsed nodes
 // ---------------------------------------------------------------------------
-function buildEtlPipeline(opts: TemplateBuildOpts): BuiltPipeline {
-	const n = {
-		extract: workflowNode("extract", "Extract"),
-		transform: workflowNode("transform", "Transform"),
-		load: workflowNode("load", "Load"),
-	};
 
-	const triggerSrc = fromTrigger<string>({ name: "etl:trigger" });
+function buildFromParsed(
+	parsed: ParseResult,
+	opts: {
+		durationRange: WritableStore<[number, number]>;
+		failRate: WritableStore<number>;
+	},
+): BuiltPipeline {
+	const triggerSrc = fromTrigger<string>({ name: "wb:trigger" });
 
-	const extractDef = task(
-		["trigger"],
-		async (_signal, [_v]) => {
-			n.extract.log.append("[START] Extracting data...");
-			return n.extract.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "extract" },
-	);
+	// Only build task-type nodes; source-type nodes are not executable
+	const taskNodes = parsed.nodes.filter((pn) => pn.type === "task");
 
-	const transformDef = task(
-		["extract"],
-		async (_signal, [_v]) => {
-			n.transform.log.append("[START] Transforming...");
-			return n.transform.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "transform" },
-	);
+	const allWfNodes: WorkflowNodeResult[] = [];
+	const wfNodes: Record<string, WorkflowNodeResult> = {};
+	const defs: Record<string, any> = { trigger: source(triggerSrc) };
+	const builtNodes: WorkflowNode[] = [];
 
-	const loadDef = task(
-		["transform"],
-		async (_signal, [_v]) => {
-			n.load.log.append("[START] Loading...");
-			return n.load.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "load" },
-	);
+	for (const pn of taskNodes) {
+		const wn = workflowNode(pn.id, pn.label);
+		wfNodes[pn.id] = wn;
+		allWfNodes.push(wn);
 
-	const wf = pipeline(
-		{
-			trigger: source(triggerSrc),
-			extract: extractDef,
-			transform: transformDef,
-			load: loadDef,
-		},
-		{ name: "etl" },
-	);
+		const deps = pn.deps.length > 0 ? pn.deps : ["trigger"];
+		const def = task(
+			deps,
+			async (signal, _vals) => {
+				wn.log.append(`[START] ${pn.label}...`);
+				return wn.simulate(opts.durationRange.get(), opts.failRate.get(), signal);
+			},
+			{ name: pn.id },
+		);
+		defs[pn.id] = def;
+	}
 
-	const edges: WorkflowEdge[] = [
-		{ source: "extract", target: "transform" },
-		{ source: "transform", target: "load" },
-	];
+	const wf = pipeline(defs, { name: "wb" });
+
+	for (const pn of taskNodes) {
+		builtNodes.push(buildNode(wfNodes[pn.id], defs[pn.id]));
+	}
+
+	// Filter edges to only include task-type nodes
+	const taskIds = new Set(taskNodes.map((n) => n.id));
+	const taskEdges = parsed.edges.filter((e) => taskIds.has(e.source) && taskIds.has(e.target));
 
 	return {
-		nodes: [
-			buildNode(n.extract, extractDef),
-			buildNode(n.transform, transformDef),
-			buildNode(n.load, loadDef),
-		],
-		edges,
-		layout: computeLayout([{ id: "extract" }, { id: "transform" }, { id: "load" }], edges),
-		trigger: triggerSrc,
-		wf,
-	};
-}
-
-// ---------------------------------------------------------------------------
-// Template 2: Fan-out / Fan-in (diamond shape)
-// ---------------------------------------------------------------------------
-function buildFanOutPipeline(opts: TemplateBuildOpts): BuiltPipeline {
-	const n = {
-		ingest: workflowNode("ingest", "Ingest"),
-		validate: workflowNode("validate", "Validate"),
-		enrich: workflowNode("enrich", "Enrich"),
-		store: workflowNode("store", "Store"),
-	};
-
-	const triggerSrc = fromTrigger<string>({ name: "fanout:trigger" });
-
-	const ingestDef = task(
-		["trigger"],
-		async (_signal, [_v]) => {
-			n.ingest.log.append("[START] Ingesting...");
-			return n.ingest.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "ingest" },
-	);
-
-	const validateDef = task(
-		["ingest"],
-		async (_signal, [_v]) => {
-			n.validate.log.append("[START] Validating...");
-			return n.validate.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "validate" },
-	);
-
-	const enrichDef = task(
-		["ingest"],
-		async (_signal, [_v]) => {
-			n.enrich.log.append("[START] Enriching...");
-			return n.enrich.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "enrich" },
-	);
-
-	const storeDef = task(
-		["validate", "enrich"],
-		async (_signal, [_v1, _v2]) => {
-			n.store.log.append("[START] Storing...");
-			return n.store.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "store" },
-	);
-
-	const wf = pipeline(
-		{
-			trigger: source(triggerSrc),
-			ingest: ingestDef,
-			validate: validateDef,
-			enrich: enrichDef,
-			store: storeDef,
-		},
-		{ name: "fanout" },
-	);
-
-	const edges: WorkflowEdge[] = [
-		{ source: "ingest", target: "validate" },
-		{ source: "ingest", target: "enrich" },
-		{ source: "validate", target: "store" },
-		{ source: "enrich", target: "store" },
-	];
-
-	return {
-		nodes: [
-			buildNode(n.ingest, ingestDef),
-			buildNode(n.validate, validateDef),
-			buildNode(n.enrich, enrichDef),
-			buildNode(n.store, storeDef),
-		],
-		edges,
+		nodes: builtNodes,
+		edges: taskEdges,
 		layout: computeLayout(
-			[{ id: "ingest" }, { id: "validate" }, { id: "enrich" }, { id: "store" }],
-			edges,
+			taskNodes.map((n) => ({ id: n.id })),
+			taskEdges,
 		),
 		trigger: triggerSrc,
+		wfNodes: allWfNodes,
 		wf,
 	};
 }
 
 // ---------------------------------------------------------------------------
-// Template 3: Full DAG (airflow-like — 7 nodes)
-// ---------------------------------------------------------------------------
-function buildFullDagPipeline(opts: TemplateBuildOpts): BuiltPipeline {
-	const n = {
-		cron: workflowNode("cron", "Cron Trigger"),
-		fetchBank: workflowNode("fetch-bank", "Fetch Bank"),
-		fetchCards: workflowNode("fetch-cards", "Fetch Cards"),
-		aggregate: workflowNode("aggregate", "Aggregate"),
-		anomaly: workflowNode("anomaly", "Detect Anomaly"),
-		batchWrite: workflowNode("batch-write", "Batch Write"),
-		alert: workflowNode("alert", "Send Alert"),
-	};
-
-	const triggerSrc = fromTrigger<string>({ name: "dag:trigger" });
-
-	const cronDef = task(
-		["trigger"],
-		async (_signal, [_v]) => {
-			n.cron.log.append("[TRIGGER] Pipeline started");
-			n.cron.breaker.recordSuccess();
-			n.cron.breakerState.set(n.cron.breaker.state);
-			return "triggered";
-		},
-		{ name: "cron" },
-	);
-
-	const fetchBankDef = task(
-		["cron"],
-		async (_signal, [_v]) => n.fetchBank.simulate(opts.durationRange, opts.failRate),
-		{
-			name: "fetchBank",
-			skip: () => !n.fetchBank.breaker.canExecute(),
-			onSkip: () => n.fetchBank.log.append("[CIRCUIT OPEN] Skipped"),
-			onStart: () => n.fetchBank.log.append("[START] Running..."),
-		},
-	);
-
-	const fetchCardsDef = task(
-		["cron"],
-		async (_signal, [_v]) => n.fetchCards.simulate(opts.durationRange, opts.failRate),
-		{
-			name: "fetchCards",
-			skip: () => !n.fetchCards.breaker.canExecute(),
-			onSkip: () => n.fetchCards.log.append("[CIRCUIT OPEN] Skipped"),
-			onStart: () => n.fetchCards.log.append("[START] Running..."),
-		},
-	);
-
-	const aggregateDef = task(
-		["fetchBank", "fetchCards"],
-		async (_signal, [_bankVal, _cardsVal]) => {
-			n.aggregate.log.append("[START] Aggregating...");
-			return n.aggregate.simulate(opts.durationRange, opts.failRate);
-		},
-		{ name: "aggregate" },
-	);
-
-	const anomalyDef = task(
-		["aggregate"],
-		async (_signal, [_v]) => n.anomaly.simulate(opts.durationRange, opts.failRate),
-		{ name: "anomaly", onStart: () => n.anomaly.log.append("[START] Running...") },
-	);
-
-	const batchWriteDef = task(
-		["aggregate"],
-		async (_signal, [_v]) => n.batchWrite.simulate(opts.durationRange, opts.failRate),
-		{ name: "batchWrite", onStart: () => n.batchWrite.log.append("[START] Running...") },
-	);
-
-	const alertDef = task(
-		["anomaly"],
-		async (_signal, [_v]) => n.alert.simulate(opts.durationRange, opts.failRate),
-		{ name: "alert", onStart: () => n.alert.log.append("[START] Running...") },
-	);
-
-	const wf = pipeline(
-		{
-			trigger: source(triggerSrc),
-			cron: cronDef,
-			fetchBank: fetchBankDef,
-			fetchCards: fetchCardsDef,
-			aggregate: aggregateDef,
-			anomaly: anomalyDef,
-			batchWrite: batchWriteDef,
-			alert: alertDef,
-		},
-		{ name: "dag" },
-	);
-
-	const edges: WorkflowEdge[] = [
-		{ source: "cron", target: "fetch-bank" },
-		{ source: "cron", target: "fetch-cards" },
-		{ source: "fetch-bank", target: "aggregate" },
-		{ source: "fetch-cards", target: "aggregate" },
-		{ source: "aggregate", target: "anomaly" },
-		{ source: "aggregate", target: "batch-write" },
-		{ source: "anomaly", target: "alert" },
-	];
-
-	return {
-		nodes: [
-			buildNode(n.cron, cronDef),
-			buildNode(n.fetchBank, fetchBankDef),
-			buildNode(n.fetchCards, fetchCardsDef),
-			buildNode(n.aggregate, aggregateDef),
-			buildNode(n.anomaly, anomalyDef),
-			buildNode(n.batchWrite, batchWriteDef),
-			buildNode(n.alert, alertDef),
-		],
-		edges,
-		layout: computeLayout(
-			[
-				{ id: "cron" },
-				{ id: "fetch-bank" },
-				{ id: "fetch-cards" },
-				{ id: "aggregate" },
-				{ id: "anomaly" },
-				{ id: "batch-write" },
-				{ id: "alert" },
-			],
-			edges,
-		),
-		trigger: triggerSrc,
-		wf,
-	};
-}
-
-// ---------------------------------------------------------------------------
-// Template registry
+// Presets — example code users can start from and edit
 // ---------------------------------------------------------------------------
 
 const ETL_CODE = `const wf = pipeline({
@@ -423,42 +329,45 @@ const FANOUT_CODE = `const wf = pipeline({
 const FULL_DAG_CODE = `const wf = pipeline({
   trigger: source(fromTrigger()),
   cron: task(["trigger"], async () => "triggered"),
-  fetchBank:  task(["cron"], async (signal) => fetchBankData(signal), {
-    skip: () => !breaker.canExecute(),
+  fetchBank: task(["cron"], async (signal) => {
+    return fetchBankData(signal);
   }),
-  fetchCards: task(["cron"], async (signal) => fetchCardData(signal), {
-    skip: () => !breaker.canExecute(),
+  fetchCards: task(["cron"], async (signal) => {
+    return fetchCardData(signal);
   }),
   // Fan-in: waits for both fetch tasks
-  aggregate:  task(["fetchBank", "fetchCards"], async (s, [bank, cards]) => {
+  aggregate: task(["fetchBank", "fetchCards"], async (s, [bank, cards]) => {
     return merge(bank, cards);
   }),
-  anomaly:    task(["aggregate"], async (s, [data]) => detectAnomalies(data)),
-  batchWrite: task(["aggregate"], async (s, [data]) => writeBatch(data)),
-  alert:      task(["anomaly"], async (s, [result]) => sendAlert(result)),
+  anomaly: task(["aggregate"], async (s, [data]) => {
+    return detectAnomalies(data);
+  }),
+  batchWrite: task(["aggregate"], async (s, [data]) => {
+    return writeBatch(data);
+  }),
+  alert: task(["anomaly"], async (s, [result]) => {
+    return sendAlert(result);
+  }),
 });`;
 
-export const templates: PipelineTemplate[] = [
+export const presets: PipelinePreset[] = [
 	{
 		id: "etl",
 		name: "ETL Pipeline",
 		description: "Extract → Transform → Load. Linear 3-stage pipeline.",
 		code: ETL_CODE,
-		build: buildEtlPipeline,
 	},
 	{
 		id: "fanout",
 		name: "Fan-out / Fan-in",
 		description: "Ingest → (Validate ‖ Enrich) → Store. Diamond-shaped DAG.",
 		code: FANOUT_CODE,
-		build: buildFanOutPipeline,
 	},
 	{
 		id: "full-dag",
-		name: "Full DAG (Airflow-style)",
-		description: "7-node finance pipeline with circuit breakers and skip propagation.",
+		name: "Full DAG (7 nodes)",
+		description: "Finance pipeline: Cron → fetch → aggregate → detect → alert.",
 		code: FULL_DAG_CODE,
-		build: buildFullDagPipeline,
 	},
 ];
 
@@ -467,14 +376,16 @@ export const templates: PipelineTemplate[] = [
 // ---------------------------------------------------------------------------
 
 export interface WorkflowBuilderState {
-	/** Currently selected template ID. */
-	selectedTemplate: Store<string>;
-	/** Pipeline code displayed in the editor. */
-	code: Store<string>;
+	/** Currently selected preset ID (empty string if user has edited code). */
+	selectedTemplate: WritableStore<string>;
+	/** Pipeline code in the editor (editable). */
+	code: WritableStore<string>;
+	/** Parse error from last updateCode() call. */
+	parseError: Store<string>;
 	/** Duration range for simulated work [min, max] ms. */
-	durationRange: Store<[number, number]>;
+	durationRange: WritableStore<[number, number]>;
 	/** Failure probability 0–1. */
-	failRate: Store<number>;
+	failRate: WritableStore<number>;
 	/** Whether the pipeline is currently running. */
 	running: Store<boolean>;
 	/** Total run count. */
@@ -489,8 +400,10 @@ export interface WorkflowBuilderState {
 	layout: Store<LayoutNode[]>;
 	/** Global execution log. */
 	executionLog: ReactiveLog<string>;
-	/** Select a template and rebuild the pipeline. */
-	selectTemplate(templateId: string): void;
+	/** Load a preset into the editor. */
+	selectTemplate(presetId: string): void;
+	/** Parse the current code and rebuild the pipeline + DAG. */
+	updateCode(newCode: string): boolean;
 	/** Fire the pipeline trigger. */
 	trigger(): void;
 	/** Reset the pipeline for re-trigger. */
@@ -506,6 +419,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	const running = state(false, { name: "wb.running" });
 	const runCount = state(0, { name: "wb.runCount" });
 	const executionLog = reactiveLog<string>({ id: "wb:executionLog", maxSize: 200 });
+	const parseError = state<string>("", { name: "wb.parseError" });
 
 	// Active pipeline state
 	let activePipeline: BuiltPipeline | null = null;
@@ -515,39 +429,43 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	const edgesStore = state<WorkflowEdge[]>([], { name: "wb.edges" });
 	const layoutStore = state<LayoutNode[]>([], { name: "wb.layout" });
 	const pipelineStatus = state<PipelineStatus>("idle", { name: "wb.pipelineStatus" });
-	const code = state<string>(templates[0].code, { name: "wb.code" });
+	const code = state<string>(presets[0].code, { name: "wb.code" });
 
 	// Status sync effect disposer
 	let statusUnsub: (() => void) | null = null;
 
-	function buildFromTemplate(templateId: string): void {
-		// Destroy previous pipeline
+	function destroyActive(): void {
 		if (activePipeline) {
 			activePipeline.wf.destroy();
-			for (const node of activePipeline.nodes) {
-				node.log.destroy();
+			for (const wn of activePipeline.wfNodes) {
+				wn.destroy();
 			}
+			activePipeline = null;
 		}
 		if (statusUnsub) {
 			statusUnsub();
 			statusUnsub = null;
 		}
+	}
 
-		const template = templates.find((t) => t.id === templateId);
-		if (!template) {
-			activePipeline = null;
-			return;
+	function buildAndActivate(codeText: string): boolean {
+		const parsed = parsePipelineCode(codeText);
+		if (!parsed.ok) {
+			parseError.set(parsed.error ?? "Parse error");
+			return false;
 		}
 
-		activePipeline = template.build({
-			durationRange: durationRange.get(),
-			failRate: failRate.get(),
+		destroyActive();
+		parseError.set("");
+
+		activePipeline = buildFromParsed(parsed, {
+			durationRange,
+			failRate,
 		});
 
 		nodesStore.set(activePipeline.nodes);
 		edgesStore.set(activePipeline.edges);
 		layoutStore.set(activePipeline.layout);
-		code.set(template.code);
 		pipelineStatus.set("idle");
 		running.set(false);
 
@@ -558,28 +476,42 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 			pipelineStatus.set(s);
 			if (running.get() && (s === "completed" || s === "errored")) {
 				running.set(false);
-				runCount.update((n) => n + 1);
-				executionLog.append(`[${new Date().toISOString()}] Run #${runCount.get()} — ${s}`);
+				const next = runCount.get() + 1;
+				runCount.set(next);
+				executionLog.append(`[${new Date().toISOString()}] Run #${next} — ${s}`);
 			}
-			return undefined;
 		});
 		statusUnsub = dispose;
+		return true;
 	}
 
-	// Initialize with first template
-	buildFromTemplate("etl");
+	// Initialize with first preset
+	buildAndActivate(presets[0].code);
 
-	function selectTemplate(templateId: string): void {
-		selectedTemplate.set(templateId);
-		buildFromTemplate(templateId);
+	function selectTemplate(presetId: string): void {
+		const preset = presets.find((p) => p.id === presetId);
+		if (!preset) return;
+		selectedTemplate.set(presetId);
+		code.set(preset.code);
+		buildAndActivate(preset.code);
+	}
+
+	function updateCode(newCode: string): boolean {
+		const ok = buildAndActivate(newCode);
+		if (ok) {
+			code.set(newCode);
+			selectedTemplate.set("");
+		}
+		return ok;
 	}
 
 	function triggerPipeline(): void {
 		if (!activePipeline || running.get()) return;
 		activePipeline.wf.reset();
+		for (const wn of activePipeline.wfNodes) wn.reset();
 		activePipeline.trigger.fire("go");
 		running.set(true);
-		executionLog.append(`[${new Date().toISOString()}] Triggered: ${selectedTemplate.get()}`);
+		executionLog.append(`[${new Date().toISOString()}] Triggered pipeline`);
 	}
 
 	function resetPipeline(): void {
@@ -590,19 +522,14 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	}
 
 	function destroy(): void {
-		if (activePipeline) {
-			activePipeline.wf.destroy();
-			for (const node of activePipeline.nodes) {
-				node.log.destroy();
-			}
-		}
-		if (statusUnsub) statusUnsub();
+		destroyActive();
 		executionLog.destroy();
 	}
 
 	return {
 		selectedTemplate,
 		code,
+		parseError,
 		durationRange,
 		failRate,
 		running,
@@ -613,6 +540,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 		layout: layoutStore,
 		executionLog,
 		selectTemplate,
+		updateCode,
 		trigger: triggerPipeline,
 		reset: resetPipeline,
 		destroy,
@@ -623,15 +551,15 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 // CLI entry point
 // ---------------------------------------------------------------------------
 if (typeof process !== "undefined" && process.argv?.[1]?.includes("workflow-builder")) {
-	console.log("=== Workflow Builder: Template-based Pipelines ===\n");
-	console.log("Available templates:");
-	for (const t of templates) {
-		console.log(`  ${t.id}: ${t.name} — ${t.description}`);
+	console.log("=== Workflow Builder: Code-first Pipeline Editor ===\n");
+	console.log("Available presets:");
+	for (const p of presets) {
+		console.log(`  ${p.id}: ${p.name} — ${p.description}`);
 	}
 
 	const wb = createWorkflowBuilder();
 
-	console.log(`\nSelected: ${wb.selectedTemplate.get()}`);
+	console.log(`\nPreset: ${wb.selectedTemplate.get()}`);
 	console.log(
 		`Nodes: ${wb.nodes
 			.get()
@@ -639,30 +567,32 @@ if (typeof process !== "undefined" && process.argv?.[1]?.includes("workflow-buil
 			.join(" → ")}`,
 	);
 	console.log(`Edges: ${wb.edges.get().length}`);
-	console.log(
-		`Layout: ${wb.layout
-			.get()
-			.map((l) => `${l.id}(${l.x},${l.y})`)
-			.join(", ")}`,
-	);
 	console.log(`Code:\n${wb.code.get()}\n`);
 
-	// Switch to fan-out
-	wb.selectTemplate("fanout");
-	console.log(`Switched to: ${wb.selectedTemplate.get()}`);
+	// Test updateCode with custom pipeline
+	const customCode = `const wf = pipeline({
+  trigger: source(fromTrigger()),
+  fetch: task(["trigger"], async (s) => getData()),
+  process: task(["fetch"], async (s, [d]) => transform(d)),
+  save: task(["process"], async (s, [d]) => persist(d)),
+});`;
+
+	console.log("--- Updating with custom code ---");
+	const ok = wb.updateCode(customCode);
+	console.log(`Parse OK: ${ok}`);
 	console.log(
 		`Nodes: ${wb.nodes
 			.get()
 			.map((n) => n.label)
-			.join(", ")}`,
+			.join(" → ")}`,
 	);
 	console.log(`Edges: ${wb.edges.get().length}`);
-	console.log(
-		`Layout: ${wb.layout
-			.get()
-			.map((l) => `${l.id}(${l.x},${l.y})`)
-			.join(", ")}`,
-	);
+
+	// Test parse error
+	console.log("\n--- Testing parse error ---");
+	const bad = wb.updateCode("const x = 42;");
+	console.log(`Parse OK: ${bad}`);
+	console.log(`Error: ${wb.parseError.get()}`);
 
 	wb.destroy();
 	console.log("\n--- done ---");

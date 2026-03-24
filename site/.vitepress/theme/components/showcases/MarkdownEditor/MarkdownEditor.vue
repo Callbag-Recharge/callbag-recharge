@@ -94,28 +94,12 @@ function onKeyDown(e: KeyboardEvent) {
 	const mod = e.metaKey || e.ctrlKey;
 	if (mod && e.key === "z" && !e.shiftKey) {
 		e.preventDefault();
-		hero.editor.commands.execute("undo");
-		nextTick(() => {
-			const el = textareaRef.value;
-			if (el) {
-				const len = hero.editor.buffer.content.get().length;
-				el.selectionStart = len;
-				el.selectionEnd = len;
-				syncCursor();
-			}
-		});
+		hero.editor.commands.dispatch("undo");
+		syncTextarea();
 	} else if (mod && (e.key === "y" || (e.key === "z" && e.shiftKey))) {
 		e.preventDefault();
-		hero.editor.commands.execute("redo");
-		nextTick(() => {
-			const el = textareaRef.value;
-			if (el) {
-				const len = hero.editor.buffer.content.get().length;
-				el.selectionStart = len;
-				el.selectionEnd = len;
-				syncCursor();
-			}
-		});
+		hero.editor.commands.dispatch("redo");
+		syncTextarea();
 	} else if (e.key === "Tab") {
 		e.preventDefault();
 		const el = textareaRef.value;
@@ -132,34 +116,59 @@ function onKeyDown(e: KeyboardEvent) {
 }
 
 // ---------------------------------------------------------------------------
+// Sync textarea from buffer (after commands modify content/cursor)
+// ---------------------------------------------------------------------------
+function syncTextarea() {
+	const el = textareaRef.value;
+	if (!el) return;
+	const val = hero.editor.buffer.content.get();
+	if (el.value !== val) el.value = val;
+	el.selectionStart = hero.editor.buffer.cursor.start.get();
+	el.selectionEnd = hero.editor.buffer.cursor.end.get();
+	el.focus();
+}
+
+// ---------------------------------------------------------------------------
 // Toolbar actions
 // ---------------------------------------------------------------------------
 function undo() {
-	hero.editor.commands.execute("undo");
+	hero.editor.commands.dispatch("undo");
+	syncTextarea();
 }
 
 function redo() {
-	hero.editor.commands.execute("redo");
+	hero.editor.commands.dispatch("redo");
+	syncTextarea();
 }
 
 function insertHeading(level: 1 | 2 | 3) {
-	hero.editor.commands.execute("heading", { level });
+	syncCursor();
+	hero.editor.commands.dispatch("heading", { level });
+	syncTextarea();
 }
 
 function insertBold() {
-	hero.editor.commands.execute("bold");
+	syncCursor();
+	hero.editor.commands.dispatch("bold");
+	syncTextarea();
 }
 
 function insertItalic() {
-	hero.editor.commands.execute("italic");
+	syncCursor();
+	hero.editor.commands.dispatch("italic");
+	syncTextarea();
 }
 
 function insertCode() {
-	hero.editor.commands.execute("code", { block: false });
+	syncCursor();
+	hero.editor.commands.dispatch("code", { block: false });
+	syncTextarea();
 }
 
 function insertList() {
-	hero.editor.commands.execute("list", { ordered: false });
+	syncCursor();
+	hero.editor.commands.dispatch("list", { ordered: false });
+	syncTextarea();
 }
 
 // ---------------------------------------------------------------------------
@@ -184,21 +193,21 @@ const saveIcon = computed(() => {
 		<!-- Toolbar -->
 		<div class="editor-toolbar">
 			<div class="toolbar-left">
-				<button class="tool-btn" title="Undo (Ctrl+Z)" @click="undo">
+				<button class="tool-btn" title="Undo (Ctrl+Z)" @mousedown.prevent @click="undo">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 10h10a5 5 0 0 1 0 10H9" /><polyline points="7 14 3 10 7 6" /></svg>
 				</button>
-				<button class="tool-btn" title="Redo (Ctrl+Y)" @click="redo">
+				<button class="tool-btn" title="Redo (Ctrl+Y)" @mousedown.prevent @click="redo">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 10H11a5 5 0 0 0 0 10h4" /><polyline points="17 14 21 10 17 6" /></svg>
 				</button>
 				<span class="toolbar-divider" />
-				<button class="tool-btn" title="Heading 1" @click="insertHeading(1)">H1</button>
-				<button class="tool-btn" title="Heading 2" @click="insertHeading(2)">H2</button>
-				<button class="tool-btn" title="Heading 3" @click="insertHeading(3)">H3</button>
+				<button class="tool-btn" title="Heading 1" @mousedown.prevent @click="insertHeading(1)">H1</button>
+				<button class="tool-btn" title="Heading 2" @mousedown.prevent @click="insertHeading(2)">H2</button>
+				<button class="tool-btn" title="Heading 3" @mousedown.prevent @click="insertHeading(3)">H3</button>
 				<span class="toolbar-divider" />
-				<button class="tool-btn" title="Bold" @click="insertBold"><strong>B</strong></button>
-				<button class="tool-btn" title="Italic" @click="insertItalic"><em>I</em></button>
-				<button class="tool-btn" title="Inline Code" @click="insertCode"><code>&lt;/&gt;</code></button>
-				<button class="tool-btn" title="List" @click="insertList">
+				<button class="tool-btn" title="Bold" @mousedown.prevent @click="insertBold"><strong>B</strong></button>
+				<button class="tool-btn" title="Italic" @mousedown.prevent @click="insertItalic"><em>I</em></button>
+				<button class="tool-btn" title="Inline Code" @mousedown.prevent @click="insertCode"><code>&lt;/&gt;</code></button>
+				<button class="tool-btn" title="List" @mousedown.prevent @click="insertList">
 					<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6" /><line x1="8" y1="12" x2="21" y2="12" /><line x1="8" y1="18" x2="21" y2="18" /><circle cx="4" cy="6" r="1" fill="currentColor" /><circle cx="4" cy="12" r="1" fill="currentColor" /><circle cx="4" cy="18" r="1" fill="currentColor" /></svg>
 				</button>
 			</div>

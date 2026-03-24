@@ -12,7 +12,6 @@
  * Run: pnpm exec tsx --tsconfig tsconfig.examples.json examples/markdown-editor-hero.ts
  */
 
-import type { Store } from "callbag-recharge";
 import type { TextEditorResult } from "callbag-recharge/patterns/textEditor";
 import { textEditor } from "callbag-recharge/patterns/textEditor";
 import type {
@@ -20,6 +19,7 @@ import type {
 	CheckpointAdapter,
 	ContentStats,
 	CursorInfo,
+	Store,
 } from "callbag-recharge/utils";
 import { autoSave, contentStats, cursorInfo, memoryAdapter } from "callbag-recharge/utils";
 
@@ -151,6 +151,8 @@ export function createMarkdownEditorHero(opts?: MarkdownEditorHeroOpts): Markdow
 	// --- Dispose ---
 	function dispose(): void {
 		save.dispose();
+		stats.dispose();
+		cursor.dispose();
 		editor.dispose();
 	}
 
