@@ -1,3 +1,10 @@
+# [0.21.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.20.0...v0.21.0) (2026-03-24)
+
+
+### Features
+
+* fix demos round 3 ([36813d8](https://github.com/Callbag-Recharge/callbag-recharge/commit/36813d8709e7f7bccb29aa8e6d36be0241245f84))
+
 # [0.20.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.19.0...v0.20.0) (2026-03-23)
 
 
