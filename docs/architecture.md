@@ -62,7 +62,7 @@ src/
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
 ├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval, gate, taskState, executionLog)
 ├── messaging/       ← Pulsar-inspired topic/subscription system (topic, subscription, repeatPublish)
-├── memory/          ← agent memory primitives (collection, decay, node)
+├── memory/          ← agent memory primitives (collection, decay, node, vectorIndex)
 ├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
 ├── worker/          ← reactive cross-thread bridge (workerBridge, workerSelf, WorkerTransport)
 ├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
@@ -375,15 +375,40 @@ See [`docs/optimizations.md`](optimizations.md) for the full reference. Key prin
 ## 15. Inspector & Debugging
 
 ```ts
-Inspector.inspect(store)  // { name, kind, value, status }
-Inspector.graph()         // Map of all named stores
-Inspector.getEdges()      // dependency graph
-Inspector.snapshot()      // JSON-serializable { nodes, edges }
-Inspector.toMermaid()     // diagram text
-Inspector.observe(store)  // protocol-level test utility
+// Graph introspection
+Inspector.inspect(store)          // { name, kind, value, status }
+Inspector.graph()                 // Map<key, StoreInfo> — all named stores
+Inspector.getEdges()              // Map<key, string[]> — dependency edges
+Inspector.snapshot()              // JSON-serializable { nodes, edges, traceLog }
+Inspector.dumpGraph()             // pretty-print graph for console/CLI
+
+// Diagram export
+Inspector.toMermaid(opts?)        // Mermaid flowchart text
+Inspector.toD2(opts?)             // D2 diagram text
+
+// Subscription utilities
+Inspector.observe(store)          // ObserveResult<T> — values, signals, events (test utility)
+Inspector.activate(store)         // subscribe to activate only; returns dispose fn
+Inspector.spy(store, opts?)       // observe + console.log side-effect
+Inspector.trace(store, cb)        // (value, prev) => void — lightweight watcher; returns dispose
+Inspector.tap(store, name?)       // transparent passthrough Store — wrap for visualization
+
+// Annotation / reasoning trace
+Inspector.annotate(node, reason)  // tag node with a reasoning string; appended to traceLog
+Inspector.getAnnotation(node)     // latest annotation string for a node
+Inspector.traceLog()              // TraceEntry[] — chronological log of all annotations
+Inspector.clearTrace()            // clear trace log (per-node WeakMap annotations kept)
+
+// Advanced observe (testing)
+Inspector.timeline(store)         // TimelineResult<T> — protocol events with timestamps
+Inspector.observeDerived(store)   // DerivedObserveResult<T> — per-evaluation dep snapshots
+Inspector.observeTaskState(task)  // TaskStateObserveResult — status transitions with timestamps
+Inspector.causalityTrace(store)   // CausalityResult<T> — which dep triggered each recomputation
 ```
 
 Zero per-store cost via WeakMaps. Disable in production: `Inspector.enabled = false`.
+
+**Result types:** `ObserveResult<T>` (values + signals + events + `reconnect()`), `DerivedObserveResult<T>` (extends with `evaluations`), `CausalityResult<T>` (extends with `causality`), `TaskStateObserveResult` (transitions[]), `TimelineResult<T>` (entries[]).
 
 ---
 
@@ -411,7 +436,17 @@ Raw callbag operators lack `source()` and multicast capability. The `wrap()` int
 
 ### Utils (`src/utils/`)
 
-Resilience (`circuitBreaker`, `withBreaker`, `retry`, `backoff`), async (`asyncQueue`, `cancellableAction`), metadata (`withStatus`, `withConnectionStatus`, `track`), eviction (fifo/lru/lfu/scored), state (`stateMachine`, `timer`), persistence (`checkpoint` + file/SQLite/IndexedDB adapters), caching (`cascadingCache`, `tieredStorage`), graph (`dag`).
+- **Resilience:** `circuitBreaker`, `withBreaker` (pipe operator), `retry`, `backoff` (exponential/linear/jitter strategies)
+- **Async:** `asyncQueue`, `cancellableAction`, `cancellableStream` / `fromAbortable`, `keyedAsync` (per-key dedup)
+- **Rate / token:** `rateLimiter` (`slidingWindow`, `tokenBucket`), `tokenTracker` (LLM token usage + budget stores)
+- **Metadata companions:** `withStatus` (idle/pending/success/error + data stores), `withConnectionStatus` (connection lifecycle), `withMeta` (reactive companion stores for protocol events), `track` (status/duration/count/error reactive stores as pipe operator)
+- **Eviction:** `fifo`, `lru`, `lfu`, `scored`, `random` policies; `reactiveScored` (live min-heap for reactive eviction)
+- **State / time:** `stateMachine` (typed FSM with reactive `state` + `transitions`), `timer` (`countdown`, `stopwatch`), `dirtyTracker` (uncommitted-change tracking)
+- **Persistence:** `checkpoint` + `memoryAdapter`; `indexedDBAdapter`, `sqliteAdapter` (`checkpointAdapters`); `fileAdapter` (Node-only via `callbag-recharge/utils/node`); `autoSave` (debounce + checkpoint + status)
+- **Caching:** `cascadingCache` (L1/L2/L3 with reactive miss/hit), `tieredStorage` (memory + IndexedDB fallback)
+- **Graph / DAG:** `dag` (acyclicity validation via Kahn's, Inspector edge registration)
+- **Validation:** `validationPipeline` (multi-step typed validation with reactive error/warning stores), `batchWriter` (debounced batch flush with reactive queue size)
+- **Content / cursor:** `contentStats` (word/char/line count reactive stores), `cursorInfo` (line/column/display from content + position)
 
 ### Data (`src/data/`)
 
@@ -423,7 +458,7 @@ Pulsar-inspired topic/subscription. `topic` (persistent stream), `subscription` 
 
 ### Memory (`src/memory/`)
 
-`collection` (reactive node set with O(1) tag lookup via `reactiveIndex`, auto-eviction via `reactiveScored`), `decay` (time-weighted scoring — recency, frequency, importance), `node` (memory node: `content` + `meta` + `scoreStore`).
+`collection` (reactive node set with O(1) tag lookup via `reactiveIndex`, auto-eviction via `reactiveScored`), `decay` (time-weighted scoring — recency, frequency, importance), `node` (memory node: `content` + `meta` + `scoreStore`), `vectorIndex` (in-process HNSW vector search — cosine/euclidean/dotProduct, ~1-10 μs for <10K vectors).
 
 `reactiveScored` maintains a live min-heap: when a node's `meta` emits, the heap sifts to the new position in O(log n). Eviction is O(log n) extract-min — no O(n) scan. Per-key heap watchers use `subscribe` (not `effect`) — lightweight DATA-only sink, no DIRTY/RESOLVED overhead (§1.19).
 

@@ -16,7 +16,7 @@
 | Utils | 31 | `retry`, `withBreaker`, `withStatus`, `withConnectionStatus`, `withSchema`, `cascadingCache`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, `keyedAsync`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
 | Messaging | 5 | `topic`, `subscription`, `repeatPublish`, `jobQueue`, `jobFlow` — Pulsar-inspired topic/subscription + job queues |
-| Memory | 3 | `collection`, `decay`, `node` |
+| Memory | 4 | `collection`, `decay`, `node`, `vectorIndex` (HNSW) |
 | Orchestrate | 17 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop`, `forEach`, `onFailure`, `wait`, `subPipeline` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `toolCallState`, `focusManager`, `hybridRoute`, `selection`, `textBuffer`, … |
 | Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
@@ -69,6 +69,10 @@
 
 RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals. All 6 core nodes handle lifecycle signals. Tier 2 extras forward via `onSignal`. Timer utils, memory layer, orchestrate, adapters, patterns, and compat all migrated. `subscribe()` returns `Subscription` with `signal()` method. Operator generation counter for stale closure prevention.
 
+### Phase 6b: In-Process Vector Index — Complete
+
+`vectorIndex` — pure TypeScript HNSW (Hierarchical Navigable Small World) implementation. Cosine, Euclidean, and dot-product distance metrics. ~1-10 μs search for <10K vectors. Zero dependencies. Ships in `src/memory/`. Reactive `size` store. `VectorIndex`, `VectorIndexOptions`, `VectorSearchResult` types exported from `callbag-recharge/memory`.
+
 ### Phase 5g: Worker Bridge — Complete
 
 `WorkerTransport` (auto-detects Worker/SharedWorker/ServiceWorker/BroadcastChannel/MessagePort), `workerBridge()`/`workerSelf()` (expose/import stores across threads), lifecycle signals across wire, `withConnectionStatus()`, batch coalescing via `derived()`+`effect()`, `transfer` option for zero-copy ArrayBuffer.
@@ -117,24 +121,20 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 
 > **Goal:** Reactive agentic memory — vector search, knowledge graphs, memory lifecycle.
 >
-> **Depends on:** Data structures (shipped), memoryNode/collection/decay (shipped).
+> **Depends on:** Data structures (shipped), memoryNode/collection/decay/vectorIndex (shipped).
 >
 > **Market validation (March 2026):** OpenClaw integrated Mem0 (hybrid vector + graph) as
 > built-in agent memory — confirms demand for structured memory backends in AI tools. Our
 > differentiator: reactive/push-based (vs Mem0's pull-only), in-process (vs service call),
-> diamond-safe updates, transport-agnostic. See `SESSION-agentic-memory-research.md` §Update.
->
-> **Recommended priority order:** 6b → 6d → 6a → 6c (HNSW is the biggest concrete gap vs
-> Mem0; consolidation enables autonomous memory lifecycle; transport enables multi-surface
-> agents; knowledge graph is powerful but XL and Mem0g hasn't displaced basic Mem0 widely).
+> diamond-safe updates, transport-agnostic.
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
-| 6b | In-process vector index | HNSW-based semantic search. ~1-10 μs vs Mem0/Redis ~50-500 μs. The single biggest performance claim over external memory services. | L |
+| ~~6b~~ | ~~In-process vector index~~ | **Shipped** — `vectorIndex` HNSW in `src/memory/`. | — |
 | 6d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control (`admissionPolicy` option on `collection`). Matches Mem0's extraction pipeline reactively. | L |
 | 6a | Session transport adapters | WebSocket sink, HTTP sink. Same graph, different edge. | M |
 | 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
-| 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. Addresses 29.4x overhead in current `collection`. | S |
+| 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. | S |
 
 ### Phase 7: More Adapters
 

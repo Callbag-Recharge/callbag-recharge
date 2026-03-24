@@ -142,6 +142,10 @@ const REGISTRY = {
 
 	// Data
 	reactiveLog: "src/data/reactiveLog.ts",
+	reactiveMap: "src/data/reactiveMap.ts",
+	reactiveIndex: "src/data/reactiveIndex.ts",
+	reactiveList: "src/data/reactiveList.ts",
+	pubsub: "src/data/pubsub.ts",
 
 	// Adapters
 	fromLLM: "src/adapters/llm.ts",

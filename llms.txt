@@ -5,7 +5,7 @@
 Reactive state management with 6 primitives: state, derived, dynamicDerived, effect, producer, operator.
 Glitch-free diamond resolution via two-phase push. 70+ tree-shakeable operators.
 Protocol-native lifecycle signals (RESET, PAUSE, RESUME, TEARDOWN).
-Framework-agnostic. Works frontend, backend, edge. Zero dependencies. 170+ modules.
+Framework-agnostic. Works frontend, backend, edge. Zero dependencies. 180+ modules.
 
 ## When to use
 - Simple state management (like Zustand/Jotai but framework-agnostic, no providers)
@@ -88,8 +88,12 @@ Sinks: forEach, subscribe
 - `executionLog(opts)` — reactive execution history
 - `pipelineRunner(configs[])` — supervisor with health checks and auto-restart
 - `toMermaid(steps)` / `toD2(steps)` — DAG diagram export
+- `dagLayout(nodes, edges, opts?)` — Sugiyama-style layered DAG layout (x/y coords, back-edge detection)
+- `workflowNode(id, label, opts?)` — bundled task node: reactive log + circuit breaker + simulate helper
 - `fromCron(schedule)` — cron trigger (zero-dep parser)
 - `fromTrigger()` — manual trigger source
+- `source(name, factory)` — raw reactive source wrapper for pipeline steps
+- Execution log adapters: `memoryLogAdapter()`, `indexedDBLogAdapter(opts)`, `sqliteLogAdapter(opts)`, `fileLogAdapter(opts)` (Node)
 - Checkpoint adapters: memoryAdapter(), fileAdapter(), sqliteAdapter(), indexedDBAdapter()
 
 ## Worker (import from callbag-recharge/worker)
@@ -123,12 +127,31 @@ Sinks: forEach, subscribe
 - `selection` — multi-select state
 - `textBuffer` — text buffer with cursor tracking
 
+## Memory (import from callbag-recharge/memory)
+- `collection(opts?)` — reactive node set with O(1) tag lookup and auto-eviction via scored heap
+- `decay(opts)` — time-weighted scoring: recency, frequency, importance
+- `memoryNode(content, meta)` — memory node: content + meta + scoreStore
+- `vectorIndex(opts?)` — in-process HNSW vector search (cosine/euclidean/dotProduct, ~1-10 μs for <10K vectors)
+
+## Utils (import from callbag-recharge/utils)
+Resilience: `circuitBreaker` (reactive state store), `withBreaker` (pipe operator), `retry` (configurable delay strategy), `backoff` (exponential/linear/jitter)
+Async: `asyncQueue` (bounded), `cancellableAction`, `cancellableStream` / `fromAbortable`, `keyedAsync` (per-key dedup)
+Rate / token: `slidingWindow`, `tokenBucket` (rate limiters), `tokenTracker` (LLM token usage + budget stores)
+Metadata: `withStatus` (idle/pending/success/error companion stores), `withConnectionStatus`, `withMeta` (protocol event companions), `track` (status/duration/count/error as pipe operator)
+Eviction: `fifo`, `lru`, `lfu`, `scored`, `random` policies; `reactiveScored` (live min-heap)
+State / time: `stateMachine` (typed FSM), `countdown`, `stopwatch`, `dirtyTracker`
+Persistence: `checkpoint` + `memoryAdapter`, `indexedDBAdapter`, `sqliteAdapter`, `fileAdapter` (Node); `autoSave` (debounce + checkpoint + status)
+Caching: `cascadingCache` (L1/L2/L3), `tieredStorage` (memory + IndexedDB fallback)
+Graph: `dag` (Kahn's acyclicity + Inspector edge registration)
+Validation: `validationPipeline` (multi-step, reactive errors/warnings), `batchWriter` (debounced batch flush)
+Content: `contentStats` (words/chars/lines/bytes), `cursorInfo` (line/column from position)
+
 ## Compat layers (drop-in API replacements + framework bindings)
 - `callbag-recharge/compat/zustand` — create() matching StoreApi
 - `callbag-recharge/compat/jotai` — atom() with dynamic dep tracking
 - `callbag-recharge/compat/nanostores` — atom(), computed(), map()
 - `callbag-recharge/compat/signals` — TC39 Signal.State, Signal.Computed
-- `callbag-recharge/compat/vue` — useStore(store), useSubscribe(store)
+- `callbag-recharge/compat/vue` — useStore(store), useSubscribe(store), useSubscribeRecord(keys, factory)
 - `callbag-recharge/compat/react` — useStore(store), useSubscribe(store)
 - `callbag-recharge/compat/svelte` — useSubscribe(store)
 - `callbag-recharge/compat/solid` — useSubscribe(store)
@@ -136,10 +159,21 @@ Sinks: forEach, subscribe
 ## Inspectability
 - `Inspector.inspect(store)` — { name, kind, value, status }
 - `Inspector.graph()` — Map of all named stores
-- `Inspector.getEdges()` — dependency graph
-- `Inspector.snapshot()` — JSON-serializable graph state
+- `Inspector.getEdges()` — dependency edges
+- `Inspector.snapshot()` — JSON-serializable { nodes, edges, traceLog }
+- `Inspector.dumpGraph()` — pretty-print for console/CLI
 - `Inspector.toMermaid()` / `Inspector.toD2()` — graph as diagram text
-- `Inspector.observe(store)` — protocol-level test utility
+- `Inspector.observe(store)` — ObserveResult<T>: values, signals, events (test utility)
+- `Inspector.activate(store)` — subscribe to activate; returns dispose fn
+- `Inspector.spy(store)` — observe + console logging
+- `Inspector.trace(store, cb)` — (value, prev) callback; returns dispose
+- `Inspector.tap(store, name?)` — transparent passthrough Store for visualization
+- `Inspector.annotate(node, reason)` — tag node with reasoning string
+- `Inspector.traceLog()` / `Inspector.clearTrace()` — chronological annotation log
+- `Inspector.timeline(store)` — TimelineResult<T> with timestamps
+- `Inspector.observeDerived(store)` — DerivedObserveResult<T> with per-evaluation dep snapshots
+- `Inspector.observeTaskState(task)` — TaskStateObserveResult with status transitions
+- `Inspector.causalityTrace(store)` — CausalityResult<T>: which dep triggered each recomputation
 - Zero per-store cost via WeakMaps
 
 ## Install

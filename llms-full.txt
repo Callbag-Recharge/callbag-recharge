@@ -4,7 +4,7 @@
 ## Overview
 
 callbag-recharge is a reactive state management library where every store is a callbag source.
-6 primitives, 70+ operators, 170+ modules, framework-agnostic, zero dependencies.
+6 primitives, 70+ operators, 180+ modules, framework-agnostic, zero dependencies.
 
 Key differentiators:
 1. Glitch-free diamond resolution — two-phase push (DIRTY then values) ensures derived stores compute exactly once
@@ -187,18 +187,38 @@ Opt-in observability. Zero per-store cost via WeakMaps.
 ```ts
 import { Inspector } from 'callbag-recharge'
 
-Inspector.inspect(store)    // { name, kind, value, status }
-Inspector.graph()           // Map of all named stores
-Inspector.getEdges()        // dependency edges
-Inspector.snapshot()        // JSON-serializable { nodes, edges }
-Inspector.dumpGraph()       // pretty-print for console/CLI
-Inspector.toMermaid()       // Mermaid diagram text
-Inspector.toD2()            // D2 diagram text
-Inspector.observe(store)    // callbag sink for testing
-Inspector.spy(store)        // observe + console logging
-Inspector.trace(store, cb)  // value change callback
-Inspector.tap(store, name)  // transparent passthrough for visualization
+// Graph introspection
+Inspector.inspect(store)          // { name, kind, value, status }
+Inspector.graph()                 // Map<key, StoreInfo> — all named stores
+Inspector.getEdges()              // Map<key, string[]> — dependency edges
+Inspector.snapshot()              // JSON-serializable { nodes, edges, traceLog }
+Inspector.dumpGraph()             // pretty-print graph for console/CLI
+
+// Diagram export
+Inspector.toMermaid(opts?)        // Mermaid flowchart text
+Inspector.toD2(opts?)             // D2 diagram text
+
+// Subscription utilities
+Inspector.observe(store)          // ObserveResult<T> — values + signals + events (test utility)
+Inspector.activate(store)         // subscribe to activate; returns dispose fn (no values needed)
+Inspector.spy(store, opts?)       // observe + console.log side-effect
+Inspector.trace(store, cb)        // (value, prev) callback — lightweight watcher; returns dispose
+Inspector.tap(store, name?)       // transparent passthrough Store for visualization
+
+// Annotation / reasoning trace
+Inspector.annotate(node, reason)  // tag node with reasoning string; appended to traceLog
+Inspector.getAnnotation(node)     // latest annotation string for a node
+Inspector.traceLog()              // TraceEntry[] — chronological log of all annotations
+Inspector.clearTrace()            // clear trace log (per-node WeakMap annotations kept)
+
+// Advanced observe (testing)
+Inspector.timeline(store)         // TimelineResult<T> — protocol events with timestamps
+Inspector.observeDerived(store)   // DerivedObserveResult<T> — per-evaluation dep snapshots
+Inspector.observeTaskState(task)  // TaskStateObserveResult — status transitions with timestamps
+Inspector.causalityTrace(store)   // CausalityResult<T> — which dep triggered each recomputation
 ```
+
+**Result types:** `ObserveResult<T>` (values + signals + events + `reconnect()`), `DerivedObserveResult<T>` (extends with `evaluations`), `CausalityResult<T>` (extends with `causality`), `TaskStateObserveResult` (transitions[]), `TimelineResult<T>` (entries[]).
 
 ## Lifecycle Signals
 
@@ -373,6 +393,77 @@ bus.publish('user-events', { type: 'login', payload: { id: 1 } })
 bus.subscribe('user-events') // Store — reactive
 ```
 
+## Utils (callbag-recharge/utils)
+
+Higher-order helpers that compose core primitives. Import from `callbag-recharge/utils`.
+
+### Resilience
+
+- `circuitBreaker(opts)` — reactive breaker with `state` (closed/open/half-open), `failures`, `successes` stores. Call `.record(success)` to update.
+- `withBreaker(breaker)` — pipe operator: open breaker → throw `CircuitOpenError`
+- `retry(opts)` — retry with configurable `DelayStrategy` (`fixed`, `exponential`, `linear`) and max attempts
+- `backoff` — `exponential(opts)` / `linear(opts)` / `jitter(strategy)` delay builders
+
+### Async & Streams
+
+- `asyncQueue(opts?)` — bounded async queue: `enqueue()`, `dequeue()`, `sizeStore`, `drain()`
+- `cancellableStream<T>()` — controller (`push`, `complete`, `error`) + `Store<T>` + cancel; safe streaming source without raw Promises
+- `fromAbortable(fn)` — wrap AbortSignal-aware function as a store source
+- `cancellableAction(fn, opts?)` — wrap async fn with abort + status tracking
+- `keyedAsync(fn)` — per-key async dedup: concurrent calls with same key share the in-flight promise
+
+### Rate & Token Limiting
+
+- `slidingWindow(opts)` — sliding-window rate limiter: `allow()` returns boolean, reactive `remaining` store
+- `tokenBucket(opts)` — token bucket: `consume(n)`, reactive `tokens` store, auto-refill
+- `tokenTracker(store, opts?)` — wraps a store emitting `TokenUsage`; exposes `total`, `prompt`, `completion`, `budget` stores
+
+### Metadata Companions
+
+- `withStatus(store, opts?)` — `WithStatusStore`: adds `status` (idle/pending/success/error), `data`, `error`, `loading` stores
+- `withConnectionStatus(store, opts?)` — adds `connected`, `reconnecting`, `lastConnected` stores; emits connection lifecycle signals
+- `withMeta(store, opts?)` — `MetaResult`: reactive companion stores for protocol events (`dirty`, `resolved`, `endCount`)
+- `track(opts?)` — pipe operator: wraps async store; exposes `status`, `duration`, `count`, `error` as reactive stores
+
+### Eviction Policies
+
+- `fifo(maxSize)`, `lru(maxSize)`, `lfu(maxSize)`, `scored(opts)`, `random(maxSize)` — eviction policy factories for `reactiveMap`
+- `reactiveScored(opts)` — live min-heap: `insert(key, score)`, `update(key, score)`, `evict()` returning evicted key; O(log n) all operations
+
+### State & Time
+
+- `stateMachine(config)` — typed FSM: `state` store, `transitions` store, `send(event)`, `can(event)`, guards + side-effects
+- `countdown(opts)` — `remaining`, `running`, `expired` stores; `start()`, `pause()`, `reset()`
+- `stopwatch(opts)` — `elapsed`, `running` stores; `start()`, `stop()`, `reset()`
+- `dirtyTracker(store, opts?)` — `isDirty`, `original`, `changes` stores; `commit()`, `rollback()`
+
+### Persistence
+
+- `checkpoint(id, adapter)` — reactive save/restore: `save()`, `restore()`, `lastSaved`, `status` stores
+- `memoryAdapter()` — in-memory checkpoint adapter
+- `indexedDBAdapter(opts)` / `sqliteAdapter(opts)` — browser persistence adapters
+- `fileAdapter(opts)` — Node.js file adapter (import from `callbag-recharge/utils/node`)
+- `autoSave(store, opts)` — debounced auto-save: `status`, `lastSaved`, `error` stores; `flush()`, `cancel()`
+
+### Caching
+
+- `cascadingCache(layers, opts?)` — L1/L2/…/Ln cache with reactive `hitRate`, `missRate`, `size` per layer; `get(key)`, `set(key, val)`, `invalidate(key)`
+- `tieredStorage(opts)` — memory-first with IndexedDB fallback; reactive `sizeStore`, TTL, LRU eviction
+
+### Graph
+
+- `dag(tasks)` — validates acyclicity via Kahn's algorithm; registers edges with Inspector; returns topological order
+
+### Validation & Writing
+
+- `validationPipeline(steps, opts?)` — multi-step typed validation: reactive `errors`, `warnings`, `valid` stores; `validate(value)`
+- `batchWriter(opts)` — debounced batch flush: `write(item)`, reactive `queueSize`, `flush()`, `status`
+
+### Content & Cursor
+
+- `contentStats(store)` — reactive `words`, `chars`, `lines`, `bytes` derived from a `Store<string>`
+- `cursorInfo(content, position)` — reactive `line`, `column`, `lineText`, `offset` from content + cursor position stores
+
 ## Orchestration (callbag-recharge/orchestrate)
 
 ### fromCron(schedule)
@@ -462,9 +553,13 @@ Acyclicity validation via Kahn's algorithm. Registers edges with Inspector.
 - `loop(deps, factory, opts?)` — declarative iteration with predicate and maxIterations
 - `pipelineRunner(configs[])` — supervisor with health checks and auto-restart
 - `toMermaid(steps)` / `toD2(steps)` — serialize pipeline DAG to diagram syntax
+- `dagLayout(nodes, edges, opts?)` — Sugiyama-style layered DAG layout: assigns (x, y) coords, detects back-edges (cycles), barycenter crossing reduction. Options: nodeGap, layerGap, direction (TB/LR), nodeWidth
+- `workflowNode(id, label, opts?)` — bundled task node: reactive `log` (ReactiveLog), `breaker` (CircuitBreaker), `breakerState` store, `simulate(durationRange, failRate, signal?)` helper, `reset()`, `destroy()`. Options: logMaxSize, breaker config, cooldown backoff strategy
+- `source(name, factory)` — raw reactive source wrapper for pipeline steps (alternative to `step`)
 - `withBreaker(breaker)` — circuit breaker as pipe operator
 - `withRetry(config)` — retry + backoff with observable retry state
 - `withTimeout(ms)` — timeout as pipe operator
+- Execution log adapters: `memoryLogAdapter()`, `indexedDBLogAdapter(opts)`, `sqliteLogAdapter(opts)`, `fileLogAdapter(opts)` (Node-only via `callbag-recharge/orchestrate/node`)
 
 ## Messaging (callbag-recharge/messaging)
 
@@ -683,6 +778,50 @@ memory.recallByTag('pref') // tag-based retrieval
 - `selection` — multi-select state management
 - `textBuffer` — text buffer with cursor tracking
 
+## Memory (callbag-recharge/memory)
+
+Agent memory primitives. Reactive node set with scored eviction, time-weighted decay, and HNSW vector search.
+
+### collection(opts?)
+
+Reactive set of memory nodes. O(1) tag lookup via `reactiveIndex`. Auto-eviction via scored min-heap.
+
+```ts
+import { collection, memoryNode } from 'callbag-recharge/memory'
+
+const mem = collection({ maxSize: 100 })
+const node = memoryNode('User prefers TypeScript', { tags: ['pref'] })
+mem.add(node)
+mem.byTag('pref').get()  // Store<MemoryNode[]>
+mem.topN(5).get()        // Store<MemoryNode[]> — sorted by score
+```
+
+### decay(opts)
+
+Time-weighted scoring combining recency, frequency, and importance.
+
+```ts
+import { decay } from 'callbag-recharge/memory'
+
+const scorer = decay({ recencyWeight: 0.5, frequencyWeight: 0.3, importanceWeight: 0.2 })
+scorer.score(node) // updates node.scoreStore reactively
+```
+
+### vectorIndex(opts?)
+
+In-process HNSW vector index. ~1-10 μs search for <10K vectors. Zero dependencies.
+
+```ts
+import { vectorIndex } from 'callbag-recharge/memory'
+
+const idx = vectorIndex({ metric: 'cosine', dimensions: 384 })
+idx.add('doc-1', new Float32Array(embedding))
+idx.search(queryEmbedding, 5) // top-5 nearest neighbours → [{ id, score }]
+idx.size.get()               // Store<number> — reactive count
+```
+
+Options: `metric` (`cosine` | `euclidean` | `dotProduct`), `dimensions`, `M`, `efConstruction`, `efSearch`.
+
 ## Compat Layers (drop-in API replacements + framework bindings)
 
 ### Drop-in API replacements
@@ -710,9 +849,14 @@ const doubled = new Signal.Computed(() => count.get() * 2)
 
 ```ts
 // Vue
-import { useStore, useSubscribe } from 'callbag-recharge/compat/vue'
+import { useStore, useSubscribe, useSubscribeRecord } from 'callbag-recharge/compat/vue'
 const count = useStore(countStore)    // writable Ref<T>
 const status = useSubscribe(ws.status) // readonly Ref<T>
+// useSubscribeRecord — dynamic per-key store subscriptions (e.g. for lists of nodes)
+const nodeData = useSubscribeRecord(
+  () => nodes.value.map(n => n.id),
+  (id) => ({ status: nodeMap[id].task.status, error: nodeMap[id].task.error }),
+) // Readonly<Ref<Record<string, { status, error }>>>
 
 // React
 import { useStore, useSubscribe } from 'callbag-recharge/compat/react'
@@ -734,20 +878,30 @@ const count = useSubscribe(countStore) // Solid signal accessor
 
 ### AI Chat with Streaming and Auto-Cancellation
 
-```ts
-import { state, derived, effect, producer } from 'callbag-recharge'
-import { switchMap, scan, subscribe } from 'callbag-recharge/extra'
+Use `chatStream` from `patterns/` for the full-featured high-level API:
 
-const prompt = state('')
-const chunks = switchMap(prompt, (p) =>
-  producer(({ emit, complete }) => {
-    const ctrl = new AbortController()
-    streamChat(p, ctrl.signal, emit, complete)
-    return () => ctrl.abort()
-  })
-)
-const response = scan(chunks, (acc, chunk) => acc + chunk, '')
-// New prompt auto-cancels previous stream
+```ts
+import { chatStream } from 'callbag-recharge/patterns/chatStream'
+
+const chat = chatStream({ endpoint: '/api/chat' })
+chat.send('Hello!')
+chat.messages.get()   // reactive message list
+chat.partial.get()    // accumulating response text
+chat.streaming.get()  // boolean — is currently streaming
+chat.stop()           // cancel in-flight request
+chat.retry()          // retry last failed request
+```
+
+Or build from primitives using `cancellableStream` for custom streaming sources:
+
+```ts
+import { cancellableStream } from 'callbag-recharge/utils'
+import { scan } from 'callbag-recharge/extra'
+
+const stream = cancellableStream<string>()
+stream.start((signal) => fetchTokenStream(prompt, signal))
+const response = scan(stream.store, (acc, chunk) => acc + chunk, '')
+// stream.start() auto-cancels any previous stream
 ```
 
 ### On-Device LLM Streaming State (WebLLM / Ollama)

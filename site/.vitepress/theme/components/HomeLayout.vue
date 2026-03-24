@@ -21,7 +21,7 @@ const features = [
 	},
 	{
 		icon: '<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v3"/><path d="M12 8v3"/></svg>',
-		title: "60+ Operators",
+		title: "70+ Operators",
 		desc: "switchMap, debounce, retry, scan, merge, combine, groupBy, window, and more \u2014 tree-shakeable.",
 		color: "#a78bfa",
 	},
@@ -36,6 +36,7 @@ const features = [
 const primitives = [
 	{ name: "state", desc: "writable store", example: "state(0)" },
 	{ name: "derived", desc: "computed value", example: "derived([a, b], fn)" },
+	{ name: "dynamicDerived", desc: "runtime-tracked derived", example: "dynamicDerived((get) => get(flag) ? get(a) : get(b))" },
 	{ name: "effect", desc: "side effects", example: "effect([dep], fn)" },
 	{ name: "producer", desc: "async source", example: "producer(({ emit }) => ...)" },
 	{ name: "operator", desc: "custom transform", example: "operator([dep], init, handler)" },
@@ -90,7 +91,7 @@ const primitives = [
         </h1>
         <p class="hero-chinese">川流不息，唯取一瓢</p>
         <p class="hero-sub">
-          6 primitives. 60+ operators. Diamond-safe. Framework-agnostic.
+          6 primitives. 70+ operators. Diamond-safe. Framework-agnostic.
           <br />From atoms to streams in one library.
         </p>
         <div class="hero-actions">
@@ -127,7 +128,7 @@ const primitives = [
     <!-- ══════════ PRIMITIVES ══════════ -->
     <section class="primitives-section">
       <div class="section-inner">
-        <h2 class="section-heading">Five Primitives. That's It.</h2>
+        <h2 class="section-heading">Six Primitives. That's It.</h2>
         <p class="section-sub">No ceremony. No providers. No boilerplate. Every store is a callbag source.</p>
         <div class="primitives-list">
           <div
@@ -177,19 +178,16 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
               <span class="code-dot" style="background:#28c840"></span>
               <span class="code-label">streaming.ts</span>
             </div>
-            <pre class="code-pre"><code><span class="k">import</span> { producer } <span class="k">from</span> <span class="s">'callbag-recharge'</span>
-<span class="k">import</span> { switchMap, scan } <span class="k">from</span> <span class="s">'callbag-recharge/extra'</span>
+            <pre class="code-pre"><code><span class="k">import</span> { chatStream } <span class="k">from</span> <span class="s">'callbag-recharge/patterns/chatStream'</span>
 
-<span class="c">// AI chat with auto-cancellation</span>
-<span class="k">const</span> prompt = <span class="fn">state</span>(<span class="s">''</span>)
-<span class="k">const</span> response = <span class="fn">switchMap</span>(prompt, (p) <span class="k">=></span>
-  <span class="fn">producer</span>(({ emit, complete }) <span class="k">=></span> {
-    <span class="k">const</span> ctrl = <span class="k">new</span> <span class="fn">AbortController</span>()
-    <span class="fn">streamChat</span>(p, ctrl.signal, emit, complete)
-    <span class="k">return</span> () <span class="k">=></span> ctrl.<span class="fn">abort</span>()
-  })
-)
-<span class="c">// New prompt auto-cancels previous stream</span></code></pre>
+<span class="c">// AI chat with history, cancel, retry</span>
+<span class="k">const</span> chat = <span class="fn">chatStream</span>({ endpoint: <span class="s">'/api/chat'</span> })
+chat.<span class="fn">send</span>(<span class="s">'Explain diamond resolution'</span>)
+
+chat.partial.<span class="fn">get</span>()    <span class="c">// accumulating response text</span>
+chat.streaming.<span class="fn">get</span>()  <span class="c">// true while streaming</span>
+chat.<span class="fn">stop</span>()            <span class="c">// cancel in-flight request</span>
+chat.<span class="fn">retry</span>()           <span class="c">// retry last failed message</span></code></pre>
           </div>
         </div>
       </div>
@@ -222,7 +220,7 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
               </tr>
               <tr>
                 <td class="row-label">Stream operators</td>
-                <td class="highlight"><span class="check">&#10003;</span> 60+</td>
+                <td class="highlight"><span class="check">&#10003;</span> 70+</td>
                 <td><span class="cross">&#10005;</span></td>
                 <td><span class="cross">&#10005;</span></td>
                 <td><span class="cross">&#10005;</span></td>

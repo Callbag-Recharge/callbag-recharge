@@ -487,6 +487,22 @@ sub.signal().addEventListener("abort", () => {
 
 This is defensive — no current code path causes `node.meta` to END independently. Only relevant if future orchestration features (e.g., node disposal, hot-swap) start completing individual node stores.
 
+### 4. vectorIndex: max-heap for searchLayer results
+
+**Status:** Not implemented. **Impact:** Medium (performance). **Priority:** Medium — matters at `efConstruction=200+` or high-M values.
+
+`searchLayer` tracks the ef-nearest results in a flat array with O(ef) linear scan to find the worst element on every neighbor evaluation. With `efConstruction=200` and `M=16`, each neighbor visit does a 200-element scan. A max-heap for the results set would reduce worst-element lookup from O(ef) to O(1) and replacement to O(log ef), giving ~10x speedup on the insertion hot path. The current min-heap is only used for the candidate queue, not results.
+
+**Proposed fix:** Add a max-heap (inverted comparator) for the results set. Maintain `worstDist` at the root. Replace the linear scan with `heapPeek` and use `heapReplaceTop` for the swap-and-sift operation.
+
+### 5. vectorIndex: compact soft-deleted nodes
+
+**Status:** Not implemented. **Impact:** Medium (memory). **Priority:** Low — only matters for long-lived indices with high churn (e.g., sliding-window agent memory).
+
+`vectorIndex` uses soft deletes — `remove()` marks nodes as `deleted: true` but never frees them from the `nodes` array or `idToIdx` map. Over time with add/remove churn, `nodes` grows unboundedly. For 1536-dim embeddings, each leaked node holds ~6KB (Float32Array) plus neighbor Sets. After 100K add/remove cycles, ~600MB leaked. Linear scans in `remove()` (entry point reassignment) and `reconnectAtLayer()` degrade to O(total-ever-inserted), not O(active).
+
+**Proposed fix:** Either (a) null out `vector` and clear `neighbors` on delete to free the heavy fields while keeping the tombstone lightweight, or (b) implement periodic compaction that rebuilds the index, reindexing `idToIdx`. Option (a) is simpler but doesn't shrink the `nodes` array; option (b) gives full reclamation but requires a rebuild pass.
+
 
 ---
 
@@ -580,6 +596,8 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Atomic batch drain | Potential (medium) | Correctness for RESET-inside-batch | Orchestration code |
 | Compile-time Inspector removal | Potential (low priority) | Zero overhead + smaller bundle | Production builds |
 | Cleanup orphaned heap entries on END | Potential (low priority) | Prevents zombie entries if score stores complete | Future node disposal/hot-swap |
+| vectorIndex max-heap for results | Potential (medium) | ~10x faster insertion at high ef | Large indices, efConstruction≥200 |
+| vectorIndex compact soft-deleted nodes | Potential (low priority) | Reclaim memory from deleted vectors | Long-lived indices with high churn |
 
 | ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |

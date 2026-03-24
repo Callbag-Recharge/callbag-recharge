@@ -27,6 +27,13 @@ Read in parallel:
 - Existing tests for the area
 - `docs/roadmap.md` — only if this is a new feature
 
+While planning, explicitly validate proposed changes against these invariants:
+- Control flows through the graph (TYPE 3 STATE), not imperative bypasses
+- No raw `new Promise` outside canonical bridge primitives
+- Push/pull via callbag, never polling loops
+- No microtask/timer scheduling for reactive coordination
+- Prefer `subscribe` over `effect` for single-dependency data sinks
+
 Do NOT start implementing yet.
 
 ---
@@ -67,6 +74,9 @@ If any of these apply, escalate: HALT and present findings as in full mode.
 
 After user approves (full mode) or after Phase 1 (light mode, no escalation):
 1. Implement the changes
+   - Enforce design invariants from `docs/architecture.md` as non-negotiable constraints
+   - If existing code violates invariants, refactor toward invariant-compliant flow as part of the change
+   - Favor clean replacement over compatibility layers (pre-1.0, no legacy retention by default)
 2. Create tests following `docs/test-guidance.md`:
    - Put tests in the most specific existing test file
    - Follow the checklist for the operator tier (tier 1 or tier 2)

@@ -123,3 +123,45 @@ export interface DecayOptions {
 }
 
 export type DecayFn = (meta: MemoryMeta, now?: number) => number;
+
+// ---------------------------------------------------------------------------
+// Vector Index (Phase 6b)
+// ---------------------------------------------------------------------------
+
+/** Distance metric for vector comparison. */
+export type DistanceMetric = "cosine" | "euclidean" | "dotProduct";
+
+export interface VectorIndexOptions {
+	/** Vector dimensionality (required). */
+	dimensions: number;
+	/** HNSW connections per layer. Default: 16 */
+	m?: number;
+	/** Build-time beam width. Default: 200 */
+	efConstruction?: number;
+	/** Query-time beam width. Default: 50 */
+	efSearch?: number;
+	/** Distance metric. Default: 'cosine' */
+	distance?: DistanceMetric;
+}
+
+export interface VectorSearchResult {
+	/** ID of the matched vector. */
+	id: string;
+	/** Distance to query (lower = more similar for cosine/euclidean; higher = more similar for dotProduct). */
+	distance: number;
+}
+
+export interface VectorIndex {
+	/** Add a vector with the given ID. Replaces if ID already exists. */
+	add(id: string, vector: Float32Array | number[]): void;
+	/** Remove a vector by ID. Returns true if found. */
+	remove(id: string): boolean;
+	/** Search for the k nearest neighbors. Returns results sorted by distance (ascending). */
+	search(query: Float32Array | number[], k?: number): VectorSearchResult[];
+	/** Check if a vector exists by ID. */
+	has(id: string): boolean;
+	/** Reactive size store. */
+	readonly size: Store<number>;
+	/** Tear down internal stores. */
+	destroy(): void;
+}

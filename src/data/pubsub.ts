@@ -26,6 +26,31 @@ pubsub.from = function from<T>(snap: PubSubSnapshot<T>): PubSub<T> {
 	return bus;
 };
 
+/**
+ * Creates a lightweight topic-based publish/subscribe channel.
+ *
+ * @param opts - Optional configuration.
+ *
+ * @returns `PubSub<T>` — topic publish/subscribe API with snapshot and lifecycle methods.
+ *
+ * @remarks **Lazy channels:** Topics are created on first publish/subscribe.
+ * @remarks **Reactive subscription:** `subscribe(topic)` returns a read-only store for latest topic value.
+ * @remarks **Ephemeral emission semantics:** Message updates always emit, even for referentially equal values.
+ *
+ * @example
+ * ```ts
+ * import { pubsub } from "callbag-recharge/data";
+ *
+ * const bus = pubsub<string>();
+ * const chat = bus.subscribe("chat");
+ *
+ * bus.publish("chat", "hello");
+ * chat.get(); // "hello"
+ * ```
+ *
+ * @seeAlso [topic](/api/topic), [subscription](/api/subscription), [reactiveMap](./reactiveMap)
+ * @category data
+ */
 export function pubsub<T = unknown>(opts?: { id?: string }): PubSub<T> {
 	const counter = ++pubsubCounter;
 	const nodeId = opts?.id ?? `pubsub-${counter}`;

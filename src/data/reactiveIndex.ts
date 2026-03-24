@@ -42,6 +42,39 @@ reactiveIndex.from = function from(snap: IndexSnapshot): ReactiveIndex {
 	return idx;
 };
 
+/**
+ * Creates a reactive secondary index from index key to sets of primary keys.
+ *
+ * @param opts - Optional configuration.
+ *
+ * @returns `ReactiveIndex` — reverse mapping queries, reactive selectors, mutation helpers, and snapshot APIs.
+ *
+ * @remarks **Reverse map:** Tracks primary key to index keys for efficient `remove()` and `update()`.
+ * @remarks **Reactive selectors:** `select(indexKey)` returns cached stores for index-key membership updates.
+ * @remarks **Structural versioning:** `keysStore`/`sizeStore` are version-gated and update on keyset changes.
+ *
+ * @example
+ * ```ts
+ * import { reactiveIndex } from "callbag-recharge/data";
+ *
+ * const byTag = reactiveIndex();
+ * byTag.add("u1", ["admin", "active"]);
+ * byTag.get("admin"); // Set { "u1" }
+ * ```
+ *
+ * @example Update indexed keys
+ * ```ts
+ * const byTag = reactiveIndex();
+ * byTag.add("u1", ["admin"]);
+ * byTag.update("u1", ["editor"]);
+ *
+ * byTag.get("admin").size; // 0
+ * byTag.get("editor").size; // 1
+ * ```
+ *
+ * @seeAlso [reactiveMap](./reactiveMap), [reactiveList](./reactiveList), [pubsub](./pubsub)
+ * @category data
+ */
 export function reactiveIndex(opts?: ReactiveIndexCreateOptions): ReactiveIndex {
 	const counter = ++indexCounter;
 	const nodeId = opts?.id ?? `ridx-${counter}`;
