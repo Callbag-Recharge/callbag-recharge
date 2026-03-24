@@ -69,6 +69,10 @@
 
 RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals. All 6 core nodes handle lifecycle signals. Tier 2 extras forward via `onSignal`. Timer utils, memory layer, orchestrate, adapters, patterns, and compat all migrated. `subscribe()` returns `Subscription` with `signal()` method. Operator generation counter for stale closure prevention.
 
+### Phase 6d: Memory Lifecycle — Complete
+
+`admissionPolicy` on `collection` — gate every `add()` with admit/reject/update/merge decisions for reactive dedup and conflict resolution. `forgetPolicy` — quality predicate pruned before each admission and on explicit `gc()`. `summarize(nodeIds, reducer)` — atomic consolidation of multiple nodes into one (single `batch()` wave). All policies run synchronously through the reactive graph. 14 new tests.
+
 ### Phase 6b: In-Process Vector Index — Complete
 
 `vectorIndex` — pure TypeScript HNSW (Hierarchical Navigable Small World) implementation. Cosine, Euclidean, and dot-product distance metrics. ~1-10 μs search for <10K vectors. Zero dependencies. Ships in `src/memory/`. Reactive `size` store. `VectorIndex`, `VectorIndexOptions`, `VectorSearchResult` types exported from `callbag-recharge/memory`.
@@ -131,7 +135,7 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
 | ~~6b~~ | ~~In-process vector index~~ | **Shipped** — `vectorIndex` HNSW in `src/memory/`. | — |
-| 6d | Consolidation + self-editing | Memory lifecycle: dedup, summarize, forget. Admission control (`admissionPolicy` option on `collection`). Matches Mem0's extraction pipeline reactively. | L |
+| ~~6d~~ | ~~Consolidation + self-editing~~ | **Shipped** — `admissionPolicy` (admit/reject/update/merge), `forgetPolicy`, `summarize()`, `gc()` on `collection`. | — |
 | 6a | Session transport adapters | WebSocket sink, HTTP sink. Same graph, different edge. | M |
 | 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
 | 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. | S |

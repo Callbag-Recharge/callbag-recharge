@@ -178,5 +178,5 @@ Inspector also supports signal hooks (`onEmit`, `onSignal`, `onStatus`, `onEnd`)
 
 ## Next Steps
 
-- [Extras Reference](/extras/) -- 60+ tree-shakeable operators, sources, and sinks
+- [Extras Reference](/extras/) -- 70+ tree-shakeable operators, sources, and sinks
 - [Architecture](/architecture/) -- deep dive into the two-phase push protocol, output slot model, and diamond resolution

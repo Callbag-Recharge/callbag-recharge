@@ -4,7 +4,7 @@ import { subscribe } from "../../core/subscribe";
 import { collection } from "../../memory/collection";
 import { computeScore, decay } from "../../memory/decay";
 import { memoryNode } from "../../memory/node";
-import type { MemoryMeta } from "../../memory/types";
+import type { AdmissionDecision, MemoryMeta, MemoryNode } from "../../memory/types";
 
 // ---------------------------------------------------------------------------
 // MemoryNode
@@ -432,5 +432,264 @@ describe("collection — Phase 1: Collection", () => {
 
 		// After destroy, collection is cleaned up
 		expect(col.tagIndex.get("x").size).toBe(0);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6d: Admission Control + Consolidation
+// ---------------------------------------------------------------------------
+describe("collection — Phase 6d: Admission Policy", () => {
+	it("admissionPolicy 'admit' adds normally", () => {
+		const col = collection<string>({
+			admissionPolicy: () => ({ action: "admit" }),
+		});
+		const node = col.add("hello");
+		expect(node).toBeDefined();
+		expect(node!.content.get()).toBe("hello");
+		expect(col.size.get()).toBe(1);
+		col.destroy();
+	});
+
+	it("admissionPolicy 'reject' returns undefined and does not add", () => {
+		const col = collection<string>({
+			admissionPolicy: () => ({ action: "reject" }),
+		});
+		const result = col.add("hello");
+		expect(result).toBeUndefined();
+		expect(col.size.get()).toBe(0);
+		col.destroy();
+	});
+
+	it("admissionPolicy 'update' replaces content of existing node", () => {
+		const col = collection<string>({
+			admissionPolicy: (incoming, nodes) => {
+				// Dedup: if any node has same content prefix, update it
+				const existing = nodes.find((n) => n.content.get().startsWith("fact:"));
+				if (existing) {
+					return { action: "update", targetId: existing.id, content: incoming };
+				}
+				return { action: "admit" };
+			},
+		});
+
+		const n1 = col.add("fact: the sky is blue", { id: "n1" });
+		expect(n1).toBeDefined();
+		expect(col.size.get()).toBe(1);
+
+		// Second add with same prefix should update, not add
+		const n2 = col.add("fact: the sky is actually many colors");
+		expect(n2).toBeDefined();
+		expect(n2!.id).toBe("n1"); // returned the existing node
+		expect(col.size.get()).toBe(1); // still one node
+		expect(n2!.content.get()).toBe("fact: the sky is actually many colors");
+		col.destroy();
+	});
+
+	it("admissionPolicy 'merge' combines content via reducer", () => {
+		const col = collection<string[]>({
+			admissionPolicy: (incoming, nodes) => {
+				const target = nodes.find((n) => n.meta.get().tags.has("facts"));
+				if (target) {
+					return {
+						action: "merge",
+						targetId: target.id,
+						reducer: (existing, inc) => [...existing, ...inc],
+					};
+				}
+				return { action: "admit" };
+			},
+		});
+
+		const n1 = col.add(["sky is blue"], { id: "n1", tags: ["facts"] });
+		expect(n1).toBeDefined();
+
+		const n2 = col.add(["grass is green"]);
+		expect(n2).toBeDefined();
+		expect(n2!.id).toBe("n1");
+		expect(n2!.content.get()).toEqual(["sky is blue", "grass is green"]);
+		expect(col.size.get()).toBe(1);
+		col.destroy();
+	});
+
+	it("admissionPolicy 'update' throws for missing targetId", () => {
+		const col = collection<string>({
+			admissionPolicy: () => ({ action: "update", targetId: "nonexistent", content: "x" }),
+		});
+		expect(() => col.add("test")).toThrow('Admission update target "nonexistent" not found');
+		col.destroy();
+	});
+
+	it("admissionPolicy 'merge' throws for missing targetId", () => {
+		const col = collection<string>({
+			admissionPolicy: () => ({
+				action: "merge",
+				targetId: "nonexistent",
+				reducer: (a, b) => a + b,
+			}),
+		});
+		expect(() => col.add("test")).toThrow('Admission merge target "nonexistent" not found');
+		col.destroy();
+	});
+
+	it("no admissionPolicy = always admit (backward compat)", () => {
+		const col = collection<string>();
+		const n = col.add("hello");
+		expect(n).toBeDefined();
+		expect(col.size.get()).toBe(1);
+		col.destroy();
+	});
+});
+
+describe("collection — Phase 6d: Forget Policy", () => {
+	it("forgetPolicy removes stale nodes after add()", () => {
+		const col = collection<string>({
+			forgetPolicy: (node) => node.meta.get().importance < 0.2,
+		});
+
+		col.add("important", { importance: 0.9, id: "keep" });
+		const stale = col.add("initially-ok", { importance: 0.5, id: "stale" });
+		expect(col.has("stale")).toBe(true);
+		expect(col.size.get()).toBe(2);
+
+		// Drop importance below threshold
+		stale!.setImportance(0.1);
+
+		// Next add triggers forget pass — stale gets removed
+		col.add("another", { importance: 0.5, id: "another" });
+		expect(col.has("stale")).toBe(false);
+		expect(col.has("keep")).toBe(true);
+		expect(col.has("another")).toBe(true);
+		expect(col.size.get()).toBe(2);
+		col.destroy();
+	});
+
+	it("gc() runs forget policy on demand", () => {
+		const col = collection<string>({
+			forgetPolicy: (node) => node.meta.get().importance < 0.3,
+		});
+
+		// All start above threshold
+		col.add("a", { importance: 0.5, id: "a" });
+		col.add("b", { importance: 0.5, id: "b" });
+		col.add("c", { importance: 0.5, id: "c" });
+		expect(col.size.get()).toBe(3);
+
+		// Drop importance below threshold after adding
+		col.get("a")!.setImportance(0.1);
+		col.get("c")!.setImportance(0.2);
+
+		// Manual gc() removes stale nodes
+		const removed = col.gc();
+		expect(removed).toBe(2);
+		expect(col.has("b")).toBe(true);
+		expect(col.has("a")).toBe(false);
+		expect(col.has("c")).toBe(false);
+		expect(col.size.get()).toBe(1);
+		col.destroy();
+	});
+
+	it("gc() returns 0 when no forgetPolicy", () => {
+		const col = collection<string>();
+		col.add("a");
+		expect(col.gc()).toBe(0);
+		col.destroy();
+	});
+
+	it("gc() throws on destroyed collection", () => {
+		const col = collection<string>();
+		col.destroy();
+		expect(() => col.gc()).toThrow("Collection is destroyed");
+	});
+
+	it("forgetPolicy + maxSize: forget runs before eviction", () => {
+		const col = collection<string>({
+			maxSize: 3,
+			weights: { recency: 0, frequency: 0, importance: 1 },
+			forgetPolicy: (node) => node.meta.get().importance === 0,
+		});
+
+		col.add("a", { importance: 0.5, id: "a" });
+		col.add("b", { importance: 0, id: "b" }); // will be forgotten
+		col.add("c", { importance: 0.8, id: "c" });
+
+		// Adding 4th triggers forget (removes "b") then eviction not needed (3→2 < maxSize 3)
+		col.add("d", { importance: 0.6, id: "d" });
+		expect(col.has("b")).toBe(false); // forgotten
+		expect(col.has("a")).toBe(true);
+		expect(col.has("c")).toBe(true);
+		expect(col.has("d")).toBe(true);
+		expect(col.size.get()).toBe(3);
+		col.destroy();
+	});
+});
+
+describe("collection — Phase 6d: Summarize", () => {
+	it("summarize() consolidates multiple nodes into one", () => {
+		const col = collection<string>();
+		col.add("fact 1", { id: "n1", tags: ["facts"] });
+		col.add("fact 2", { id: "n2", tags: ["facts"] });
+		col.add("unrelated", { id: "n3" });
+
+		const summary = col.summarize(
+			["n1", "n2"],
+			(nodes) => nodes.map((n) => n.content.get()).join("; "),
+			{ id: "summary", tags: ["facts", "summary"] },
+		);
+
+		expect(summary.content.get()).toBe("fact 1; fact 2");
+		expect(summary.id).toBe("summary");
+		expect(col.has("n1")).toBe(false); // removed
+		expect(col.has("n2")).toBe(false); // removed
+		expect(col.has("n3")).toBe(true); // untouched
+		expect(col.has("summary")).toBe(true);
+		expect(col.size.get()).toBe(2); // n3 + summary
+		col.destroy();
+	});
+
+	it("summarize() throws for empty/invalid node list", () => {
+		const col = collection<string>();
+		expect(() => col.summarize([], (nodes) => "")).toThrow("No valid nodes to summarize");
+		expect(() => col.summarize(["nonexistent"], (nodes) => "")).toThrow(
+			"No valid nodes to summarize",
+		);
+		col.destroy();
+	});
+
+	it("summarize() throws on destroyed collection", () => {
+		const col = collection<string>();
+		col.destroy();
+		expect(() => col.summarize(["a"], (n) => "")).toThrow("Collection is destroyed");
+	});
+
+	it("summarize() updates tag index correctly", () => {
+		const col = collection<string>();
+		col.add("a", { id: "n1", tags: ["x"] });
+		col.add("b", { id: "n2", tags: ["x", "y"] });
+
+		col.summarize(["n1", "n2"], (nodes) => "combined", { id: "s1", tags: ["x", "z"] });
+
+		// Old nodes' tags should be cleaned up
+		expect(col.byTag("y")).toHaveLength(0);
+		// New summary should be in "x" and "z"
+		expect(col.byTag("x")).toHaveLength(1);
+		expect(col.byTag("x")[0].id).toBe("s1");
+		expect(col.byTag("z")).toHaveLength(1);
+		col.destroy();
+	});
+
+	it("summarize() skips invalid IDs gracefully", () => {
+		const col = collection<string>();
+		col.add("a", { id: "n1" });
+
+		// "n2" doesn't exist — only "n1" gets summarized
+		const s = col.summarize(["n1", "n2"], (nodes) => {
+			expect(nodes).toHaveLength(1);
+			return nodes[0].content.get() + " (summarized)";
+		});
+
+		expect(s.content.get()).toBe("a (summarized)");
+		expect(col.has("n1")).toBe(false);
+		expect(col.size.get()).toBe(1);
+		col.destroy();
 	});
 });

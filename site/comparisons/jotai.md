@@ -16,7 +16,7 @@ Both use atomic state with derived computations. callbag-recharge adds glitch-fr
 | **Diamond resolution** | Glitches possible | Glitch-free (two-phase push) |
 | **Provider** | Required (`<Provider>`) | None |
 | **Framework** | React only | Framework-agnostic |
-| **Streaming operators** | None | 60+ (switchMap, debounce, retry, ...) |
+| **Streaming operators** | None | 70+ (switchMap, debounce, retry, ...) |
 | **Async atoms** | `atom(async (get) => ...)` | `producer()` + `switchMap` |
 | **DevTools** | Jotai DevTools extension | `Inspector.dumpGraph()` |
 | **Bundle size** | ~2.4 KB | ~4.5 KB core (tree-shakeable) |
@@ -69,7 +69,7 @@ See above. callbag-recharge guarantees derived stores compute exactly once per u
 
 ### 2. Streaming operators
 
-Jotai has no built-in way to debounce, throttle, buffer, or retry. callbag-recharge has 60+ operators that compose with `pipe()`.
+Jotai has no built-in way to debounce, throttle, buffer, or retry. callbag-recharge has 70+ operators that compose with `pipe()`.
 
 ### 3. Framework independence
 

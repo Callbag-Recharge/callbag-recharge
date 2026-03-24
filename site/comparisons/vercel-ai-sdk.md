@@ -19,7 +19,7 @@ Both handle LLM streaming. Vercel AI SDK provides React hooks for chat UIs; call
 | **Tool calling** | Built-in | `stateMachine` + `producer` (composable) |
 | **Multi-model** | Provider switching | `route()` + `rescue()` + `switchMap` |
 | **Diamond resolution** | None (React re-renders) | Glitch-free two-phase push |
-| **Composable operators** | None | 60+ (debounce, retry, buffer, ...) |
+| **Composable operators** | None | 70+ (debounce, retry, buffer, ...) |
 | **Graph inspection** | None | `Inspector.dumpGraph()` |
 | **Orchestration** | None | `pipeline()`, `gate()`, `checkpoint()` |
 | **Bundle size** | ~15 KB+ | ~4.5 KB core |
@@ -54,7 +54,7 @@ const tokenCount = derived([response], () => estimateTokens(response.get()))
 
 ### 2. Composable operators
 
-Vercel AI SDK has no way to debounce, throttle, buffer, or retry at the stream level. callbag-recharge has 60+ operators.
+Vercel AI SDK has no way to debounce, throttle, buffer, or retry at the stream level. callbag-recharge has 70+ operators.
 
 ### 3. Multi-model coordination
 

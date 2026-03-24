@@ -9,37 +9,70 @@ function setupSidebarAccordion(): void {
 	if (document.documentElement.dataset.crSidebarAccordionInstalled === "true") return;
 	document.documentElement.dataset.crSidebarAccordionInstalled = "true";
 
-	let programmatic = false;
+	let suppressing = false;
 
-	document.addEventListener("click", (event) => {
-		if (programmatic) return;
+	const observer = new MutationObserver((mutations) => {
+		if (suppressing) return;
 
-		const target = event.target as HTMLElement | null;
-		// The clickable header is `.item` inside a collapsible level-0 sidebar section
-		const clickedItem = target?.closest?.(".VPSidebarItem.level-0.collapsible > .item");
-		if (!(clickedItem instanceof HTMLElement)) return;
+		for (const mutation of mutations) {
+			const el = mutation.target as HTMLElement;
+			if (!el.classList) continue;
 
-		const clickedSection = clickedItem.closest(".VPSidebarItem.level-0.collapsible");
-		if (!clickedSection) return;
+			// Only care about level-0 collapsible sidebar sections
+			if (
+				!el.classList.contains("VPSidebarItem") ||
+				!el.classList.contains("level-0") ||
+				!el.classList.contains("collapsible")
+			)
+				continue;
 
-		// Wait for Vue to update the collapsed class after toggle
-		requestAnimationFrame(() => {
-			// If the clicked section is now collapsed, the user collapsed it — nothing to do
-			if (clickedSection.classList.contains("collapsed")) return;
+			// Detect expansion: old class list had "collapsed", new one doesn't
+			const wasCollapsed = mutation.oldValue?.includes("collapsed") ?? false;
+			const isNowExpanded = !el.classList.contains("collapsed");
+			if (!wasCollapsed || !isNowExpanded) continue;
 
-			// Collapse all other expanded sections
+			// This section just expanded — collapse all other expanded sections
+			suppressing = true;
 			const allSections = document.querySelectorAll<HTMLElement>(
 				".VPSidebarItem.level-0.collapsible:not(.collapsed)",
 			);
-
-			programmatic = true;
 			for (const section of allSections) {
-				if (section === clickedSection) continue;
-				const item = section.querySelector<HTMLElement>(":scope > .item");
-				item?.click();
+				if (section === el) continue;
+				// Click the header to trigger VitePress's own toggle()
+				section.querySelector<HTMLElement>(":scope > .item")?.click();
 			}
-			programmatic = false;
-		});
+			suppressing = false;
+			break;
+		}
+	});
+
+	// Start observing once the sidebar exists; re-attach after SPA navigations
+	const attach = () => {
+		const sidebar = document.querySelector(".VPSidebar");
+		if (sidebar) {
+			observer.observe(sidebar, {
+				attributes: true,
+				attributeFilter: ["class"],
+				attributeOldValue: true,
+				subtree: true,
+			});
+		}
+	};
+
+	// The sidebar may not exist yet at enhanceApp time — poll briefly then watch
+	const tryAttach = () => {
+		if (document.querySelector(".VPSidebar")) {
+			attach();
+		} else {
+			requestAnimationFrame(tryAttach);
+		}
+	};
+	tryAttach();
+
+	// Re-attach after VitePress SPA navigations re-render the sidebar
+	new MutationObserver(() => attach()).observe(document.documentElement, {
+		childList: true,
+		subtree: true,
 	});
 }
 

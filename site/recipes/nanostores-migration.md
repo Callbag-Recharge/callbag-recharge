@@ -16,7 +16,7 @@ callbag-recharge ships a Nanostores-compatible API with `atom()`, `computed()`, 
 | `.subscribe()` | Immediate call + listen | Same behavior |
 | `.listen()` | Changes only | Same behavior |
 | Diamond resolution | Glitches | Glitch-free (two-phase push) |
-| Streaming operators | None | 60+ (switchMap, debounce, retry, ...) |
+| Streaming operators | None | 70+ (switchMap, debounce, retry, ...) |
 | Inspectable graph | No | `Inspector.dumpGraph()` |
 | Framework support | Astro, React, Vue, Svelte | Any (framework-agnostic) |
 

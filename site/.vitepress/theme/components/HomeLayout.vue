@@ -36,7 +36,11 @@ const features = [
 const primitives = [
 	{ name: "state", desc: "writable store", example: "state(0)" },
 	{ name: "derived", desc: "computed value", example: "derived([a, b], fn)" },
-	{ name: "dynamicDerived", desc: "runtime-tracked derived", example: "dynamicDerived((get) => get(flag) ? get(a) : get(b))" },
+	{
+		name: "dynamicDerived",
+		desc: "runtime-tracked derived",
+		example: "dynamicDerived((get) => get(flag) ? get(a) : get(b))",
+	},
 	{ name: "effect", desc: "side effects", example: "effect([dep], fn)" },
 	{ name: "producer", desc: "async source", example: "producer(({ emit }) => ...)" },
 	{ name: "operator", desc: "custom transform", example: "operator([dep], init, handler)" },

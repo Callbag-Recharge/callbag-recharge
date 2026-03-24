@@ -68,12 +68,41 @@ export interface MemoryNodeOptions {
 }
 
 // ---------------------------------------------------------------------------
+// Admission Control (Phase 6d)
+// ---------------------------------------------------------------------------
+
+/** Decision returned by an admission policy when a new memory is added. */
+export type AdmissionDecision<T> =
+	| { action: "admit" }
+	| { action: "reject" }
+	| { action: "update"; targetId: string; content: T }
+	| { action: "merge"; targetId: string; reducer: (existing: T, incoming: T) => T };
+
+/**
+ * Admission policy function. Called on every `add()` with the incoming content
+ * and a snapshot of existing nodes. Returns a decision controlling whether to
+ * admit, reject, update an existing node, or merge into one.
+ */
+export type AdmissionPolicyFn<T> = (incoming: T, nodes: MemoryNode<T>[]) => AdmissionDecision<T>;
+
+/**
+ * Forget policy function. Called before each new `add()` (on existing nodes only,
+ * never on the node being admitted) and on explicit `gc()` calls.
+ * Return `true` to remove the node from the collection.
+ */
+export type ForgetPolicyFn<T> = (node: MemoryNode<T>) => boolean;
+
+// ---------------------------------------------------------------------------
 // Collection
 // ---------------------------------------------------------------------------
 
 export interface Collection<T> {
-	/** Add a new memory node to the collection. */
-	add(content: T, opts?: MemoryNodeOptions): MemoryNode<T>;
+	/**
+	 * Add a new memory node to the collection.
+	 * When an `admissionPolicy` is configured, returns `undefined` if the policy rejects,
+	 * or the updated/merged existing node for `update`/`merge` decisions.
+	 */
+	add(content: T, opts?: MemoryNodeOptions): MemoryNode<T> | undefined;
 	/** Remove a node by reference or ID. Returns true if found. */
 	remove(nodeOrId: MemoryNode<T> | string): boolean;
 	/** Get a node by ID. */
@@ -93,6 +122,23 @@ export interface Collection<T> {
 	/** Get top-K nodes by score (snapshot). */
 	topK(k: number, weights?: ScoreWeights): MemoryNode<T>[];
 
+	/**
+	 * Consolidate multiple nodes into one. Removes source nodes and creates
+	 * a new node with the reducer's output. Synchronous — async summarization
+	 * (e.g. via LLM) belongs at a higher layer.
+	 */
+	summarize(
+		nodeIds: string[],
+		reducer: (nodes: MemoryNode<T>[]) => T,
+		opts?: MemoryNodeOptions,
+	): MemoryNode<T>;
+
+	/**
+	 * Run the forget policy on all nodes. Returns the number of nodes removed.
+	 * No-op if no `forgetPolicy` is configured.
+	 */
+	gc(): number;
+
 	/** Reactive tag index — select(tag) returns reactive Set<nodeId>. */
 	readonly tagIndex: ReactiveIndex;
 
@@ -100,11 +146,21 @@ export interface Collection<T> {
 	destroy(): void;
 }
 
-export interface CollectionOptions {
+export interface CollectionOptions<T = unknown> {
 	/** Maximum number of nodes. Oldest (by score) are evicted on overflow. */
 	maxSize?: number;
 	/** Default score weights for topK and eviction. */
 	weights?: ScoreWeights;
+	/**
+	 * Admission policy — controls whether new memories are admitted, rejected,
+	 * merged with an existing node, or used to update one. Called on every `add()`.
+	 */
+	admissionPolicy?: AdmissionPolicyFn<T>;
+	/**
+	 * Forget policy — predicate called on existing nodes before each `add()` and during `gc()`.
+	 * The newly-admitted node is never evaluated. Return `true` to remove a node.
+	 */
+	forgetPolicy?: ForgetPolicyFn<T>;
 }
 
 // ---------------------------------------------------------------------------

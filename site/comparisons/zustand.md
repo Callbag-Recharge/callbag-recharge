@@ -14,7 +14,7 @@ Both are simple, ergonomic state management libraries. callbag-recharge adds dia
 | **Computed values** | None built-in | `select()` — automatic, diamond-safe |
 | **Memoization** | Manual (`useShallow`) | Automatic push-phase via `equals` |
 | **Diamond resolution** | Not applicable (no derived) | Glitch-free two-phase push |
-| **Streaming operators** | None | 60+ (switchMap, debounce, retry, ...) |
+| **Streaming operators** | None | 70+ (switchMap, debounce, retry, ...) |
 | **Framework** | React-first (vanilla adapter) | Framework-agnostic |
 | **DevTools** | Browser extension | `Inspector.dumpGraph()` — runtime, programmatic |
 | **Bundle size** | ~1.1 KB | ~4.5 KB core (tree-shakeable) |
@@ -68,7 +68,7 @@ When multiple selectors share upstream data, Zustand can produce inconsistent in
 
 ### 3. Streaming operators
 
-Need debounce, switchMap, retry, bufferTime? Zustand requires a separate library (RxJS). callbag-recharge has 60+ composable operators.
+Need debounce, switchMap, retry, bufferTime? Zustand requires a separate library (RxJS). callbag-recharge has 70+ composable operators.
 
 ### 4. Programmatic inspection
 

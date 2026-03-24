@@ -12,7 +12,7 @@ Both provide streaming operators. callbag-recharge adds first-class state (`.get
 |---------|------|-----------------|
 | **State** | `BehaviorSubject` (awkward) | `state()` — first-class `.get()/.set()` |
 | **Derived** | `combineLatest + map` | `derived([deps], fn)` — diamond-safe |
-| **Operators** | 200+ | 60+ (covers common cases) |
+| **Operators** | 200+ | 70+ (covers common cases) |
 | **Diamond resolution** | Not applicable | Glitch-free two-phase push |
 | **Side effects** | `tap()`, manual | `effect([deps], fn)` — auto-tracks deps |
 | **Bundle size** | ~30 KB (full) | ~4.5 KB core |
@@ -76,7 +76,7 @@ RxJS has a steep learning curve with 200+ operators, hot/cold observables, Subje
 
 ## What RxJS Does Better
 
-- **More operators** — 200+ vs 60+ (though callbag-recharge covers all common patterns)
+- **More operators** — 200+ vs 70+ (though callbag-recharge covers all common patterns)
 - **Mature ecosystem** — Angular integration, extensive community resources
 - **Scheduler control** — fine-grained async scheduling
 - **Hot/cold distinction** — explicit multicast control (callbag-recharge stores are inherently multicast)

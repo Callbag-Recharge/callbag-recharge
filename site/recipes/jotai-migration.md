@@ -17,7 +17,7 @@ callbag-recharge ships a Jotai-compatible `atom()` function. You can migrate inc
 | Diamond resolution | Glitches possible | Glitch-free (two-phase push) |
 | Provider required | Yes (`<Provider>`) | No |
 | Framework lock-in | React only | Framework-agnostic |
-| Streaming operators | None | 60+ (switchMap, debounce, retry, ...) |
+| Streaming operators | None | 70+ (switchMap, debounce, retry, ...) |
 | Inspectable graph | Jotai DevTools | `Inspector.dumpGraph()` — runtime, no extension |
 
 ## Step 1: Use the Compat Layer (Zero Changes)

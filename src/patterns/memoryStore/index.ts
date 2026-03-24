@@ -131,15 +131,15 @@ export function memoryStore<T>(opts?: MemoryStoreOptions): MemoryStoreResult<T> 
 	});
 
 	function remember(content: T, nodeOpts?: MemoryNodeOptions): MemoryNode<T> {
-		return _session.add(content, nodeOpts);
+		return _session.add(content, nodeOpts)!;
 	}
 
 	function focus(content: T, nodeOpts?: MemoryNodeOptions): MemoryNode<T> {
-		return _working.add(content, nodeOpts);
+		return _working.add(content, nodeOpts)!;
 	}
 
 	function storeMem(content: T, nodeOpts?: MemoryNodeOptions): MemoryNode<T> {
-		return _longTerm.add(content, nodeOpts);
+		return _longTerm.add(content, nodeOpts)!;
 	}
 
 	function promote(nodeId: string): boolean {
@@ -161,7 +161,7 @@ export function memoryStore<T>(opts?: MemoryStoreOptions): MemoryStoreResult<T> 
 			id: meta.id,
 			importance: meta.importance,
 			tags: Array.from(meta.tags),
-		});
+		})!;
 		// Replay access count so scoring reflects original history
 		for (let i = 0; i < meta.accessCount; i++) promoted.touch();
 
