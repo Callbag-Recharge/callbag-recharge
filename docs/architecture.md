@@ -67,6 +67,7 @@ src/
 ├── worker/          ← reactive cross-thread bridge (workerBridge, workerSelf, WorkerTransport)
 ├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
 ├── compat/          ← drop-in API wrappers + framework bindings (react, vue, signals, zustand, jotai, nanostores)
+├── ai/              ← composed AI/LLM surface (chatStream, ragPipeline, docIndex, embeddingIndex, memoryStore, fromLLM, …)
 └── index.ts         ← public API barrel (core primitives only; other layers via subpath exports)
 ```
 
@@ -86,7 +87,11 @@ Tier 2 (utilities)    utils/
 Tier 3 (domains)      orchestrate/    messaging/    memory/    worker/
                         ↓                ↓              ↓          ↓
 Tier 4 (surface)      patterns/    adapters/    compat/
+                        ↓                ↓
+Tier 5 (ai)           ai/
 ```
+
+`ai/` is the **highest surface layer** — composed AI/LLM primitives (`chatStream`, `ragPipeline`, `docIndex`, `embeddingIndex`, `memoryStore`, `fromLLM`, etc.). Nothing imports from `ai/`. H2 and user AI apps import from this layer plus `compat/`, `data/`, `orchestrate/`, `memory/`, `worker/`, `messaging/` — never `raw/`, `core/`, `extra/`, `utils/` directly.
 
 `data/` is a **cross-cutting layer** — importable from any tier (core excluded).
 
@@ -106,6 +111,7 @@ Tier 4 (surface)      patterns/    adapters/    compat/
 - `patterns/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, `memory/`, and `worker/`
 - `adapters/` imports from `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, `memory/`, and `worker/`
 - `compat/` imports from `core/`, `raw/`, `extra/`, `orchestrate/`, and `memory/` only
+- `ai/` imports from everything — `core/`, `raw/`, `extra/`, `utils/`, `data/`, `orchestrate/`, `messaging/`, `memory/`, `worker/`, `patterns/`, `adapters/`, and `compat/`. Nothing imports from `ai/`.
 - **Intra-folder imports are always allowed** (e.g. `retry` → `backoff` within `utils/`, `task` → `taskState` within `orchestrate/`)
 - `protocol.ts` and `types.ts` have zero runtime dependencies on other core files
 

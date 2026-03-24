@@ -61,7 +61,11 @@ export function markdownToHtml(md: string): string {
 			out.push(`<p>${escapeInline(line)}</p>`);
 		}
 	}
-	return out.join("\n");
+	// Avoid an artificial blank first/last line inside fenced code blocks.
+	return out
+		.join("\n")
+		.replace(/<pre><code>\n/g, "<pre><code>")
+		.replace(/\n<\/code><\/pre>/g, "</code></pre>");
 }
 
 function escapeHtml(s: string): string {

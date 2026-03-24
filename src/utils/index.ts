@@ -54,12 +54,12 @@ export type {
 } from "./checkpoint";
 export { checkpoint, memoryAdapter } from "./checkpoint";
 export type {
-	FileAdapterOptions,
 	IndexedDBAdapterOptions,
 	SQLiteAdapterOptions,
 	SQLiteDatabase,
 } from "./checkpointAdapters";
-export { fileAdapter, indexedDBAdapter, sqliteAdapter } from "./checkpointAdapters";
+export { indexedDBAdapter, sqliteAdapter } from "./checkpointAdapters";
+// Node-only: fileAdapter is in checkpointAdapters.node.ts (import from 'callbag-recharge/utils/node')
 // Circuit breaker
 export type { CircuitBreaker, CircuitBreakerOptions, CircuitState } from "./circuitBreaker";
 export { circuitBreaker } from "./circuitBreaker";

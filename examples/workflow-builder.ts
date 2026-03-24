@@ -15,9 +15,9 @@
  */
 
 import type { ReactiveLog } from "callbag-recharge/data";
-import { reactiveLog } from "callbag-recharge/data";
 import type {
 	DagLayoutEdge,
+	ExecutionLogResult,
 	LayoutNode,
 	PipelineStatus,
 	Store,
@@ -28,6 +28,7 @@ import type {
 import {
 	dagLayout,
 	effect,
+	executionLog,
 	fromTrigger,
 	pipeline,
 	source,
@@ -89,7 +90,12 @@ interface BuiltPipeline {
 	layout: LayoutNode[];
 	trigger: ReturnType<typeof fromTrigger<string>>;
 	wfNodes: WorkflowNodeResult[];
-	wf: { status: Store<PipelineStatus>; reset(): void; destroy(): void };
+	wf: {
+		status: Store<PipelineStatus>;
+		reset(): void;
+		destroy(): void;
+		inner: { stepMeta: Record<string, Store<any>>; order: string[] };
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -255,9 +261,12 @@ function buildFromParsed(
 		const deps = pn.deps.length > 0 ? pn.deps : ["trigger"];
 		const def = task(
 			deps,
-			async (signal, _vals) => {
-				wn.log.append(`[START] ${pn.label}...`);
-				return wn.simulate(opts.durationRange.get(), opts.failRate.get(), signal);
+			async (signal, vals) => {
+				const depSummary = deps.map((d, i) => `${d}=${JSON.stringify(vals[i]) ?? "?"}`).join(", ");
+				wn.log.append(`[START] ${pn.label} (${depSummary})`);
+				const result = await wn.simulate(opts.durationRange.get(), opts.failRate.get(), signal);
+				wn.log.append(`[VALUE] → ${JSON.stringify(result)}`);
+				return result;
 			},
 			{ name: pn.id },
 		);
@@ -398,8 +407,8 @@ export interface WorkflowBuilderState {
 	edges: Store<WorkflowEdge[]>;
 	/** Current auto-layout positions. */
 	layout: Store<LayoutNode[]>;
-	/** Global execution log. */
-	executionLog: ReactiveLog<string>;
+	/** Global execution log (auto-connected to pipeline stepMeta). */
+	execLog: ExecutionLogResult;
 	/** Load a preset into the editor. */
 	selectTemplate(presetId: string): void;
 	/** Parse the current code and rebuild the pipeline + DAG. */
@@ -418,7 +427,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	const failRate = state<number>(0.1, { name: "wb.failRate" });
 	const running = state(false, { name: "wb.running" });
 	const runCount = state(0, { name: "wb.runCount" });
-	const executionLog = reactiveLog<string>({ id: "wb:executionLog", maxSize: 200 });
+	const execLog = executionLog({ maxSize: 200, name: "wb:execLog" });
 	const parseError = state<string>("", { name: "wb.parseError" });
 
 	// Active pipeline state
@@ -431,10 +440,15 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 	const pipelineStatus = state<PipelineStatus>("idle", { name: "wb.pipelineStatus" });
 	const code = state<string>(presets[0].code, { name: "wb.code" });
 
-	// Status sync effect disposer
+	// Status sync effect disposer + execution log connection
 	let statusUnsub: (() => void) | null = null;
+	let logUnsub: (() => void) | null = null;
 
 	function destroyActive(): void {
+		if (logUnsub) {
+			logUnsub();
+			logUnsub = null;
+		}
 		if (activePipeline) {
 			activePipeline.wf.destroy();
 			for (const wn of activePipeline.wfNodes) {
@@ -469,6 +483,12 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 		pipelineStatus.set("idle");
 		running.set(false);
 
+		// Connect execution log to pipeline stepMeta (auto-logs start/value/complete/error)
+		logUnsub = execLog.connectPipeline(
+			activePipeline.wf.inner.stepMeta,
+			activePipeline.wf.inner.order,
+		);
+
 		// Sync pipeline status reactively
 		const wfStatus = activePipeline.wf.status;
 		const dispose = effect([wfStatus, running], () => {
@@ -478,7 +498,6 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 				running.set(false);
 				const next = runCount.get() + 1;
 				runCount.set(next);
-				executionLog.append(`[${new Date().toISOString()}] Run #${next} — ${s}`);
 			}
 		});
 		statusUnsub = dispose;
@@ -511,7 +530,12 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 		for (const wn of activePipeline.wfNodes) wn.reset();
 		activePipeline.trigger.fire("go");
 		running.set(true);
-		executionLog.append(`[${new Date().toISOString()}] Triggered pipeline`);
+		execLog.append({
+			step: "pipeline",
+			event: "start",
+			timestamp: Date.now(),
+			runCount: runCount.get() + 1,
+		});
 	}
 
 	function resetPipeline(): void {
@@ -523,7 +547,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 
 	function destroy(): void {
 		destroyActive();
-		executionLog.destroy();
+		execLog.destroy();
 	}
 
 	return {
@@ -538,7 +562,7 @@ export function createWorkflowBuilder(): WorkflowBuilderState {
 		nodes: nodesStore,
 		edges: edgesStore,
 		layout: layoutStore,
-		executionLog,
+		execLog,
 		selectTemplate,
 		updateCode,
 		trigger: triggerPipeline,

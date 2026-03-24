@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ExecutionEntry } from "../../orchestrate/executionLog";
 import { executionLog } from "../../orchestrate/executionLog";
-import { fileLogAdapter, sqliteLogAdapter } from "../../orchestrate/executionLogAdapters";
+import { sqliteLogAdapter } from "../../orchestrate/executionLogAdapters";
+import { fileLogAdapter } from "../../orchestrate/executionLogAdapters.node";
 
 // ---------------------------------------------------------------------------
 // fileLogAdapter tests

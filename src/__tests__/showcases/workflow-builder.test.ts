@@ -353,20 +353,20 @@ describe("H3: Workflow Builder — store layer", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("etl");
 
-			const logBefore = wb.executionLog.lengthStore.get();
+			const logBefore = wb.execLog.length.get();
 			wb.trigger();
-			expect(wb.executionLog.lengthStore.get()).toBeGreaterThan(logBefore);
+			expect(wb.execLog.length.get()).toBeGreaterThan(logBefore);
 
 			wb.destroy();
 		});
 
-		it("execution log records trigger event", () => {
+		it("execution log records pipeline start event", () => {
 			const wb = createWorkflowBuilder();
 			wb.selectTemplate("fanout");
 
 			wb.trigger();
-			const entries = wb.executionLog.toArray();
-			expect(entries.some((e) => e.value.includes("Triggered"))).toBe(true);
+			const entries = wb.execLog.forStep("pipeline");
+			expect(entries.some((e) => e.event === "start")).toBe(true);
 
 			wb.destroy();
 		});

@@ -5,87 +5,14 @@
 // the CheckpointAdapter interface (save/load/clear).
 //
 // Shipped adapters:
-//   - fileAdapter(dir)      — JSON files in a directory (Node.js)
 //   - sqliteAdapter(db)     — SQLite via better-sqlite3 (peer dep)
 //   - indexedDBAdapter(db)  — IndexedDB (browser)
+// Note: fileAdapter lives in checkpointAdapters.node.ts (uses node:fs)
 // ---------------------------------------------------------------------------
 
 import { firstValueFrom } from "../raw/firstValueFrom";
 import type { CheckpointAdapter } from "./checkpoint";
 import { fromIDBRequest } from "./fromIDBRequest";
-
-// ---------------------------------------------------------------------------
-// File-based adapter (Node.js)
-// ---------------------------------------------------------------------------
-
-export interface FileAdapterOptions {
-	/** Directory to store checkpoint files. Each checkpoint becomes `<dir>/<id>.json`. */
-	dir: string;
-}
-
-/**
- * File-based checkpoint adapter. Stores each checkpoint as a JSON file in the given directory.
- *
- * @param opts - Configuration with `dir` path.
- *
- * @returns `CheckpointAdapter` — save/load/clear backed by the filesystem.
- *
- * @remarks **Node.js only:** Uses `node:fs` for file operations. Not available in browser builds.
- * @remarks **Async:** All operations return Promises.
- * @remarks **Format:** Values are JSON-serialized. Non-serializable values will throw on save.
- *
- * @example
- * ```ts
- * import { pipe } from 'callbag-recharge';
- * import { checkpoint } from 'callbag-recharge/orchestrate';
- * import { fileAdapter } from 'callbag-recharge/orchestrate';
- *
- * const adapter = fileAdapter({ dir: './checkpoints' });
- * const durable = pipe(source, checkpoint("step-1", adapter));
- * ```
- *
- * @seeAlso [checkpoint](./checkpoint) — durable step boundary, [memoryAdapter](./checkpoint) — in-memory adapter
- *
- * @category orchestrate
- */
-export function fileAdapter(opts: FileAdapterOptions): CheckpointAdapter {
-	const { dir } = opts;
-
-	function filePath(id: string): string {
-		// Sanitize id to prevent directory traversal
-		const safe = id.replace(/[^a-zA-Z0-9_-]/g, "_");
-		return `${dir}/${safe}.json`;
-	}
-
-	return {
-		async save(id: string, value: unknown): Promise<void> {
-			const fs = await import("node:fs/promises");
-			await fs.mkdir(dir, { recursive: true });
-			await fs.writeFile(filePath(id), JSON.stringify(value), "utf-8");
-		},
-
-		async load(id: string): Promise<unknown | undefined> {
-			const fs = await import("node:fs/promises");
-			try {
-				const data = await fs.readFile(filePath(id), "utf-8");
-				return JSON.parse(data);
-			} catch (err: any) {
-				if (err?.code === "ENOENT") return undefined;
-				throw err;
-			}
-		},
-
-		async clear(id: string): Promise<void> {
-			const fs = await import("node:fs/promises");
-			try {
-				await fs.unlink(filePath(id));
-			} catch (err: any) {
-				if (err?.code === "ENOENT") return; // Already gone
-				throw err;
-			}
-		},
-	};
-}
 
 // ---------------------------------------------------------------------------
 // SQLite adapter (via better-sqlite3 peer dep)

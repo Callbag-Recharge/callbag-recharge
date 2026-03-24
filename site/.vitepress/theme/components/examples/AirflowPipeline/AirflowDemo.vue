@@ -7,6 +7,7 @@ import { edges, nodes, runCount, running, stop, trigger } from "@examples/airflo
 import pipelineRaw from "@examples/airflow-demo.ts?raw";
 import { useSubscribe } from "callbag-recharge/compat/vue";
 import { computed, nextTick, onUnmounted, ref, watch, watchEffect } from "vue";
+import { useAutoFitFlow } from "../../shared/useAutoFitFlow";
 
 // Extract the display region between #region display and #endregion display
 const REGION_START = "// #region display";
@@ -70,6 +71,12 @@ onUnmounted(stop);
 const hoveredNode = ref<string | null>(null);
 const graphPanelRef = ref<HTMLElement | null>(null);
 const popoverPos = ref<{ x: number; y: number; above: boolean }>({ x: 0, y: 0, above: false });
+const { onFlowInit } = useAutoFitFlow({
+	panelRef: graphPanelRef,
+	watchSources: [() => isRunning.value, () => runs.value],
+	padding: 0.15,
+	duration: 180,
+});
 
 function onNodeEnter(id: string, event: MouseEvent) {
 	hoveredNode.value = id;
@@ -319,13 +326,14 @@ defineExpose({
 					:fit-view-params="{ padding: 0.15 }"
 					:nodes-draggable="false"
 					:nodes-connectable="false"
-					:zoom-on-scroll="false"
+					:zoom-on-scroll="true"
 					:pan-on-scroll="false"
-					:pan-on-drag="false"
-					:prevent-scrolling="false"
-					:zoom-on-double-click="false"
-					:zoom-on-pinch="false"
+					:pan-on-drag="true"
+					:prevent-scrolling="true"
+					:zoom-on-double-click="true"
+					:zoom-on-pinch="true"
 					class="vue-flow-wrapper"
+					@init="onFlowInit"
 				>
 					<Background :gap="20" :size="0.5" pattern-color="#1e345033" />
 

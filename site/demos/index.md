@@ -12,12 +12,14 @@ Interactive demos showcasing callbag-recharge primitives in action. Each demo is
 |------|--------------|
 | [Airflow in TypeScript](./airflow) | `pipeline()` + `task()` DAG with circuit breakers, retry, and real-time node status |
 | [Agent Loop](./agent-loop) | `agentLoop()` + `gate()` for observe → plan → act with human-in-the-loop approval |
+| [Workflow Builder](/demos/workflow-builder.html) | Code-first DAG builder with template selection, node status visualization, and reactive execution logs |
 
 ## State & Forms
 
 | Demo | What it shows |
 |------|--------------|
 | [Form Builder](./form-builder) | `formField()` with sync/async validation, dirty tracking, and derived aggregation |
+| [Markdown Editor](/demos/markdown-editor.html) | Split-pane Markdown editor with live preview, reactive toolbar state, and autosave checkpoints |
 | [State Machine](./state-machine) | `stateMachine()` with declarative transitions, SVG graph, and Mermaid export |
 
 ## Data & Monitoring

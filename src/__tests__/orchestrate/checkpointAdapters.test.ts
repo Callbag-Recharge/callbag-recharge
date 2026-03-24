@@ -2,7 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { pipe, state } from "../../index";
 import { checkpoint } from "../../utils/checkpoint";
-import { fileAdapter, sqliteAdapter } from "../../utils/checkpointAdapters";
+import { sqliteAdapter } from "../../utils/checkpointAdapters";
+import { fileAdapter } from "../../utils/checkpointAdapters.node";
 
 // ---------------------------------------------------------------------------
 // fileAdapter tests (structural — can't easily mock dynamic import)

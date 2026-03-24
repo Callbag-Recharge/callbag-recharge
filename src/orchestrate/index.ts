@@ -36,12 +36,12 @@ export type {
 } from "./executionLog";
 export { executionLog, memoryLogAdapter } from "./executionLog";
 export type {
-	FileLogAdapterOptions,
 	IndexedDBLogAdapterOptions,
 	SQLiteDatabase as SQLiteLogDatabase,
 	SQLiteLogAdapterOptions,
 } from "./executionLogAdapters";
-export { fileLogAdapter, indexedDBLogAdapter, sqliteLogAdapter } from "./executionLogAdapters";
+export { indexedDBLogAdapter, sqliteLogAdapter } from "./executionLogAdapters";
+// Node-only: fileLogAdapter is in executionLogAdapters.node.ts (import from 'callbag-recharge/orchestrate/node')
 export type { ForEachOpts, ForEachStepDef } from "./forEach";
 export { forEach } from "./forEach";
 export type { GateController, GatedStore, GateOptions } from "./gate";

@@ -6,6 +6,8 @@ import "@vue-flow/core/dist/theme-default.css";
 import { createWorkflowBuilder, presets, type WorkflowNode } from "@examples/workflow-builder";
 import { useSubscribe, useSubscribeRecord } from "callbag-recharge/compat/vue";
 import { computed, onUnmounted, ref, watchEffect } from "vue";
+import { useAutoFitFlow } from "../../shared/useAutoFitFlow";
+import { useLockPageScroll } from "../../shared/useLockPageScroll";
 
 // ---------------------------------------------------------------------------
 // Store
@@ -26,7 +28,7 @@ const layoutRef = useSubscribe(wb.layout);
 const durationRange = useSubscribe(wb.durationRange);
 const failRate = useSubscribe(wb.failRate);
 const parseError = useSubscribe(wb.parseError);
-const executionLogLatest = useSubscribe(wb.executionLog.latest);
+const executionLogLatest = useSubscribe(wb.execLog.latest);
 
 // ---------------------------------------------------------------------------
 // Editable code
@@ -66,17 +68,25 @@ watchEffect(() => {
 		if (entry && entry.value !== lastLogEntry.get(n.id)) {
 			lastLogEntry.set(n.id, entry.value);
 			const current = nodeLogs.value[n.id] ?? [];
-			nodeLogs.value[n.id] = [...current.slice(-4), entry.value];
+			nodeLogs.value[n.id] = [...current.slice(-5), entry.value];
 		}
 	}
 });
 
-// Execution log accumulator
+// Execution log accumulator — formats ExecutionEntry into display strings
 const executionLogLines = ref<string[]>([]);
+let lastLogTimestamp = 0;
 watchEffect(() => {
 	const entry = executionLogLatest.value;
-	if (entry) {
-		executionLogLines.value = [...executionLogLines.value.slice(-19), entry.value];
+	if (entry && entry.timestamp !== lastLogTimestamp) {
+		lastLogTimestamp = entry.timestamp;
+		const time = new Date(entry.timestamp).toISOString().slice(11, 23);
+		let line = `[${time}] ${entry.step}: ${entry.event}`;
+		if (entry.event === "error" && entry.error) {
+			const msg = entry.error instanceof Error ? entry.error.message : String(entry.error);
+			line += ` — ${msg}`;
+		}
+		executionLogLines.value = [...executionLogLines.value.slice(-29), line];
 	}
 });
 
@@ -89,6 +99,8 @@ function onPresetChange(e: Event) {
 	editorCode.value = wb.code.get();
 	codeChanged.value = false;
 	executionLogLines.value = [];
+	lastLogTimestamp = 0;
+	wb.execLog.clear();
 	nodeLogs.value = {};
 	lastLogEntry.clear();
 }
@@ -199,9 +211,22 @@ const dynamicEdges = computed(() =>
 // ---------------------------------------------------------------------------
 // Popover
 // ---------------------------------------------------------------------------
+const isFullscreen = ref(false);
+useLockPageScroll(isFullscreen);
 const hoveredNode = ref<string | null>(null);
 const graphPanelRef = ref<HTMLElement | null>(null);
 const popoverPos = ref<{ x: number; y: number; above: boolean }>({ x: 0, y: 0, above: false });
+const hasExecutionLog = computed(() => executionLogLines.value.length > 0);
+const { onFlowInit } = useAutoFitFlow({
+	panelRef: graphPanelRef,
+	watchSources: [
+		() => isFullscreen.value,
+		() => hasExecutionLog.value,
+		() => executionLogLines.value.length,
+	],
+	padding: 0.2,
+	duration: 180,
+});
 
 function onNodeEnter(id: string, event: MouseEvent) {
 	hoveredNode.value = id;
@@ -229,7 +254,13 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 </script>
 
 <template>
-	<div class="workflow-builder">
+	<div class="workflow-builder" :class="{ fullscreen: isFullscreen }">
+		<!-- Fullscreen toggle -->
+		<button class="fullscreen-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'" @click="isFullscreen = !isFullscreen">
+			<svg v-if="!isFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+			<svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+		</button>
+
 		<!-- Header -->
 		<div class="wb-header">
 			<div class="wb-title">
@@ -334,14 +365,14 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 					:fit-view-params="{ padding: 0.2 }"
 					:nodes-draggable="false"
 					:nodes-connectable="false"
-					:zoom-on-scroll="false"
+					:zoom-on-scroll="true"
 					:pan-on-scroll="false"
-					:pan-on-drag="false"
-					:prevent-scrolling="false"
-					:zoom-on-double-click="false"
-					:zoom-on-pinch="false"
+					:pan-on-drag="true"
+					:prevent-scrolling="true"
+					:zoom-on-double-click="true"
+					:zoom-on-pinch="true"
 					class="vue-flow-wrapper"
-					:key="nodesRef.map(n => n.id).join(',')"
+					@init="onFlowInit"
 				>
 					<Background :gap="20" :size="0.5" pattern-color="#1e345033" />
 
@@ -406,6 +437,7 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 									'log-err': line.includes('[ERROR]'),
 									'log-start': line.includes('[START]') || line.includes('[TRIGGER]'),
 									'log-skip': line.includes('[CIRCUIT'),
+									'log-value': line.includes('[VALUE]'),
 								}"
 							>
 								{{ line }}
@@ -428,9 +460,10 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 					:key="i"
 					class="exec-log-line"
 					:class="{
-						'log-ok': line.includes('completed'),
-						'log-err': line.includes('errored'),
-						'log-trigger': line.includes('Triggered'),
+						'log-ok': line.includes('complete'),
+						'log-err': line.includes('error'),
+						'log-trigger': line.includes('start'),
+						'log-value': line.includes('value'),
 					}"
 				>
 					{{ line }}
@@ -879,6 +912,7 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 .log-err { color: #ef4444; }
 .log-start { color: #3b82f6; }
 .log-skip { color: var(--cr-accent-warm); }
+.log-value { color: var(--cr-accent-warm); }
 
 /* ── Execution log ── */
 .wb-log {
@@ -925,6 +959,7 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 .exec-log-line.log-ok { color: var(--cr-aqua-dim); }
 .exec-log-line.log-err { color: #ef4444; }
 .exec-log-line.log-trigger { color: #3b82f6; }
+.exec-log-line.log-value { color: var(--cr-accent-warm); }
 
 /* ── Vue Flow overrides ── */
 .vue-flow-wrapper :deep(.vue-flow__edge-path) {
@@ -944,6 +979,68 @@ const codeLineCount = computed(() => editorCode.value.split("\n").length);
 	height: 8px;
 	background: var(--cr-border);
 	border: 1px solid var(--cr-surface);
+}
+
+/* ── Fullscreen toggle ── */
+.fullscreen-btn {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	z-index: 10;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--cr-border-subtle);
+	border-radius: 6px;
+	background: var(--cr-surface-raised);
+	color: var(--cr-text-muted);
+	cursor: pointer;
+	transition: all 0.15s;
+	opacity: 0.6;
+}
+
+.fullscreen-btn:hover {
+	opacity: 1;
+	color: var(--cr-text);
+	border-color: var(--cr-border);
+}
+
+.workflow-builder {
+	position: relative;
+}
+
+.workflow-builder.fullscreen {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 9999;
+	border-radius: 0;
+	border: none;
+	display: flex;
+	flex-direction: column;
+}
+
+.workflow-builder.fullscreen .wb-body {
+	flex: 1;
+	min-height: 0;
+}
+
+.workflow-builder.fullscreen .code-textarea {
+	min-height: 0;
+	flex: 1;
+}
+
+.workflow-builder.fullscreen .vue-flow-wrapper {
+	min-height: 0;
+	height: 100%;
+}
+
+.workflow-builder.fullscreen .graph-panel {
+	min-height: 0;
 }
 
 /* ── Responsive ── */

@@ -2,6 +2,7 @@
 import { createMarkdownEditorHero } from "@examples/markdown-editor-hero";
 import { useSubscribe } from "callbag-recharge/compat/vue";
 import { computed, nextTick, onUnmounted, ref, watch } from "vue";
+import { useLockPageScroll } from "../../shared/useLockPageScroll";
 
 // ---------------------------------------------------------------------------
 // Store
@@ -53,8 +54,13 @@ const error = useSubscribe(hero.editor.error);
 // ---------------------------------------------------------------------------
 // Textarea sync
 // ---------------------------------------------------------------------------
+const isFullscreen = ref(false);
+useLockPageScroll(isFullscreen);
 const textareaRef = ref<HTMLTextAreaElement | null>(null);
+const previewRef = ref<HTMLElement | null>(null);
 const isSyncing = ref(false);
+const previewScrollRatio = ref(0);
+const previewWasAtBottom = ref(false);
 
 function onInput(e: Event) {
 	const textarea = e.target as HTMLTextAreaElement;
@@ -85,6 +91,25 @@ watch(content, (val) => {
 			syncCursor();
 		});
 	}
+});
+
+function onPreviewScroll() {
+	const el = previewRef.value;
+	if (!el) return;
+	const maxScroll = Math.max(1, el.scrollHeight - el.clientHeight);
+	previewScrollRatio.value = el.scrollTop / maxScroll;
+	previewWasAtBottom.value = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+}
+
+// Preserve preview scroll position when v-html updates on every keystroke.
+watch(preview, async () => {
+	const el = previewRef.value;
+	if (!el) return;
+	const ratio = previewScrollRatio.value;
+	const atBottom = previewWasAtBottom.value;
+	await nextTick();
+	const maxScroll = Math.max(0, el.scrollHeight - el.clientHeight);
+	el.scrollTop = atBottom ? maxScroll : Math.round(maxScroll * ratio);
 });
 
 // ---------------------------------------------------------------------------
@@ -189,7 +214,13 @@ const saveIcon = computed(() => {
 </script>
 
 <template>
-	<div class="markdown-editor">
+	<div class="markdown-editor" :class="{ fullscreen: isFullscreen }">
+		<!-- Fullscreen toggle -->
+		<button class="fullscreen-btn" :title="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'" @click="isFullscreen = !isFullscreen">
+			<svg v-if="!isFullscreen" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" y1="3" x2="14" y2="10" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+			<svg v-else width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" y1="10" x2="21" y2="3" /><line x1="3" y1="21" x2="10" y2="14" /></svg>
+		</button>
+
 		<!-- Toolbar -->
 		<div class="editor-toolbar">
 			<div class="toolbar-left">
@@ -244,7 +275,7 @@ const saveIcon = computed(() => {
 				<div class="pane-header">
 					<span class="pane-label">Preview</span>
 				</div>
-				<div class="preview-content" v-html="preview" />
+				<div ref="previewRef" class="preview-content" v-html="preview" @scroll="onPreviewScroll" />
 			</div>
 		</div>
 	</div>
@@ -362,11 +393,13 @@ const saveIcon = computed(() => {
 	display: flex;
 	flex-direction: column;
 	border-right: 1px solid var(--cr-border-subtle);
+	min-height: 0;
 }
 
 .preview-pane {
 	display: flex;
 	flex-direction: column;
+	min-height: 0;
 }
 
 .pane-header {
@@ -416,6 +449,7 @@ const saveIcon = computed(() => {
 	line-height: 1.7;
 	color: var(--cr-text);
 	min-height: 460px;
+	min-width: 0;
 }
 
 .preview-content :deep(h1) {
@@ -505,6 +539,65 @@ const saveIcon = computed(() => {
 	display: block;
 	content: "";
 	margin: 4px 0;
+}
+
+/* ── Fullscreen toggle ── */
+.fullscreen-btn {
+	position: absolute;
+	top: 10px;
+	right: 10px;
+	z-index: 10;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 32px;
+	height: 32px;
+	border: 1px solid var(--cr-border-subtle);
+	border-radius: 6px;
+	background: var(--cr-surface-raised);
+	color: var(--cr-text-muted);
+	cursor: pointer;
+	transition: all 0.15s;
+	opacity: 0.6;
+}
+
+.fullscreen-btn:hover {
+	opacity: 1;
+	color: var(--cr-text);
+	border-color: var(--cr-border);
+}
+
+.markdown-editor {
+	position: relative;
+}
+
+.markdown-editor.fullscreen {
+	position: fixed;
+	top: 0;
+	left: 0;
+	right: 0;
+	bottom: 0;
+	z-index: 9999;
+	border-radius: 0;
+	border: none;
+	display: flex;
+	flex-direction: column;
+}
+
+.markdown-editor.fullscreen .editor-body {
+	flex: 1;
+	min-height: 0;
+}
+
+.markdown-editor.fullscreen .editor-pane,
+.markdown-editor.fullscreen .preview-pane {
+	min-height: 0;
+}
+
+.markdown-editor.fullscreen .editor-textarea,
+.markdown-editor.fullscreen .preview-content {
+	min-height: 0;
+	flex: 1;
 }
 
 /* ── Responsive ── */

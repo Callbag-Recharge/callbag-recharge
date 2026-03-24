@@ -178,6 +178,16 @@
 				"default": "./dist/orchestrate/index.cjs"
 			}
 		},
+		"./orchestrate/node": {
+			"import": {
+				"types": "./dist/orchestrate/executionLogAdapters.node.d.ts",
+				"default": "./dist/orchestrate/executionLogAdapters.node.js"
+			},
+			"require": {
+				"types": "./dist/orchestrate/executionLogAdapters.node.d.cts",
+				"default": "./dist/orchestrate/executionLogAdapters.node.cjs"
+			}
+		},
 		"./messaging": {
 			"import": {
 				"types": "./dist/messaging/index.d.ts",
@@ -196,6 +206,16 @@
 			"require": {
 				"types": "./dist/utils/index.d.cts",
 				"default": "./dist/utils/index.cjs"
+			}
+		},
+		"./utils/node": {
+			"import": {
+				"types": "./dist/utils/checkpointAdapters.node.d.ts",
+				"default": "./dist/utils/checkpointAdapters.node.js"
+			},
+			"require": {
+				"types": "./dist/utils/checkpointAdapters.node.d.cts",
+				"default": "./dist/utils/checkpointAdapters.node.cjs"
 			}
 		},
 		"./compat/nanostores": {
