@@ -16,7 +16,7 @@
 | Utils | 31 | `retry`, `withBreaker`, `withStatus`, `withConnectionStatus`, `withSchema`, `cascadingCache`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, `keyedAsync`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
 | Messaging | 5 | `topic`, `subscription`, `repeatPublish`, `jobQueue`, `jobFlow` — Pulsar-inspired topic/subscription + job queues |
-| Memory | 4 | `collection`, `decay`, `node`, `vectorIndex` (HNSW) |
+| Memory | 5 | `collection`, `lightCollection`, `decay`, `node`, `vectorIndex` (HNSW) |
 | Orchestrate | 17 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop`, `forEach`, `onFailure`, `wait`, `subPipeline` |
 | Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `toolCallState`, `focusManager`, `hybridRoute`, `selection`, `textBuffer`, … |
 | Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
@@ -72,6 +72,10 @@ RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals. All 6 core nodes handle lif
 ### Phase 6c: Knowledge Graph — Complete
 
 `knowledgeGraph` — reactive entity relationships with temporal tracking and graph-based retrieval. Wraps `Collection<T>` for entities (inherits decay, scoring, admission, eviction). Directed typed relations with `weight` (0–1), `metadata`, `createdAt`/`updatedAt`. Graph queries: `outgoing`, `incoming`, `neighbors`, `traverse` (BFS), `shortestPath`, `subgraph`. Reactive: `relationsOf`, `neighborsOf`, `relationCount`. `typeIndex` (ReactiveIndex) for relation type lookups. Cascade deletion via `subscribe` on collection.nodes (§1.19). 32 new tests.
+
+### Phase 6e: Light Collection — Complete
+
+`lightCollection` — lightweight variant of `collection` that uses FIFO or LRU eviction instead of `reactiveScored`. Same `Collection<T>` interface — drop-in replacement. Zero per-node subscription overhead (no reactive scoring heap). `get()` counts as LRU access. Defensive `_evictIfNeeded()` added to `summarize()` in both `collection` and `lightCollection`. 24 new tests.
 
 ### Phase 6d: Memory Lifecycle — Complete
 
@@ -142,7 +146,7 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | ~~6d~~ | ~~Consolidation + self-editing~~ | **Shipped** — `admissionPolicy` (admit/reject/update/merge), `forgetPolicy`, `summarize()`, `gc()` on `collection`. | — |
 | ~~6a~~ | ~~Session transport adapters~~ | **Shipped** — `sessionSync` (reactive diff engine), `wsTransport`, `httpTransport` (with batching) in `src/memory/`. | — |
 | ~~6c~~ | ~~Knowledge graph (reactive)~~ | **Shipped** — `knowledgeGraph` in `src/memory/`. Entity CRUD (wraps `collection`), directed typed relations with temporal tracking (`weight`, `createdAt`, `updatedAt`), BFS traversal, shortest path, subgraph extraction. Cascade deletion via `subscribe`. Reactive `relationsOf`, `neighborsOf`, `relationCount`. `typeIndex` for relation type lookups. | — |
-| 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. | S |
+| ~~6e~~ | ~~Lightweight collection variant~~ | **Shipped** — `lightCollection` in `src/memory/`. FIFO or LRU eviction (no reactive scoring overhead). Same `Collection<T>` interface — drop-in for high-throughput paths. | — |
 
 ### Phase 7: More Adapters
 

@@ -6,6 +6,7 @@ export { collection } from "./collection";
 export { computeScore, decay } from "./decay";
 export { httpTransport } from "./httpTransport";
 export { knowledgeGraph } from "./knowledgeGraph";
+export { lightCollection } from "./lightCollection";
 export { memoryNode } from "./node";
 export { sessionSync } from "./sessionSync";
 // Types
@@ -22,6 +23,7 @@ export type {
 	HttpTransportOptions,
 	KnowledgeGraph,
 	KnowledgeGraphOptions,
+	LightCollectionOptions,
 	MemoryMeta,
 	MemoryNode,
 	MemoryNodeOptions,

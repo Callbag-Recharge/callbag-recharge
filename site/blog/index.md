@@ -16,10 +16,15 @@ Behind-the-scenes stories from building callbag-recharge — the architecture de
 | 2 | [The Protocol That Already Solved Your Problem](./02-the-protocol-that-already-solved-your-problem) | 10 min |
 | 3 | [Signals Are Not Enough](./03-signals-are-not-enough) | 10 min |
 
-<!--
 ### Arc 2: Architecture v1 — The Naive First Attempt
-Coming soon.
 
+| # | Post | Read time |
+|---|------|-----------|
+| 4 | [Push Dirty, Pull Values: Our First Diamond Solution](./04-push-dirty-pull-values-our-first-diamond-solution) | 8 min |
+| 5 | [Why Explicit Dependencies Beat Magic Tracking](./05-why-explicit-dependencies-beat-magic-tracking) | 8 min |
+| 6 | [The Inspector Pattern: Observability as a First-Class Citizen](./06-the-inspector-pattern-observability-as-first-class-citizen) | 8 min |
+
+<!--
 ### Arc 3: Architecture v2 — The Great Unification
 Coming soon.
 

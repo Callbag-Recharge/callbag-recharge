@@ -1,15 +1,12 @@
 // ---------------------------------------------------------------------------
-// Phase 1: Collection — reactive set of MemoryNodes
+// Phase 6e: Light Collection — FIFO/LRU eviction, no reactive scoring
 // ---------------------------------------------------------------------------
-// A collection manages a set of MemoryNodes with reactive tracking.
-// Supports query, tag-based lookup, top-K scoring, and auto-eviction.
+// A lightweight variant of `collection` that replaces `reactiveScored`
+// (O(log n) heap with per-node subscriptions) with simple FIFO or LRU
+// eviction (O(1), no subscriptions). Same `Collection<T>` interface.
 //
-// Design:
-// - _nodes: Map<string, MemoryNode<T>> for O(1) ID lookup
-// - _nodesStore: state<MemoryNode<T>[]> for reactive node list
-// - _sizeStore: derived from _nodesStore for reactive count
-// - _tagIndex: reactiveIndex for O(1) tag-based lookups (replaces O(n) scan)
-// - maxSize eviction uses decay scoring — lowest-score nodes evicted first
+// Use when eviction quality < raw speed — message buffers, caches,
+// high-throughput ingestion paths.
 // ---------------------------------------------------------------------------
 
 import { derived } from "../core/derived";
@@ -18,89 +15,57 @@ import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import { reactiveIndex } from "../data/reactiveIndex";
-import { reactiveScored } from "../utils/reactiveEviction";
+import type { EvictionPolicy } from "../utils/eviction";
+import { fifo, lru } from "../utils/eviction";
 import { computeScore } from "./decay";
 import { memoryNode } from "./node";
 import type {
 	AdmissionDecision,
 	Collection as CollectionInterface,
-	CollectionOptions,
+	LightCollectionOptions,
 	MemoryNode as MemoryNodeInterface,
 	MemoryNodeOptions,
 	ScoreWeights,
 } from "./types";
 
-let collectionCounter = 0;
+let lightCollectionCounter = 0;
 
 /**
- * Creates a reactive collection of `MemoryNode<T>` values with tag indexing,
- * decay-scored eviction, and memory lifecycle management.
+ * Creates a lightweight reactive collection that uses FIFO or LRU eviction
+ * instead of decay-scored reactive eviction. Same `Collection<T>` interface
+ * as `collection()` — drop-in replacement for high-throughput paths.
  *
  * @param opts - Optional configuration.
  *
- * @returns `Collection<T>` with the following API:
+ * @returns `Collection<T>` — identical interface to `collection()`.
  *
- * @returnsTable add(content, opts?) | (content: T, opts?: MemoryNodeOptions) => MemoryNode<T> \| undefined | Add a node. Returns undefined if admissionPolicy rejects.
- * remove(nodeOrId) | (nodeOrId: MemoryNode<T> \| string) => boolean | Remove a node by reference or ID.
- * get(id) | (id: string) => MemoryNode<T> \| undefined | Get a node by ID.
- * has(id) | (id: string) => boolean | Check if a node exists.
- * nodes | Store<MemoryNode<T>[]> | Reactive store of all nodes (updates on add/remove/summarize).
- * size | Store<number> | Reactive node count.
- * query(filter) | (filter: (n: MemoryNode<T>) => boolean) => MemoryNode<T>[] | Snapshot filter.
- * byTag(tag) | (tag: string) => MemoryNode<T>[] | O(1) tag lookup via reactiveIndex.
- * topK(k, weights?) | (k: number, weights?: ScoreWeights) => MemoryNode<T>[] | Top-k by decay score.
- * summarize(ids, reducer, opts?) | (...) => MemoryNode<T> | Consolidate nodes into one.
- * gc() | () => number | Run forgetPolicy on demand; returns count removed.
- * tagIndex | ReactiveIndex | Reactive tag-to-nodeId index.
- * destroy() | () => void | Tear down all nodes and internal stores.
+ * @optionsType LightCollectionOptions
+ * @option maxSize | number | Infinity | Maximum nodes. Evicted by FIFO or LRU on overflow.
+ * @option eviction | "fifo" \| "lru" | "fifo" | Eviction strategy.
+ * @option weights | ScoreWeights | {} | Default weights for topK scoring (eviction does NOT use scores).
+ * @option admissionPolicy | AdmissionPolicyFn<T> | undefined | Gate every add().
+ * @option forgetPolicy | ForgetPolicyFn<T> | undefined | Predicate run before each add() and during gc().
  *
- * @optionsType CollectionOptions
- * @option maxSize | number | Infinity | Maximum nodes. Lowest-scored evicted on overflow.
- * @option weights | ScoreWeights | {} | Default weights for topK and eviction scoring.
- * @option admissionPolicy | AdmissionPolicyFn<T> | undefined | Gate every add(): admit, reject, update an existing node, or merge into one.
- * @option forgetPolicy | ForgetPolicyFn<T> | undefined | Predicate run before each add() and during gc(). Return true to remove a node.
- *
- * @remarks **Admission policy:** Called synchronously on every `add()` with a snapshot of current nodes. Returns `{ action: "admit" | "reject" | "update" | "merge" }`. Use for dedup, conflict resolution, and content merging.
- * @remarks **Forget policy:** Runs on existing nodes before each new admission and on explicit `gc()` calls. The newly-admitted node is never evaluated by the policy in the same call.
- * @remarks **Summarize:** Removes source nodes and inserts one consolidated node in a single `batch()` — subscribers see one atomic update. Run forgetPolicy on survivors before inserting the new node.
- * @remarks **Eviction vs forget:** `maxSize` eviction uses decay scoring (score-based heap). `forgetPolicy` is content/quality-based. Both can coexist — forget runs first, then eviction trims any remaining overflow.
- * @remarks **Reactivity:** `nodes` and `size` are derived from an internal version counter that bumps on structural changes (add/remove/summarize/gc). Node content changes are reactive through each node's own stores, not through the collection stores.
+ * @remarks **FIFO** evicts the oldest-inserted node regardless of access. **LRU** evicts the least-recently-accessed node — `get()` counts as an access.
+ * @remarks **No per-node subscriptions.** Unlike `collection()` which subscribes to every node's `.meta` for reactive score updates, `lightCollection` has zero per-node overhead beyond tag tracking.
  *
  * @example
  * ```ts
- * import { collection } from 'callbag-recharge/memory';
+ * import { lightCollection } from 'callbag-recharge/memory';
  *
- * const mem = collection<string>({ maxSize: 100 });
+ * // FIFO buffer — oldest out
+ * const buf = lightCollection<string>({ maxSize: 1000 });
  *
- * const n = mem.add("The sky is blue", { importance: 0.8, tags: ["fact"] });
- * n!.touch(); // update accessedAt + accessCount
- * mem.topK(5); // top 5 by decay score
+ * // LRU cache — least-recently-used out
+ * const cache = lightCollection<string>({ maxSize: 100, eviction: "lru" });
  * ```
  *
- * @example Dedup with admissionPolicy
- * ```ts
- * const mem = collection<string>({
- *   admissionPolicy: (incoming, nodes) => {
- *     const dup = nodes.find(n => n.content.get() === incoming);
- *     if (dup) return { action: "update", targetId: dup.id, content: incoming };
- *     return { action: "admit" };
- *   },
- * });
- * ```
- *
- * @example Auto-prune stale nodes with forgetPolicy
- * ```ts
- * const mem = collection<string>({
- *   forgetPolicy: (node) => node.meta.get().importance < 0.1,
- * });
- * // Stale nodes pruned before each add(); call mem.gc() for on-demand cleanup.
- * ```
- *
- * @seeAlso [memoryNode](./memoryNode) — individual memory node, [vectorIndex](./vectorIndex) — HNSW semantic search
+ * @seeAlso [collection](./collection) — decay-scored eviction, [memoryNode](./memoryNode) — individual memory node
  */
-export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<T> {
-	const id = ++collectionCounter;
+export function lightCollection<T>(opts?: LightCollectionOptions<T>): CollectionInterface<T> {
+	const id = ++lightCollectionCounter;
 	const maxSize = opts?.maxSize ?? Infinity;
+	const evictionType = opts?.eviction ?? "fifo";
 	const defaultWeights = opts?.weights ?? {};
 	const admissionPolicy = opts?.admissionPolicy;
 	const forgetPolicy = opts?.forgetPolicy;
@@ -110,30 +75,19 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 
 	// Tag index — O(1) tag-based lookups via reactiveIndex
 	const _tagIndex = reactiveIndex();
-	// Per-node effect disposers for tag change tracking
 	const _tagEffects = new Map<string, () => void>();
 
-	// Reactive eviction policy — O(log n) heap, updated on every meta push.
-	// Subscribes directly to node.meta via effect — no intermediate derived needed.
-	// computeScore runs inline in the effect handler with collection's weights
-	// (node.scoreStore uses node-level empty weights — not the same thing).
-	const _evictionPolicy =
-		maxSize < Infinity
-			? reactiveScored(
-					(nodeId: string) => _nodes.get(nodeId)!.meta,
-					(meta) => computeScore(meta, defaultWeights),
-				)
-			: null;
+	// Simple eviction — no per-node subscriptions, no reactive scoring
+	const _evictionPolicy: EvictionPolicy<string> | null =
+		maxSize < Infinity ? (evictionType === "lru" ? lru<string>() : fifo<string>()) : null;
 
-	// Version-gated reactive stores — bump version on structural change,
-	// derived stores materialize lazily from the version (like reactiveMap).
-	// Avoids Array.from() allocation on every add/remove.
-	const _version = state<number>(0, { name: `collection-${id}:ver` });
+	// Version-gated reactive stores
+	const _version = state<number>(0, { name: `lightCollection-${id}:ver` });
 	const _nodesStore = derived([_version], () => Array.from(_nodes.values()), {
-		name: `collection-${id}:nodes`,
+		name: `lightCollection-${id}:nodes`,
 	}) as Store<MemoryNodeInterface<T>[]>;
 	const _sizeStore = derived([_version], () => _nodes.size, {
-		name: `collection-${id}:size`,
+		name: `lightCollection-${id}:size`,
 	});
 
 	let destroyed = false;
@@ -143,10 +97,6 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 	}
 
 	function _trackTags(node: MemoryNodeInterface<T>): void {
-		// Subscribe to node.meta — fires when this node's tags change.
-		// Uses subscribe (callbag sink) instead of effect — lighter weight,
-		// no DIRTY/RESOLVED overhead, no cleanup return handling.
-		// Initial tag index update is done inline after subscribe.
 		const currentTags = Array.from(node.meta.get().tags);
 		_tagIndex.update(node.id, currentTags);
 		const sub = subscribe(node.meta, (meta) => {
@@ -214,9 +164,8 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 						if (!target)
 							throw new Error(`Admission update target "${decision.targetId}" not found`);
 						target.update(decision.content);
-						// update/merge don't change collection structure — no version bump needed.
-						// Node content reactivity flows through the node's own content/meta stores.
-						// Use gc() for explicit forget-policy cleanup.
+						// LRU: touch on update — counts as access
+						_evictionPolicy?.touch(target.id);
 						return target;
 					}
 
@@ -225,16 +174,17 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 						if (!target) throw new Error(`Admission merge target "${decision.targetId}" not found`);
 						const merged = decision.reducer(target.content.get(), content);
 						target.update(merged);
+						// LRU: touch on merge — counts as access
+						_evictionPolicy?.touch(target.id);
 						return target;
 					}
 
 					default:
-						break; // fall through to normal add (including "admit")
+						break; // fall through to normal add
 				}
 			}
 
-			// Run forget pass before insertion — cleans up stale existing nodes
-			// without risking immediately forgetting the node we're about to admit.
+			// Run forget pass before insertion
 			if (forgetPolicy) _runForgetPolicy();
 
 			const node = memoryNode<T>(content, nodeOpts);
@@ -259,7 +209,10 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 		},
 
 		get(nodeId: string): MemoryNodeInterface<T> | undefined {
-			return _nodes.get(nodeId);
+			const node = _nodes.get(nodeId);
+			// LRU: touch on read — counts as access. FIFO touch is a no-op.
+			if (node) _evictionPolicy?.touch(nodeId);
+			return node;
 		},
 
 		has(nodeId: string): boolean {
@@ -305,7 +258,6 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 			nodeOpts?: MemoryNodeOptions,
 		): MemoryNodeInterface<T> {
 			if (destroyed) throw new Error("Collection is destroyed");
-			// Deduplicate to prevent double-destroy on repeated IDs
 			const uniqueIds = Array.from(new Set(nodeIds));
 			const sourceNodes: MemoryNodeInterface<T>[] = [];
 			for (const nid of uniqueIds) {
@@ -314,10 +266,8 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 			}
 			if (sourceNodes.length === 0) throw new Error("No valid nodes to summarize");
 
-			// Run reducer before any teardown — if it throws, source nodes remain intact
 			const summarized = reducer(sourceNodes);
 
-			// Wrap entire mutation in one batch — single atomic reactive update wave
 			let newNode!: MemoryNodeInterface<T>;
 			batch(() => {
 				for (const node of sourceNodes) {
@@ -326,9 +276,6 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 					node.destroy();
 					_nodes.delete(node.id);
 				}
-				// Run forget pass on survivors after source removal, before inserting
-				// the consolidated node — keeps the new node safe from being immediately
-				// forgotten by the policy.
 				if (forgetPolicy) _runForgetPolicy();
 				newNode = memoryNode<T>(summarized, nodeOpts);
 				_nodes.set(newNode.id, newNode);
@@ -351,13 +298,9 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 			if (destroyed) return;
 			destroyed = true;
 			_evictionPolicy?.clear();
-			// Dispose tag-tracking effects — local cleanup alongside node teardown.
 			for (const dispose of _tagEffects.values()) dispose();
 			_tagEffects.clear();
 			_tagIndex.destroy();
-			// Clear nodes first so END subscribers observe an empty collection.
-			// teardown(_version) cascades END to _nodesStore, _sizeStore,
-			// and any external subscribers — they must see _nodes already empty.
 			batch(() => {
 				for (const node of _nodes.values()) node.destroy();
 				_nodes.clear();

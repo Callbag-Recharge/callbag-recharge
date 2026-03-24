@@ -142,6 +142,7 @@ const REGISTRY = {
 
 	// Memory
 	collection: "src/memory/collection.ts",
+	lightCollection: "src/memory/lightCollection.ts",
 	memoryNode: "src/memory/node.ts",
 	knowledgeGraph: "src/memory/knowledgeGraph.ts",
 	vectorIndex: "src/memory/vectorIndex.ts",

@@ -4,6 +4,7 @@ import { subscribe } from "../../core/subscribe";
 import { collection } from "../../memory/collection";
 import { computeScore, decay } from "../../memory/decay";
 import { knowledgeGraph } from "../../memory/knowledgeGraph";
+import { lightCollection } from "../../memory/lightCollection";
 import { memoryNode } from "../../memory/node";
 import type { MemoryMeta } from "../../memory/types";
 
@@ -1233,5 +1234,366 @@ describe("knowledgeGraph — Phase 6c: Lifecycle", () => {
 		const kg = knowledgeGraph<string>();
 		kg.destroy();
 		kg.destroy(); // should not throw
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6e: Light Collection — FIFO/LRU eviction
+// ---------------------------------------------------------------------------
+describe("lightCollection — Phase 6e: FIFO/LRU eviction", () => {
+	// --- Basic CRUD (same interface as collection) ---
+
+	it("add/remove/get/has", () => {
+		const col = lightCollection<string>();
+
+		const n1 = col.add("hello", { id: "n1" });
+		col.add("world", { id: "n2" });
+
+		expect(col.has("n1")).toBe(true);
+		expect(col.get("n1")).toBe(n1);
+		expect(col.size.get()).toBe(2);
+
+		expect(col.remove("n1")).toBe(true);
+		expect(col.has("n1")).toBe(false);
+		expect(col.size.get()).toBe(1);
+
+		expect(col.remove("nonexistent")).toBe(false);
+		col.destroy();
+	});
+
+	it("nodes store is reactive", () => {
+		const col = lightCollection<number>();
+		const log: number[] = [];
+		const dispose = effect([col.size], () => {
+			log.push(col.size.get());
+		});
+
+		col.add(1);
+		col.add(2);
+		col.add(3);
+
+		expect(log).toEqual([0, 1, 2, 3]);
+		dispose();
+		col.destroy();
+	});
+
+	it("query filters nodes", () => {
+		const col = lightCollection<number>();
+		col.add(1, { tags: ["odd"] });
+		col.add(2, { tags: ["even"] });
+		col.add(3, { tags: ["odd"] });
+
+		const odds = col.query((n) => n.meta.get().tags.has("odd"));
+		expect(odds).toHaveLength(2);
+		expect(odds.map((n) => n.content.get())).toEqual([1, 3]);
+		col.destroy();
+	});
+
+	it("byTag returns nodes with specific tag", () => {
+		const col = lightCollection<string>();
+		col.add("a", { tags: ["x"] });
+		col.add("b", { tags: ["y"] });
+		col.add("c", { tags: ["x", "y"] });
+
+		const xNodes = col.byTag("x");
+		expect(xNodes).toHaveLength(2);
+		expect(xNodes.map((n) => n.content.get()).sort()).toEqual(["a", "c"]);
+		col.destroy();
+	});
+
+	it("topK returns highest-scored nodes", () => {
+		const col = lightCollection<string>();
+		col.add("low", { importance: 0.1 });
+		col.add("mid", { importance: 0.5 });
+		col.add("high", { importance: 0.9 });
+
+		const top = col.topK(2, { recency: 0, frequency: 0, importance: 1 });
+		expect(top).toHaveLength(2);
+		expect(top[0].content.get()).toBe("high");
+		expect(top[1].content.get()).toBe("mid");
+		col.destroy();
+	});
+
+	// --- FIFO eviction ---
+
+	it("FIFO evicts oldest-inserted node on overflow", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "fifo",
+		});
+
+		col.add("first", { id: "a" });
+		col.add("second", { id: "b" });
+		expect(col.size.get()).toBe(2);
+
+		col.add("third", { id: "c" });
+		expect(col.size.get()).toBe(2);
+		expect(col.has("a")).toBe(false); // oldest evicted
+		expect(col.has("b")).toBe(true);
+		expect(col.has("c")).toBe(true);
+		col.destroy();
+	});
+
+	it("FIFO ignores access — evicts by insertion order", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "fifo",
+		});
+
+		col.add("first", { id: "a" });
+		col.add("second", { id: "b" });
+
+		// Access "a" — should NOT prevent its eviction under FIFO
+		col.get("a");
+
+		col.add("third", { id: "c" });
+		expect(col.has("a")).toBe(false); // still evicted despite access
+		expect(col.has("b")).toBe(true);
+		expect(col.has("c")).toBe(true);
+		col.destroy();
+	});
+
+	it("FIFO defaults when no eviction option specified", () => {
+		const col = lightCollection<string>({ maxSize: 2 });
+
+		col.add("first", { id: "a" });
+		col.add("second", { id: "b" });
+		col.add("third", { id: "c" });
+
+		// Default is FIFO — oldest evicted
+		expect(col.has("a")).toBe(false);
+		expect(col.has("c")).toBe(true);
+		col.destroy();
+	});
+
+	// --- LRU eviction ---
+
+	it("LRU evicts least-recently-accessed node on overflow", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "lru",
+		});
+
+		col.add("first", { id: "a" });
+		col.add("second", { id: "b" });
+
+		// Access "a" — makes "b" the LRU
+		col.get("a");
+
+		col.add("third", { id: "c" });
+		expect(col.has("a")).toBe(true); // accessed recently
+		expect(col.has("b")).toBe(false); // LRU — evicted
+		expect(col.has("c")).toBe(true);
+		col.destroy();
+	});
+
+	it("LRU evicts by insertion order when no access", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "lru",
+		});
+
+		col.add("first", { id: "a" });
+		col.add("second", { id: "b" });
+
+		// No access — LRU falls back to insertion order
+		col.add("third", { id: "c" });
+		expect(col.has("a")).toBe(false);
+		expect(col.has("b")).toBe(true);
+		expect(col.has("c")).toBe(true);
+		col.destroy();
+	});
+
+	it("LRU touches on admission update/merge", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "lru",
+			admissionPolicy: (incoming, nodes) => {
+				const dup = nodes.find((n) => n.content.get() === incoming);
+				if (dup) return { action: "update", targetId: dup.id, content: `${incoming}!` };
+				return { action: "admit" };
+			},
+		});
+
+		col.add("a", { id: "x" });
+		col.add("b", { id: "y" });
+
+		// Update "x" via admission policy — touches it in LRU
+		col.add("a");
+
+		// Now "y" is LRU, "x" was just touched
+		col.add("c", { id: "z" });
+		expect(col.has("x")).toBe(true);
+		expect(col.has("y")).toBe(false); // LRU evicted
+		expect(col.has("z")).toBe(true);
+		col.destroy();
+	});
+
+	// --- Shared features (admission, forget, summarize, gc, destroy) ---
+
+	it("admissionPolicy works", () => {
+		const col = lightCollection<string>({
+			admissionPolicy: () => ({ action: "reject" }),
+		});
+
+		const result = col.add("nope");
+		expect(result).toBeUndefined();
+		expect(col.size.get()).toBe(0);
+		col.destroy();
+	});
+
+	it("forgetPolicy runs before add", () => {
+		const col = lightCollection<string>({
+			maxSize: 10,
+			forgetPolicy: (node) => node.meta.get().importance < 0.2,
+		});
+
+		col.add("will-be-forgotten", { importance: 0.1, id: "low" });
+		col.add("keeper", { importance: 0.9, id: "high" });
+
+		// Adding a third triggers forget policy — low-importance node pruned
+		col.add("trigger", { id: "trigger" });
+		expect(col.has("low")).toBe(false);
+		expect(col.has("high")).toBe(true);
+		expect(col.has("trigger")).toBe(true);
+		col.destroy();
+	});
+
+	it("gc() runs forgetPolicy on demand", () => {
+		const col = lightCollection<string>({
+			forgetPolicy: (node) => node.meta.get().importance < 0.2,
+		});
+
+		col.add("high", { importance: 0.9, id: "high" });
+		// Demote importance after add — forgetPolicy didn't see it as low yet
+		col.get("high")!.setImportance(0.1);
+
+		const removed = col.gc();
+		expect(removed).toBe(1);
+		expect(col.has("high")).toBe(false);
+		col.destroy();
+	});
+
+	it("summarize consolidates nodes", () => {
+		const col = lightCollection<string>();
+		col.add("hello", { id: "a" });
+		col.add("world", { id: "b" });
+
+		const summary = col.summarize(["a", "b"], (nodes) =>
+			nodes.map((n) => n.content.get()).join(" "),
+		);
+
+		expect(summary.content.get()).toBe("hello world");
+		expect(col.has("a")).toBe(false);
+		expect(col.has("b")).toBe(false);
+		expect(col.size.get()).toBe(1);
+		col.destroy();
+	});
+
+	it("destroy tears down all nodes and cascades END", () => {
+		const col = lightCollection<string>();
+		col.add("a");
+		col.add("b");
+
+		let sizeEnded = false;
+		subscribe(col.size, () => {}, {
+			onEnd: () => {
+				sizeEnded = true;
+			},
+		});
+
+		col.destroy();
+		expect(sizeEnded).toBe(true);
+		expect(() => col.add("c")).toThrow("Collection is destroyed");
+	});
+
+	it("double destroy is safe", () => {
+		const col = lightCollection<string>();
+		col.destroy();
+		col.destroy(); // should not throw
+	});
+
+	it("tagIndex updates on node tag changes", () => {
+		const col = lightCollection<string>();
+		const n = col.add("data", { id: "n1", tags: ["a"] });
+
+		expect(col.byTag("a")).toHaveLength(1);
+		n.tag("b");
+		expect(col.byTag("b")).toHaveLength(1);
+		n.untag("a");
+		expect(col.byTag("a")).toHaveLength(0);
+		col.destroy();
+	});
+
+	it("tagIndex cleans up when node is removed", () => {
+		const col = lightCollection<string>();
+		col.add("data", { id: "n1", tags: ["x"] });
+
+		expect(col.tagIndex.get("x").has("n1")).toBe(true);
+		col.remove("n1");
+		expect(col.tagIndex.get("x").size).toBe(0);
+		col.destroy();
+	});
+
+	it("no maxSize means no eviction", () => {
+		const col = lightCollection<string>();
+		for (let i = 0; i < 100; i++) col.add(`item-${i}`);
+		expect(col.size.get()).toBe(100);
+		col.destroy();
+	});
+
+	it("remove by node reference", () => {
+		const col = lightCollection<string>();
+		const n = col.add("test");
+		expect(col.remove(n)).toBe(true);
+		expect(col.size.get()).toBe(0);
+		col.destroy();
+	});
+
+	it("FIFO eviction + forgetPolicy: forget prunes before eviction", () => {
+		const col = lightCollection<string>({
+			maxSize: 3,
+			eviction: "fifo",
+			forgetPolicy: (node) => node.meta.get().importance < 0.2,
+		});
+
+		col.add("a", { id: "a", importance: 0.9 });
+		col.add("b", { id: "b", importance: 0.9 });
+		col.add("c", { id: "c", importance: 0.9 });
+		expect(col.size.get()).toBe(3);
+
+		// Demote "a" so forgetPolicy will remove it
+		col.get("a")!.setImportance(0.1);
+
+		// Adding "d" triggers forgetPolicy first (removes "a"), then insert.
+		// No eviction needed — size stays at 3.
+		col.add("d", { id: "d", importance: 0.9 });
+		expect(col.size.get()).toBe(3);
+		expect(col.has("a")).toBe(false); // pruned by forgetPolicy
+		expect(col.has("b")).toBe(true); // NOT evicted — forgetPolicy freed space
+		expect(col.has("c")).toBe(true);
+		expect(col.has("d")).toBe(true);
+		col.destroy();
+	});
+
+	it("LRU eviction + forgetPolicy: eviction respects access after forget", () => {
+		const col = lightCollection<string>({
+			maxSize: 2,
+			eviction: "lru",
+			forgetPolicy: (node) => node.meta.get().importance < 0.2,
+		});
+
+		col.add("a", { id: "a", importance: 0.9 });
+		col.add("b", { id: "b", importance: 0.9 });
+
+		// Access "a" to make "b" the LRU
+		col.get("a");
+
+		// Add "c" — no forget candidates, so eviction kicks in. "b" is LRU.
+		col.add("c", { id: "c", importance: 0.9 });
+		expect(col.has("a")).toBe(true);
+		expect(col.has("b")).toBe(false); // LRU evicted
+		expect(col.has("c")).toBe(true);
+		col.destroy();
 	});
 });

@@ -164,6 +164,15 @@ export interface CollectionOptions<T = unknown> {
 }
 
 // ---------------------------------------------------------------------------
+// Light Collection (Phase 6e)
+// ---------------------------------------------------------------------------
+
+export interface LightCollectionOptions<T = unknown> extends CollectionOptions<T> {
+	/** Eviction strategy when maxSize is reached. Default: "fifo". */
+	eviction?: "fifo" | "lru";
+}
+
+// ---------------------------------------------------------------------------
 // Decay
 // ---------------------------------------------------------------------------
 

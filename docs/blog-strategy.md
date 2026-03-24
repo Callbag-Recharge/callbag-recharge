@@ -65,13 +65,15 @@ Each "engineering evolution" post follows this pattern:
 | 2 | **The Protocol That Already Solved Your Problem** | `site/blog/02-the-protocol-that-already-solved-your-problem.md` | Done |
 | 3 | **Signals Are Not Enough** | `site/blog/03-signals-are-not-enough.md` | Done |
 
-#### Arc 2: Architecture v1 — The Naive First Attempt
+#### Arc 2: Architecture v1 — The Naive First Attempt ✅ SHIPPED (March 24, 2026)
 
-| # | Title | Source Material |
-|---|-------|----------------|
-| 4 | **Push Dirty, Pull Values: Our First Diamond Solution** | `architecture-v1.md` — dual-channel design |
-| 5 | **Why Explicit Dependencies Beat Magic Tracking** | Session 05b247c1 — pure callbag refactor, explicit deps |
-| 6 | **The Inspector Pattern: Observability as a First-Class Citizen** | WeakMap metadata, zero per-store cost design |
+| # | Title | File | Status |
+|---|-------|------|--------|
+| 4 | **Push Dirty, Pull Values: Our First Diamond Solution** | `site/blog/04-push-dirty-pull-values-our-first-diamond-solution.md` | Done |
+| 5 | **Why Explicit Dependencies Beat Magic Tracking** | `site/blog/05-why-explicit-dependencies-beat-magic-tracking.md` | Done |
+| 6 | **The Inspector Pattern: Observability as a First-Class Citizen** | `site/blog/06-the-inspector-pattern-observability-as-first-class-citizen.md` | Done |
+
+Source material: `src/archive/docs/architecture-v1.md`; session `47f1a07f` (explicit deps); `SESSION-inspector-hooks-wiring.md` + v1/v3 Inspector sections (WeakMap, hooks, `observe()`).
 
 #### Arc 3: Architecture v2 — The Great Unification
 

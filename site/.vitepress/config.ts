@@ -615,6 +615,24 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							text: "Arc 2: Architecture v1",
+							collapsed: false,
+							items: [
+								{
+									text: "4. Push Dirty, Pull Values: Our First Diamond Solution",
+									link: "/blog/04-push-dirty-pull-values-our-first-diamond-solution",
+								},
+								{
+									text: "5. Why Explicit Dependencies Beat Magic Tracking",
+									link: "/blog/05-why-explicit-dependencies-beat-magic-tracking",
+								},
+								{
+									text: "6. The Inspector Pattern: Observability as a First-Class Citizen",
+									link: "/blog/06-the-inspector-pattern-observability-as-first-class-citizen",
+								},
+							],
+						},
 					],
 				},
 			],
