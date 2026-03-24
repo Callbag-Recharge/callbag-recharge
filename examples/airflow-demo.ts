@@ -67,6 +67,16 @@ const n = {
 export const running = state(false, { name: "pipeline:running" });
 export const runCount = state(0, { name: "pipeline:runCount" });
 
+type BankSnapshot = { accountCount: number; totalBalance: number; currency: "USD" };
+type CardSnapshot = { cardCount: number; totalOutstanding: number; currency: "USD" };
+type AggregateSnapshot = {
+	netWorth: number;
+	liabilities: number;
+	assetToDebtRatio: number;
+};
+type AnomalySnapshot = { flagged: boolean; reason: string; score: number };
+type BatchWriteSnapshot = { rows: number; table: string };
+
 // ---------------------------------------------------------------------------
 // Declarative pipeline wiring via pipeline() + task()
 // ---------------------------------------------------------------------------
@@ -86,7 +96,14 @@ const cronDef = task(
 
 const fetchBankDef = task(
 	["cron"],
-	async (signal, [_v]) => n.fetchBank.simulate([800, 2000], 0.2, signal),
+	async (signal, [_v]): Promise<BankSnapshot> => {
+		await n.fetchBank.simulate([800, 2000], 0.2, signal);
+		return {
+			accountCount: 3 + Math.floor(Math.random() * 3),
+			totalBalance: 8500 + Math.floor(Math.random() * 4000),
+			currency: "USD",
+		};
+	},
 	{
 		name: "fetchBank",
 		skip: () => !n.fetchBank.breaker.canExecute(),
@@ -104,7 +121,14 @@ const fetchBankDef = task(
 
 const fetchCardsDef = task(
 	["cron"],
-	async (signal, [_v]) => n.fetchCards.simulate([600, 1500], 0.15, signal),
+	async (signal, [_v]): Promise<CardSnapshot> => {
+		await n.fetchCards.simulate([600, 1500], 0.15, signal);
+		return {
+			cardCount: 2 + Math.floor(Math.random() * 3),
+			totalOutstanding: 1200 + Math.floor(Math.random() * 2200),
+			currency: "USD",
+		};
+	},
 	{
 		name: "fetchCards",
 		skip: () => !n.fetchCards.breaker.canExecute(),
@@ -122,11 +146,22 @@ const fetchCardsDef = task(
 
 const aggregateDef = task(
 	["fetchBank", "fetchCards"],
-	async (signal, [bankVal, cardsVal]) => {
+	async (signal, [bankVal, cardsVal]): Promise<AggregateSnapshot> => {
+		const bank = bankVal as BankSnapshot;
+		const cards = cardsVal as CardSnapshot;
 		n.aggregate.log.append(
-			`[START] Merging: bank=${bankVal ? "ok" : "fail"}, cards=${cardsVal ? "ok" : "fail"}`,
+			`[START] Merging: bank=$${bank.totalBalance}, cards=$${cards.totalOutstanding}`,
 		);
-		return n.aggregate.simulate([300, 800], 0.05, signal);
+		await n.aggregate.simulate([300, 800], 0.05, signal);
+		const netWorth = bank.totalBalance - cards.totalOutstanding;
+		const liabilities = cards.totalOutstanding;
+		const ratio = liabilities === 0 ? Number.POSITIVE_INFINITY : bank.totalBalance / liabilities;
+		n.aggregate.log.append(`[VALUE] netWorth=$${netWorth}, debtRatio=${ratio.toFixed(2)}`);
+		return {
+			netWorth,
+			liabilities,
+			assetToDebtRatio: ratio,
+		};
 	},
 	{
 		name: "aggregate",
@@ -139,7 +174,17 @@ const aggregateDef = task(
 
 const anomalyDef = task(
 	["aggregate"],
-	async (signal, [_v]) => n.anomaly.simulate([200, 600], 0.1, signal),
+	async (signal, [aggVal]): Promise<AnomalySnapshot> => {
+		const agg = aggVal as AggregateSnapshot;
+		await n.anomaly.simulate([200, 600], 0.1, signal);
+		const ratioScore = Math.min(1, agg.assetToDebtRatio / 4);
+		const netWorthPenalty = agg.netWorth < 5000 ? 0.35 : 0;
+		const score = Math.max(0, Math.min(1, 1 - ratioScore + netWorthPenalty));
+		const flagged = score > 0.55;
+		const reason = flagged ? "Debt ratio high or net worth low" : "Within expected range";
+		n.anomaly.log.append(`[VALUE] score=${score.toFixed(2)} flagged=${flagged}`);
+		return { flagged, reason, score };
+	},
 	{
 		name: "anomaly",
 		onStart: () => n.anomaly.log.append("[START] Running..."),
@@ -148,7 +193,13 @@ const anomalyDef = task(
 
 const batchWriteDef = task(
 	["aggregate"],
-	async (signal, [_v]) => n.batchWrite.simulate([400, 1000], 0.08, signal),
+	async (signal, [aggVal]): Promise<BatchWriteSnapshot> => {
+		const agg = aggVal as AggregateSnapshot;
+		await n.batchWrite.simulate([400, 1000], 0.08, signal);
+		const rows = agg.netWorth < 10000 ? 2 : 1;
+		n.batchWrite.log.append(`[VALUE] wrote ${rows} rows`);
+		return { rows, table: "finance_snapshot" };
+	},
 	{
 		name: "batchWrite",
 		onStart: () => n.batchWrite.log.append("[START] Running..."),
@@ -157,7 +208,16 @@ const batchWriteDef = task(
 
 const alertDef = task(
 	["anomaly"],
-	async (signal, [_v]) => n.alert.simulate([100, 300], 0.02, signal),
+	async (signal, [anomalyVal]): Promise<string> => {
+		const anomaly = anomalyVal as AnomalySnapshot;
+		await n.alert.simulate([100, 300], 0.02, signal);
+		if (!anomaly.flagged) {
+			n.alert.log.append("[VALUE] No alert sent");
+			return "no-alert";
+		}
+		n.alert.log.append(`[VALUE] Alert sent (${anomaly.reason})`);
+		return `alert:${anomaly.reason}`;
+	},
 	{
 		name: "alert",
 		onStart: () => n.alert.log.append("[START] Running..."),
