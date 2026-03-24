@@ -1,3 +1,10 @@
+# [0.22.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.21.0...v0.22.0) (2026-03-24)
+
+
+### Features
+
+* implement 6b ([d5232db](https://github.com/Callbag-Recharge/callbag-recharge/commit/d5232dbd66184105cb5377247c5f0cb2af5e87ec))
+
 # [0.21.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.20.0...v0.21.0) (2026-03-24)
 
 
