@@ -4,8 +4,6 @@
 
 export type { FromHTTPOptions, HTTPStore } from "./http";
 export { fromHTTP } from "./http";
-export type { GenerateOptions, LLMMessage, LLMOptions, LLMStore, LLMTokenUsage } from "./llm";
-export { fromLLM } from "./llm";
 export type {
 	MCPClientLike,
 	MCPOptions,

@@ -6,7 +6,7 @@
 
 ## What's Shipped
 
-170+ modules across 12 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
+170+ modules across 13 categories. Full inventory in `src/archive/docs/roadmap-v0.4.0-shipped.md`.
 
 | Category | Count | Highlights |
 |----------|------:|------------|
@@ -18,8 +18,9 @@
 | Messaging | 5 | `topic`, `subscription`, `repeatPublish`, `jobQueue`, `jobFlow` — Pulsar-inspired topic/subscription + job queues |
 | Memory | 5 | `collection`, `lightCollection`, `decay`, `node`, `vectorIndex` (HNSW) |
 | Orchestrate | 17 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop`, `forEach`, `onFailure`, `wait`, `subPipeline` |
-| Patterns | 15 | `agentLoop`, `chatStream`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `toolCallState`, `focusManager`, `hybridRoute`, `selection`, `textBuffer`, … |
-| Adapters | 6 | `fromHTTP`, `fromLLM`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
+| Patterns | 10 | `createStore`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `focusManager`, `selection`, `textBuffer`, `rateLimiter` |
+| Adapters | 5 | `fromHTTP`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
+| AI | 6 | `chatStream`, `agentLoop`, `toolCallState`, `memoryStore`, `hybridRoute`, `fromLLM` — Tier 5 surface; barrel also re-exports `checkpoint`, `indexedDBAdapter`, `tokenTracker` from `utils/` |
 | Worker | 4 | `workerBridge`, `workerSelf`, `WorkerTransport`, wire protocol |
 | Compat | 8 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`/`useSubscribeRecord`), React (`useStore`/`useSubscribe`), Svelte (`useSubscribe`), Solid (`useSubscribe`) |
 
@@ -168,15 +169,15 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 > primitives. Consolidate scattered AI patterns into one import path so H2 (and users)
 > never need to reach into `raw/`, `core/`, `extra/`, or `utils/` for AI app development.
 >
-> **Depends on:** Phase 6 (memory maturation), Phase 7a-7e (adapters complete).
+> **Depends on:** Phase 6 (memory maturation). Phase 7a-7e (Redis, Postgres notify, Kafka, gRPC, NATS) are **independent** adapter backlog items — they extend `adapters/` but are **not** prerequisites for shipping `ai/` (7.1-0 onward) or H2.
 >
 > **Tier:** 5 (ai) — the highest surface layer, above `patterns/`, `adapters/`, `compat/`.
 > Can import from all lower tiers + `patterns/`, `adapters/`, `compat/`, `memory/`, `worker/`,
 > `orchestrate/`, `messaging/`, `data/`.
 
-#### 7.1-0: Migrate existing AI primitives to `ai/`
+#### ~~7.1-0~~: ~~Migrate existing AI primitives to `ai/`~~ — **Shipped**
 
-Move these from their current locations. Pre-1.0, no backward compat needed.
+Moved from their previous locations to `src/ai/`. `ai/index.ts` barrel exports all 6 primitives plus `checkpoint`, `indexedDBAdapter`, `tokenTracker` re-exported from `utils/`. New subpath exports: `callbag-recharge/ai`, `callbag-recharge/ai/chatStream`, etc.
 
 | Source | Primitive | New location |
 |--------|-----------|-------------|
@@ -193,8 +194,8 @@ Move these from their current locations. Pre-1.0, no backward compat needed.
 
 | # | Primitive | What | Effort |
 |---|-----------|------|--------|
-| 7.1-1 | `docIndex` | FTS5 trigram search over pre-built wa-sqlite DB. `docIndex({ db: url })` → `{ search(query): Store<SearchResult[]>, loaded: Store<boolean> }`. Wraps wa-sqlite WASM. Read-only — DB built at VitePress build time. | M |
-| 7.1-2 | `embeddingIndex` | In-browser semantic search. Loads small embedding model via Transformers.js (`all-MiniLM-L6-v2`, ~23MB). `embeddingIndex({ model, vectors: url })` → `{ search(query, k): Store<ScoredDoc[]> }`. Pre-computed embeddings shipped as binary. Lazy-loaded alongside LLM (Tier 2). | L |
+| ~~7.1-1~~ | ~~`docIndex`~~ | **Shipped** — FTS5 trigram search over pre-built wa-sqlite DB. `docIndex({ db })` → `{ search(), results, loaded, error, destroy() }`. Wraps wa-sqlite WASM (peer dep, dynamic import). FTS5 phrase matching with double-quote escaping. `teardown()` on destroy. | — |
+| ~~7.1-2~~ | ~~`embeddingIndex`~~ | **Shipped** — In-browser semantic search. Loads embedding model via Transformers.js (peer dep, dynamic import). Pre-computed vectors from binary file. Uses `vectorIndex` (HNSW) from `memory/`. Generation counter prevents stale async results (cancellableAction pattern). `teardown()` on destroy. | — |
 | 7.1-3 | `ragPipeline` | `ragPipeline({ docSearch, semanticSearch?, memory?, systemPrompt })` — wires retrieve→augment→generate. Reactive: re-derives context when any source updates. Merges FTS5 + embedding results, deduplicates, injects into LLM prompt with citations. Composes `docIndex` + `embeddingIndex` + `fromLLM` + `memoryStore`. | M |
 | 7.1-4 | `conversationSummary` | Auto-summarize conversation when token count exceeds threshold. Uses the loaded LLM to compress history into a rolling summary. `conversationSummary({ chat, llm, maxTokens })` → `Store<string>`. Feeds into `ragPipeline` as context. | M |
 | 7.1-5 | `systemPromptBuilder` | `systemPromptBuilder({ sections: Array<{ name, content: Store<string>, maxTokens? }> })` — reactive derived that assembles final system prompt from multiple sources. Manages token budget allocation across sections (library docs, user memories, search results, rules). | S |

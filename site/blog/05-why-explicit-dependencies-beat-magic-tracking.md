@@ -19,7 +19,7 @@ Every reactive library makes a fork in the road:
 
 Implicit tracking feels like magic. Explicit deps feel like ceremony. We chose ceremony.
 
-This post explains why — and what we gained when we refactored the core around **pure callbag wiring** and **static dep arrays** (the direction captured in our design archive under the library-comparison work and the early v1 architecture doc).
+This post explains why — and what we gained when we refactored the core around **pure callbag wiring** and **static dep arrays**.
 
 ## The context: auto-tracking is seductive
 
@@ -50,7 +50,7 @@ That split is deliberate. Subscriptions are **graph structure**. Reads are **com
 
 ## Why we rejected "just track like Jotai"
 
-Our library comparison notes (session `47f1a07f`) spell out the trade-off in concrete terms.
+The trade-off shows up clearly when you compare APIs side by side — see [callbag-recharge vs Jotai](/comparisons/jotai) for the full picture.
 
 **Implicit tracking** needs a runtime mechanism: a stack or zone of "who is computing right now," hooks in `get()`, dependency diffing when the set changes, and rules for async boundaries. It is powerful — Jotai proves you can ship a minimal API on top — but when something goes wrong, you debug **the tracking implementation**, not just your business logic.
 
@@ -75,7 +75,7 @@ Fair criticism: `derived([a, b, c, d, e], ...)` is longer than letting the runti
 Our answer is not that boilerplate is good for its own sake. It is that **the graph is part of your program's contract**. When the contract is visible:
 
 - Static analysis and grep work.
-- Onboarding is faster — new contributors see edges without spelunking runtime behavior.
+- Onboarding is faster — new contributors see edges without digging through runtime internals.
 - Test doubles are trivial: pass `[mockA, mockB]`.
 
 ## The insight
@@ -90,7 +90,7 @@ We still use plain `.get()` inside computations. We did not throw away pull sema
 
 - [Push Dirty, Pull Values: Our First Diamond Solution](./04-push-dirty-pull-values-our-first-diamond-solution) — how pull chains interacted with explicit wiring in v1
 - [Signals Are Not Enough](./03-signals-are-not-enough) — where fine-grained UI signals stop and streaming begins
-- Archived comparison notes: `src/archive/docs/SESSION-47f1a07f-library-comparison.md`
+- [callbag-recharge vs Jotai](/comparisons/jotai) — implicit atoms vs explicit `derived([...], fn)` deps
 
 ---
 

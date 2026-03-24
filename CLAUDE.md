@@ -20,7 +20,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 callbag-recharge is a reactive state management library where **every store is a callbag source**. The callbag protocol (START=0, DATA=1, END=2, STATE=3) is the internal wiring; users interact through a simple `Store` interface (`get()`, `set()`, `source()`).
 
-**6 core primitives:** `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect`. 180+ modules across 12 categories (core, raw, extra, utils, data, messaging, memory, orchestrate, patterns, worker, adapters, compat). See [docs/architecture.md](docs/architecture.md) for the full design (protocol, signal handling, lifecycle signals, diamond resolution, output slot model, error handling).
+**6 core primitives:** `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect`. 180+ modules across 13 categories (core, raw, extra, utils, data, messaging, memory, orchestrate, patterns, worker, adapters, compat, ai). See [docs/architecture.md](docs/architecture.md) for the full design (protocol, signal handling, lifecycle signals, diamond resolution, output slot model, error handling).
 
 ## Key docs (read when relevant, not every conversation)
 

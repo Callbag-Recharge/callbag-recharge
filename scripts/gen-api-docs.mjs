@@ -50,6 +50,7 @@ const REGISTRY = {
 	firstValueFrom: "src/raw/firstValueFrom.ts",
 	fromTimer: "src/raw/fromTimer.ts",
 	fromNodeCallback: "src/raw/fromNodeCallback.ts",
+	latestAsync: "src/raw/latestAsync.ts",
 
 	// Extras — operators
 	map: "src/extra/map.ts",
@@ -154,8 +155,10 @@ const REGISTRY = {
 	reactiveList: "src/data/reactiveList.ts",
 	pubsub: "src/data/pubsub.ts",
 
-	// Adapters
-	fromLLM: "src/adapters/llm.ts",
+	// AI
+	fromLLM: "src/ai/fromLLM.ts",
+	docIndex: "src/ai/docIndex/index.ts",
+	embeddingIndex: "src/ai/embeddingIndex/index.ts",
 
 	// Orchestrate — workflow nodes
 	taskState: "src/orchestrate/taskState.ts",
@@ -166,7 +169,7 @@ const REGISTRY = {
 	approval: "src/orchestrate/approval.ts",
 	gate: "src/orchestrate/gate.ts",
 	executionLog: "src/orchestrate/executionLog.ts",
-	fileLogAdapter: "src/orchestrate/executionLogAdapters.ts",
+	fileLogAdapter: "src/orchestrate/executionLogAdapters.node.ts",
 	sqliteLogAdapter: "src/orchestrate/executionLogAdapters.ts",
 	indexedDBLogAdapter: "src/orchestrate/executionLogAdapters.ts",
 	onFailure: "src/orchestrate/onFailure.ts",

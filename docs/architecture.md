@@ -32,7 +32,7 @@
 
 13. **Compatibility targets: TC39 Signals, raw callbag, RxJS.**
 
-14. **High-level layers speak domain language, not callbag.** `core/`, `extra/`, `utils/`, and `data/` are low-level infrastructure — they expose callbag protocol, `Store` primitives, and reactive plumbing. Everything above (`orchestrate/`, `patterns/`, `adapters/`, `compat/`) must present user-friendly APIs with domain semantics (workflow steps, form fields, chat streams). If low-level internals must be accessible, lump them under an `inner` property (see `pipeline().inner` for the canonical example). Users should never need to understand DIRTY/RESOLVED, output slots, or bitmasks to use a high-level API.
+14. **High-level layers speak domain language, not callbag.** `core/`, `extra/`, `utils/`, and `data/` are low-level infrastructure — they expose callbag protocol, `Store` primitives, and reactive plumbing. Everything above (`orchestrate/`, `patterns/`, `adapters/`, `compat/`, `ai/`) must present user-friendly APIs with domain semantics (workflow steps, form fields, chat streams, LLM agents). If low-level internals must be accessible, lump them under an `inner` property (see `pipeline().inner` for the canonical example). Users should never need to understand DIRTY/RESOLVED, output slots, or bitmasks to use a high-level API.
 
 15. **Control flows through the graph, not around it.** Lifecycle events (reset, cancel, pause, resume) must propagate as TYPE 3 STATE signals through the reactive graph — never as imperative method calls that bypass the topology. When control bypasses the graph: new node types silently escape supervision, composition breaks (child pipelines miss parent resets), and the signal model has a hole where control and data diverge. AbortSignal bridges STATE signals to imperative async (fetch, setTimeout) but is never the primary control mechanism. **Litmus test:** if adding a new orchestrate node requires registering it in a flat list for lifecycle management, the design is wrong — the graph should carry the signal.
 
@@ -63,9 +63,9 @@ src/
 ├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval, gate, taskState, executionLog)
 ├── messaging/       ← Pulsar-inspired topic/subscription system (topic, subscription, repeatPublish)
 ├── memory/          ← agent memory primitives (collection, decay, node, vectorIndex, knowledgeGraph)
-├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
+├── patterns/        ← composed recipes (createStore, formField, textEditor, pagination, …)
 ├── worker/          ← reactive cross-thread bridge (workerBridge, workerSelf, WorkerTransport)
-├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)
+├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromMCP, …)
 ├── compat/          ← drop-in API wrappers + framework bindings (react, vue, signals, zustand, jotai, nanostores)
 ├── ai/              ← composed AI/LLM surface (chatStream, ragPipeline, docIndex, embeddingIndex, memoryStore, fromLLM, …)
 └── index.ts         ← public API barrel (core primitives only; other layers via subpath exports)
@@ -504,10 +504,12 @@ function withStatus<T>(store: Store<T>): Store<T> & {
 fromWebSocket(url)  // → Store<T> & { status, error, connectionState, send(), close() }
 fromHTTP(url)       // → Store<T> & { status, error, fetchCount, refetch(), stop() }
 fromWebhook(opts)   // → Store<T> & { status, error, requestCount, handler, listen(), close() }
-chatStream(opts)    // → Store<string> & { status, error, ... }
 
-// fromLLM and fromMCP use WithStatusStatus enum for status stores
+// AI surface (callbag-recharge/ai) — streaming / inference helpers use withStatus
+chatStream(opts)    // → Store<string> & { status, error, ... }
 fromLLM(opts)       // → Store<string> & { status, error, tokens, generate(), abort() }
+
+// fromMCP uses WithStatusStatus enum for status stores
 fromMCP(opts)       // → { tool() → Store<T> & { status, error, lastArgs, duration, call() } }
 
 // Domain wrappers add their own companions

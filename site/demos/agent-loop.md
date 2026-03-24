@@ -16,7 +16,7 @@ Observe → Plan → Act cycle with human-in-the-loop approval gate.
 
 | Primitive | Module | Role |
 |-----------|--------|------|
-| `agentLoop` | `patterns/agentLoop` | Reactive observe → plan → act loop |
+| `agentLoop` | `ai/agentLoop` | Reactive observe → plan → act loop |
 | `gate` | `orchestrate` | Human-in-the-loop approval queue |
 | `useSubscribe` | `compat/vue` | Bridge stores to Vue refs |
 

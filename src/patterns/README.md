@@ -2,24 +2,30 @@
 
 Composed recipes built on callbag-recharge's core primitives (`state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`), extras, and utils. Each pattern is a self-contained module in its own subfolder with documentation, implementation, and tests.
 
+**LLM and agent flows** (`chatStream`, `agentLoop`, `memoryStore`, `toolCallState`, `hybridRoute`, `fromLLM`) live in the [`ai/`](../ai/) tier — import from `callbag-recharge/ai` or `callbag-recharge/ai/<name>`, not from `patterns/`.
+
 ## Available Patterns
 
 | Pattern | Import | Description |
 |---------|--------|-------------|
 | [createStore](./createStore/) | `callbag-recharge/patterns/createStore` | Zustand-style single-store with state + actions. Diamond-safe `select()` selectors, Zustand StoreApi compat. |
-| [chatStream](./chatStream/) | `callbag-recharge/patterns/chatStream` | LLM streaming chat with message history, partial response tracking, stop/retry, rate limiting, system prompts. |
-| [memoryStore](./memoryStore/) | `callbag-recharge/patterns/memoryStore` | Three-tier AI memory: session (ephemeral), working (bounded FIFO), long-term (decay-scored). Cross-tier recall, promotion, tag-based search. |
-| [rateLimiter](./rateLimiter/) | `callbag-recharge/patterns/rateLimiter` | Reactive rate-limiting operator. Wraps a source with configurable strategy: `drop`, `queue`, or `error`. |
-| [undoRedo](./undoRedo/) | `callbag-recharge/patterns/undoRedo` | State with undo/redo history. Reactive `canUndo`/`canRedo` stores, `maxHistory` cap, equality dedup. |
-| [pagination](./pagination/) | `callbag-recharge/patterns/pagination` | Paginated data fetching with reactive state. Auto-cancel on page change, `hasNext`/`hasPrev`, `next`/`prev`/`goTo`. |
+| [commandBus](./commandBus/) | `callbag-recharge/patterns/commandBus` | Command pattern with undo support and reactive dispatch. |
+| [focusManager](./focusManager/) | `callbag-recharge/patterns/focusManager` | Focus tracking across elements for editor-style UIs. |
 | [formField](./formField/) | `callbag-recharge/patterns/formField` | Form field with sync + async validation. Reactive `value`/`error`/`dirty`/`touched`/`valid`/`validating` stores. |
+| [pagination](./pagination/) | `callbag-recharge/patterns/pagination` | Paginated data fetching with reactive state. Auto-cancel on page change, `hasNext`/`hasPrev`, `next`/`prev`/`goTo`. |
+| [rateLimiter](./rateLimiter/) | `callbag-recharge/patterns/rateLimiter` | Reactive rate-limiting operator. Wraps a source with configurable strategy: `drop`, `queue`, or `error`. |
+| [selection](./selection/) | `callbag-recharge/patterns/selection` | Multi-select state with reactive membership and range helpers. |
+| [textBuffer](./textBuffer/) | `callbag-recharge/patterns/textBuffer` | Text buffer with cursor/selection tracking for editors. |
+| [textEditor](./textEditor/) | `callbag-recharge/patterns/textEditor` | Full editor shell: buffer, focus, command bus, markdown commands, validation. |
+| [undoRedo](./undoRedo/) | `callbag-recharge/patterns/undoRedo` | State with undo/redo history. Reactive `canUndo`/`canRedo` stores, `maxHistory` cap, equality dedup. |
 
-## How Patterns Differ from Core, Extras, and Utils
+## How Patterns Differ from Core, Extras, Utils, and AI
 
 - **Core** (`callbag-recharge`) — The six primitives: `state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`. Minimal, protocol-level building blocks.
 - **Extras** (`callbag-recharge/extra`) — Operators and sources (map, filter, switchMap, debounce, etc.). Single-purpose, composable via `pipe()`.
 - **Utils** (`callbag-recharge/utils`) — Reusable building blocks: backoff, circuit breaker, rate limiter, cancellable action/stream, state machine, batch writer, connection health. Can be used standalone or by patterns.
 - **Patterns** (`callbag-recharge/patterns/<name>`) — Opinionated, higher-level recipes that compose core + extras + utils into ready-to-use solutions for common use cases.
+- **AI** (`callbag-recharge/ai`) — Highest surface layer for LLM streaming, agents, tool state, hybrid routing, and unified inference (`fromLLM`). Entry point: `src/ai/index.ts` barrel.
 
 ## Creating a New Pattern
 
@@ -31,10 +37,6 @@ src/patterns/
   createStore/
     index.ts             ← implementation
     README.md            ← usage docs, API reference, migration guide
-  chatStream/
-    index.ts
-  memoryStore/
-    index.ts
   rateLimiter/
     index.ts
   undoRedo/
@@ -43,6 +45,7 @@ src/patterns/
     index.ts
   formField/
     index.ts
+  …
 ```
 
 Tests go in the corresponding test directory:
@@ -51,18 +54,9 @@ Tests go in the corresponding test directory:
 src/__tests__/patterns/
   createStore/
     index.test.ts
-  chatStream/
-    index.test.ts
-  memoryStore/
-    index.test.ts
   rateLimiter/
     index.test.ts
-  undoRedo/
-    index.test.ts
-  pagination/
-    index.test.ts
-  formField/
-    index.test.ts
+  …
 ```
 
 To make a pattern importable, add entries to:

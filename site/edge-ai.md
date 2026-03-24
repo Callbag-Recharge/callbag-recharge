@@ -194,7 +194,7 @@ effect([shouldTruncate], () => {
 Reactive memory with decay-scored eviction — built-in:
 
 ```ts
-import { memoryStore } from 'callbag-recharge/patterns/memoryStore'
+import { memoryStore } from 'callbag-recharge/ai/memoryStore'
 
 const memory = memoryStore({ workingSize: 10, longTermSize: 100 })
 memory.remember('User prefers TypeScript')

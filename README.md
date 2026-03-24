@@ -273,15 +273,23 @@ self.expose('count', countStore)
 
 ## Patterns
 
-16 ready-made patterns built on the primitives — import and go.
+Ten composed patterns on the primitives — import via `callbag-recharge/patterns/<name>`.
 
-`createStore` · `chatStream` · `commandBus` · `focusManager` · `formField` · `hybridRoute` · `memoryStore` · `pagination` · `rateLimiter` · `selection` · `textBuffer` · `textEditor` · `toolCallState` · `undoRedo` · `agentLoop`
+`createStore` · `commandBus` · `focusManager` · `formField` · `pagination` · `rateLimiter` · `selection` · `textBuffer` · `textEditor` · `undoRedo`
+
+---
+
+## AI surface
+
+LLM and agent primitives (Tier 5) — `callbag-recharge/ai` or `callbag-recharge/ai/<name>`.
+
+`chatStream` · `agentLoop` · `toolCallState` · `memoryStore` · `hybridRoute` · `fromLLM` — plus re-exports: `checkpoint`, `indexedDBAdapter`, `tokenTracker`
 
 ---
 
 ## Adapters & compatibility
 
-**Adapters** (`callbag-recharge/adapters`) — `fromLLM` · `fromWebSocket` · `fromSSE` · `fromWebhook` · `fromHTTP` · `fromMCP`
+**Adapters** (`callbag-recharge/adapters`) — `fromWebSocket` · `fromSSE` · `fromWebhook` · `fromHTTP` · `fromMCP`
 
 **Framework bindings** (`callbag-recharge/compat/*`) — Vue · React · Svelte · Solid · Zustand · Jotai · Nanostores · TC39 Signals
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { agentLoop } from "../../patterns/agentLoop/index";
+import { agentLoop } from "../../ai/agentLoop/index";
 
 interface ResearchContext {
 	question: string;

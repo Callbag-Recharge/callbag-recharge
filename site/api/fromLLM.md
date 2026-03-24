@@ -21,7 +21,7 @@ function fromLLM(opts: LLMOptions): LLMStore
 ## Basic Usage
 
 ```ts
-import { fromLLM } from 'callbag-recharge/adapters';
+import { fromLLM } from 'callbag-recharge/ai';
 import { effect } from 'callbag-recharge';
 
 const llm = fromLLM({ provider: 'ollama', model: 'llama4' });

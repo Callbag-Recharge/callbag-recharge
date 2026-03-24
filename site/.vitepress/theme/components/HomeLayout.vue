@@ -182,7 +182,7 @@ count.<span class="fn">set</span>(<span class="n">1</span>)  <span class="c">// 
               <span class="code-dot" style="background:#28c840"></span>
               <span class="code-label">streaming.ts</span>
             </div>
-            <pre class="code-pre"><code><span class="k">import</span> { chatStream } <span class="k">from</span> <span class="s">'callbag-recharge/patterns/chatStream'</span>
+            <pre class="code-pre"><code><span class="k">import</span> { chatStream } <span class="k">from</span> <span class="s">'callbag-recharge/ai/chatStream'</span>
 
 <span class="c">// AI chat with history, cancel, retry</span>
 <span class="k">const</span> chat = <span class="fn">chatStream</span>({ endpoint: <span class="s">'/api/chat'</span> })

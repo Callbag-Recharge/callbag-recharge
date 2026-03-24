@@ -5,7 +5,7 @@
  * multi-iteration research agent that searches, evaluates, and refines.
  */
 
-import { agentLoop } from "callbag-recharge/patterns/agentLoop";
+import { agentLoop } from "callbag-recharge/ai/agentLoop";
 
 // #region display
 

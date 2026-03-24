@@ -30,7 +30,13 @@ export default defineConfig({
 				"callbag-recharge/utils": resolve(root, "src/utils"),
 				"callbag-recharge/memory": resolve(root, "src/memory"),
 				"callbag-recharge/messaging": resolve(root, "src/messaging"),
-				"callbag-recharge/patterns/agentLoop": resolve(root, "src/patterns/agentLoop"),
+				"callbag-recharge/ai/agentLoop": resolve(root, "src/ai/agentLoop"),
+				"callbag-recharge/ai/chatStream": resolve(root, "src/ai/chatStream"),
+				"callbag-recharge/ai/memoryStore": resolve(root, "src/ai/memoryStore"),
+				"callbag-recharge/ai/toolCallState": resolve(root, "src/ai/toolCallState"),
+				"callbag-recharge/ai/hybridRoute": resolve(root, "src/ai/hybridRoute"),
+				"callbag-recharge/ai/fromLLM": resolve(root, "src/ai/fromLLM"),
+				"callbag-recharge/ai": resolve(root, "src/ai"),
 				"callbag-recharge/patterns/formField": resolve(root, "src/patterns/formField"),
 				"callbag-recharge/patterns/textEditor": resolve(root, "src/patterns/textEditor"),
 				"callbag-recharge/compat/vue": resolve(root, "src/compat/vue"),
@@ -354,15 +360,15 @@ export default defineConfig({
 					items: [
 						{
 							text: "chatStream()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/chatStream",
+							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/chatStream",
 						},
 						{
 							text: "agentLoop()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/agentLoop",
+							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/agentLoop",
 						},
 						{
 							text: "memoryStore()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/memoryStore",
+							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/memoryStore",
 						},
 						{
 							text: "createStore()",
@@ -386,11 +392,11 @@ export default defineConfig({
 						},
 						{
 							text: "toolCallState()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/toolCallState",
+							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/toolCallState",
 						},
 						{
 							text: "hybridRoute()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/hybridRoute",
+							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/hybridRoute",
 						},
 						{
 							text: "commandBus()",

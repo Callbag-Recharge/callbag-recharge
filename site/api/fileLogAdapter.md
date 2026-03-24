@@ -22,7 +22,7 @@ function fileLogAdapter(opts: FileLogAdapterOptions): ExecutionLogPersistAdapter
 
 ```ts
 import { executionLog } from 'callbag-recharge/orchestrate';
-import { fileLogAdapter } from 'callbag-recharge/orchestrate';
+import { fileLogAdapter } from 'callbag-recharge/orchestrate/node';
 
 const adapter = fileLogAdapter({ dir: './logs' });
 const log = executionLog({ persist: adapter });

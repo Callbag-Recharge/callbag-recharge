@@ -713,6 +713,57 @@ import { fromHTTP } from 'callbag-recharge/adapters'
 const data = fromHTTP('/api/status', { interval: 5000, transform: res => res.json() })
 ```
 
+## AI (callbag-recharge/ai)
+
+Tier 5 — LLM streaming, agents, tool lifecycle, hybrid routing, and unified inference. Subpaths: `callbag-recharge/ai/chatStream`, `…/agentLoop`, `…/fromLLM`, etc. The barrel also re-exports `checkpoint`, `indexedDBAdapter`, and `tokenTracker` from `utils/`.
+
+### chatStream(opts)
+
+LLM streaming with history, cancel, retry, rate limiting.
+
+```ts
+import { chatStream } from 'callbag-recharge/ai/chatStream'
+
+const chat = chatStream({ endpoint: '/api/chat' })
+chat.send('Hello!')
+chat.messages.get()  // reactive message list
+chat.partial.get()   // accumulating response text
+chat.streaming.get() // boolean — is currently streaming
+chat.stop()          // cancel in-flight request
+chat.retry()         // retry last failed request
+```
+
+### memoryStore(opts)
+
+Three-tier AI memory: session, working, long-term.
+
+```ts
+import { memoryStore } from 'callbag-recharge/ai/memoryStore'
+
+const memory = memoryStore({ workingSize: 10, longTermSize: 100 })
+memory.remember('User prefers TypeScript')
+memory.focus('pref-1')     // promote to working memory
+memory.recall(5)           // top-5 by score
+memory.recallByTag('pref') // tag-based retrieval
+```
+
+### fromLLM(opts)
+
+Unified reactive source for OpenAI-compatible HTTP streaming (tokens, status, abort).
+
+```ts
+import { fromLLM } from 'callbag-recharge/ai'
+
+const llm = fromLLM({ provider: 'ollama', model: 'llama4' })
+llm.generate('Summarize reactive state.')
+```
+
+### More AI primitives
+
+- `agentLoop` — observe → plan → act with gate/approval (`callbag-recharge/ai/agentLoop`)
+- `toolCallState` — tool call state machine (`…/ai/toolCallState`)
+- `hybridRoute` — confidence-based local vs cloud routing (`…/ai/hybridRoute`)
+
 ## Patterns (callbag-recharge/patterns)
 
 ### createStore(fn)
@@ -733,48 +784,15 @@ store.getState().count      // 1
 store.select(s => s.count)  // Store<number> — reactive, diamond-safe
 ```
 
-### chatStream(opts)
-
-LLM streaming with history, cancel, retry, rate limiting.
-
-```ts
-import { chatStream } from 'callbag-recharge/patterns/chatStream'
-
-const chat = chatStream({ endpoint: '/api/chat' })
-chat.send('Hello!')
-chat.messages.get()  // reactive message list
-chat.partial.get()   // accumulating response text
-chat.streaming.get() // boolean — is currently streaming
-chat.stop()          // cancel in-flight request
-chat.retry()         // retry last failed request
-```
-
-### memoryStore(opts)
-
-Three-tier AI memory: session, working, long-term.
-
-```ts
-import { memoryStore } from 'callbag-recharge/patterns/memoryStore'
-
-const memory = memoryStore({ workingSize: 10, longTermSize: 100 })
-memory.remember('User prefers TypeScript')
-memory.focus('pref-1')     // promote to working memory
-memory.recall(5)           // top-5 by score
-memory.recallByTag('pref') // tag-based retrieval
-```
-
 ### Additional patterns
 
-- `agentLoop` — agent tool-call loop with gate/approval
 - `textEditor` — text editor state (undo/redo, cursor, selection, markdown commands)
 - `rateLimiter(opts)` — reactive rate-limiting (drop/queue/error strategies)
 - `undoRedo(initial, opts)` — state with undo/redo history
 - `pagination(fetchFn, opts)` — paginated data fetching with auto-cancel
 - `formField(opts)` — form field with sync + async validation
 - `commandBus` — command pattern with undo support
-- `toolCallState` — LLM tool call state machine
 - `focusManager` — focus tracking across elements
-- `hybridRoute` — cloud+edge model routing
 - `selection` — multi-select state management
 - `textBuffer` — text buffer with cursor tracking
 
@@ -878,10 +896,10 @@ const count = useSubscribe(countStore) // Solid signal accessor
 
 ### AI Chat with Streaming and Auto-Cancellation
 
-Use `chatStream` from `patterns/` for the full-featured high-level API:
+Use `chatStream` from `callbag-recharge/ai` for the full-featured high-level API:
 
 ```ts
-import { chatStream } from 'callbag-recharge/patterns/chatStream'
+import { chatStream } from 'callbag-recharge/ai/chatStream'
 
 const chat = chatStream({ endpoint: '/api/chat' })
 chat.send('Hello!')

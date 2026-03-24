@@ -38,24 +38,94 @@
 				"default": "./dist/patterns/createStore/index.cjs"
 			}
 		},
-		"./patterns/chatStream": {
+		"./ai": {
 			"import": {
-				"types": "./dist/patterns/chatStream/index.d.ts",
-				"default": "./dist/patterns/chatStream/index.js"
+				"types": "./dist/ai/index.d.ts",
+				"default": "./dist/ai/index.js"
 			},
 			"require": {
-				"types": "./dist/patterns/chatStream/index.d.cts",
-				"default": "./dist/patterns/chatStream/index.cjs"
+				"types": "./dist/ai/index.d.cts",
+				"default": "./dist/ai/index.cjs"
 			}
 		},
-		"./patterns/memoryStore": {
+		"./ai/chatStream": {
 			"import": {
-				"types": "./dist/patterns/memoryStore/index.d.ts",
-				"default": "./dist/patterns/memoryStore/index.js"
+				"types": "./dist/ai/chatStream/index.d.ts",
+				"default": "./dist/ai/chatStream/index.js"
 			},
 			"require": {
-				"types": "./dist/patterns/memoryStore/index.d.cts",
-				"default": "./dist/patterns/memoryStore/index.cjs"
+				"types": "./dist/ai/chatStream/index.d.cts",
+				"default": "./dist/ai/chatStream/index.cjs"
+			}
+		},
+		"./ai/agentLoop": {
+			"import": {
+				"types": "./dist/ai/agentLoop/index.d.ts",
+				"default": "./dist/ai/agentLoop/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/agentLoop/index.d.cts",
+				"default": "./dist/ai/agentLoop/index.cjs"
+			}
+		},
+		"./ai/toolCallState": {
+			"import": {
+				"types": "./dist/ai/toolCallState/index.d.ts",
+				"default": "./dist/ai/toolCallState/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/toolCallState/index.d.cts",
+				"default": "./dist/ai/toolCallState/index.cjs"
+			}
+		},
+		"./ai/memoryStore": {
+			"import": {
+				"types": "./dist/ai/memoryStore/index.d.ts",
+				"default": "./dist/ai/memoryStore/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/memoryStore/index.d.cts",
+				"default": "./dist/ai/memoryStore/index.cjs"
+			}
+		},
+		"./ai/hybridRoute": {
+			"import": {
+				"types": "./dist/ai/hybridRoute/index.d.ts",
+				"default": "./dist/ai/hybridRoute/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/hybridRoute/index.d.cts",
+				"default": "./dist/ai/hybridRoute/index.cjs"
+			}
+		},
+		"./ai/fromLLM": {
+			"import": {
+				"types": "./dist/ai/fromLLM.d.ts",
+				"default": "./dist/ai/fromLLM.js"
+			},
+			"require": {
+				"types": "./dist/ai/fromLLM.d.cts",
+				"default": "./dist/ai/fromLLM.cjs"
+			}
+		},
+		"./ai/docIndex": {
+			"import": {
+				"types": "./dist/ai/docIndex/index.d.ts",
+				"default": "./dist/ai/docIndex/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/docIndex/index.d.cts",
+				"default": "./dist/ai/docIndex/index.cjs"
+			}
+		},
+		"./ai/embeddingIndex": {
+			"import": {
+				"types": "./dist/ai/embeddingIndex/index.d.ts",
+				"default": "./dist/ai/embeddingIndex/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/embeddingIndex/index.d.cts",
+				"default": "./dist/ai/embeddingIndex/index.cjs"
 			}
 		},
 		"./patterns/rateLimiter": {
@@ -116,36 +186,6 @@
 			"require": {
 				"types": "./dist/patterns/textEditor/index.d.cts",
 				"default": "./dist/patterns/textEditor/index.cjs"
-			}
-		},
-		"./patterns/toolCallState": {
-			"import": {
-				"types": "./dist/patterns/toolCallState/index.d.ts",
-				"default": "./dist/patterns/toolCallState/index.js"
-			},
-			"require": {
-				"types": "./dist/patterns/toolCallState/index.d.cts",
-				"default": "./dist/patterns/toolCallState/index.cjs"
-			}
-		},
-		"./patterns/hybridRoute": {
-			"import": {
-				"types": "./dist/patterns/hybridRoute/index.d.ts",
-				"default": "./dist/patterns/hybridRoute/index.js"
-			},
-			"require": {
-				"types": "./dist/patterns/hybridRoute/index.d.cts",
-				"default": "./dist/patterns/hybridRoute/index.cjs"
-			}
-		},
-		"./patterns/agentLoop": {
-			"import": {
-				"types": "./dist/patterns/agentLoop/index.d.ts",
-				"default": "./dist/patterns/agentLoop/index.js"
-			},
-			"require": {
-				"types": "./dist/patterns/agentLoop/index.d.cts",
-				"default": "./dist/patterns/agentLoop/index.cjs"
 			}
 		},
 		"./memory": {
@@ -286,16 +326,6 @@
 			"require": {
 				"types": "./dist/adapters/websocket.d.cts",
 				"default": "./dist/adapters/websocket.cjs"
-			}
-		},
-		"./adapters/llm": {
-			"import": {
-				"types": "./dist/adapters/llm.d.ts",
-				"default": "./dist/adapters/llm.js"
-			},
-			"require": {
-				"types": "./dist/adapters/llm.d.cts",
-				"default": "./dist/adapters/llm.cjs"
 			}
 		},
 		"./adapters/mcp": {
