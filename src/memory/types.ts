@@ -221,3 +221,68 @@ export interface VectorIndex {
 	/** Tear down internal stores. */
 	destroy(): void;
 }
+
+// ---------------------------------------------------------------------------
+// Session Transport (Phase 6a)
+// ---------------------------------------------------------------------------
+
+/** JSON-safe representation of a MemoryNode's metadata. */
+export interface SerializedMeta {
+	id: string;
+	createdAt: number;
+	updatedAt: number;
+	accessedAt: number;
+	accessCount: number;
+	importance: number;
+	tags: string[];
+}
+
+/** JSON-safe representation of a MemoryNode. */
+export interface SerializedNode<T = unknown> {
+	id: string;
+	content: T;
+	meta: SerializedMeta;
+}
+
+/** Structured change events emitted by `sessionSync`. */
+export type SessionEvent<T = unknown> =
+	| { type: "snapshot"; nodes: SerializedNode<T>[] }
+	| { type: "add"; nodes: SerializedNode<T>[] }
+	| { type: "remove"; nodeIds: string[] }
+	| { type: "update"; nodes: SerializedNode<T>[] };
+
+/** Pluggable transport backend — "same graph, different edge." */
+export interface SessionTransport<T = unknown> {
+	/** Send a session event to the remote. */
+	send(event: SessionEvent<T>): void;
+	/** Close the transport and release resources. */
+	close(): void;
+}
+
+export interface SessionSyncOptions {
+	/** Debug name for Inspector. */
+	name?: string;
+	/** Send an initial snapshot on connect. Default: true. */
+	initialSnapshot?: boolean;
+}
+
+export interface WsTransportOptions<T = unknown> {
+	/** Custom serializer for a single event. Default: JSON.stringify. */
+	serialize?: (event: SessionEvent<T>) => string;
+}
+
+export interface HttpTransportOptions<T = unknown> {
+	/** HTTP method. Default: "POST". */
+	method?: string;
+	/** Extra headers. */
+	headers?: Record<string, string>;
+	/** Batch window in ms. Events are collected and sent together. 0 = send immediately. Default: 0. */
+	batchMs?: number;
+	/**
+	 * Custom serializer for a batch of events. Default: JSON.stringify.
+	 * Note: takes an array (not a single event) because HTTP batches multiple
+	 * events per request. Even in immediate mode (batchMs=0), the single event
+	 * is wrapped in a one-element array for a uniform wire format.
+	 */
+	serialize?: (events: SessionEvent<T>[]) => string;
+}

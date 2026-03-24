@@ -136,7 +136,7 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 |---|-------------|------|--------|
 | ~~6b~~ | ~~In-process vector index~~ | **Shipped** — `vectorIndex` HNSW in `src/memory/`. | — |
 | ~~6d~~ | ~~Consolidation + self-editing~~ | **Shipped** — `admissionPolicy` (admit/reject/update/merge), `forgetPolicy`, `summarize()`, `gc()` on `collection`. | — |
-| 6a | Session transport adapters | WebSocket sink, HTTP sink. Same graph, different edge. | M |
+| ~~6a~~ | ~~Session transport adapters~~ | **Shipped** — `sessionSync` (reactive diff engine), `wsTransport`, `httpTransport` (with batching) in `src/memory/`. | — |
 | 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
 | 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. | S |
 

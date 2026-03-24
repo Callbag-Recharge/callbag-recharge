@@ -15,29 +15,25 @@ Focus on the README and in-repo docs. No external site yet.
 | **llms.txt** — simple machine-readable summary in repo root | P1 | TODO |
 | **docs/** — architecture, API reference (already exist) | P1 | Done |
 | **src/archive/docs/** — recovered historical docs for blog material | P1 | Done |
+| **VitePress blog** — `/blog/` section with sidebar, Arc 1 written | P1 | Done |
 
 ## Phase 2: Post-Publish (When Users Arrive)
 
-Deploy a docs site (VitePress or Starlight) to GitHub Pages with custom domain.
+VitePress docs site is live with unified `/blog/` section.
 
 ```
 site/
-├── /docs/          ← API reference, guides, recipes
-│   ├── getting-started
-│   ├── api/
-│   │   ├── state
-│   │   ├── derived
-│   │   ├── producer
-│   │   ├── operator
-│   │   └── effect
-│   ├── recipes/
-│   └── architecture/
-└── /blog/          ← engineering evolution posts
+├── /api/           ← API reference
+├── /recipes/       ← Recipes & migration guides
+├── /comparisons/   ← vs Zustand, Jotai, RxJS, etc.
+├── /demos/         ← Interactive demos
+├── /architecture/  ← Design & internals
+└── /blog/          ← engineering evolution posts (Arc 1 shipped)
 ```
 
 ### Tool Choice
 
-**Start with VitePress** (lighter, zero-config for TS libraries). Migrate to **Starlight (Astro)** later if you need structured data, i18n, or interactive island components.
+**VitePress** (lighter, zero-config for TS libraries). Migrate to **Starlight (Astro)** later if you need structured data, i18n, or interactive island components.
 
 ### Why unified (not separate blog)?
 
@@ -48,7 +44,7 @@ site/
 
 ---
 
-## Blog Content Plan
+## Blog Content Plan: "The callbag-recharge Chronicle"
 
 ### Content Formula
 
@@ -59,51 +55,88 @@ Each "engineering evolution" post follows this pattern:
 3. **The Insight** — "We realized the callbag protocol actually allows Z."
 4. **The Solution** — "In v4, we implement [pattern]. Here's the code."
 
-### Blog Topics (Prioritized)
+### Chronicle Blog Series (29 posts across 8 arcs)
 
-#### Quick Wins (2-3 hrs each)
+#### Arc 1: Origins — Why Revive Callbag? ✅ SHIPPED (March 24, 2026)
+
+| # | Title | File | Status |
+|---|-------|------|--------|
+| 1 | **Callbag Is Dead. Long Live Callbag.** | `site/blog/01-callbag-is-dead-long-live-callbag.md` | Done |
+| 2 | **The Protocol That Already Solved Your Problem** | `site/blog/02-the-protocol-that-already-solved-your-problem.md` | Done |
+| 3 | **Signals Are Not Enough** | `site/blog/03-signals-are-not-enough.md` | Done |
+
+#### Arc 2: Architecture v1 — The Naive First Attempt
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 4 | **Push Dirty, Pull Values: Our First Diamond Solution** | `architecture-v1.md` — dual-channel design |
+| 5 | **Why Explicit Dependencies Beat Magic Tracking** | Session 05b247c1 — pure callbag refactor, explicit deps |
+| 6 | **The Inspector Pattern: Observability as a First-Class Citizen** | WeakMap metadata, zero per-store cost design |
+
+#### Arc 3: Architecture v2 — The Great Unification
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 7 | **Data Should Flow Through the Graph, Not Around It** | `architecture-v2.md` — v1→v2 aha moment |
+| 8 | **Two-Phase Push: DIRTY First, Values Second** | Session 269923a2 — two-phase push implementation |
+| 9 | **From Pull-Phase to Push-Phase Memoization** | Session ce974b95 — memoization debate |
+
+#### Arc 4: Architecture v3 — The Type 3 Breakthrough
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 10 | **The Day We Read the Callbag Spec (Again)** | Session 8452282f — type 3 breakthrough brainstorm |
+| 11 | **Why Control Signals Don't Belong in the Data Stream** | `architecture-v3.md`, sessions 8452282f + 8601463b |
+| 12 | **RESOLVED: The Signal That Skips Entire Subtrees** | Session ce974b95 — push-phase memoization cascade |
+| 13 | **Five Primitives, Two Tiers, Zero Schedulers** | v3 primitive unification (producer, state, derived, operator, effect) |
+
+#### Arc 5: Architecture v4 — Performance Without Compromise
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 14 | **Output Slot: How null→fn→Set Saves 90% Memory** | Session 8693d636 — lazy allocation |
+| 15 | **When We Removed the ADOPT Protocol** | Session 2d2c2674 — simplification |
+| 16 | **Lazy Tier 2: The switchMap Footgun We Had to Kill** | Session lazy-tier2-option-d3 |
+| 17 | **Bitmask Flag Packing in TypeScript** | Session 476164b4 — V8 hidden class optimization |
+
+#### Arc 6: Correctness Stories
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 18 | **Diamond Resolution Without Pull-Phase Computation** | Session ce974b95, `architecture.md` §8 |
+| 19 | **When Not to Dedup: Understanding Callbag Operator Semantics** | Session 4f72f2b0 — no-default-dedup decision |
+| 20 | **Benchmark Regression Exposed 3 Operator Bugs** | Session ecc3a7e6 — benchmarks as design validators |
+| 21 | **The Cost of Correctness: 9.8M ops/sec vs Preact's 34M** | Session 88e9bd81 — honest benchmarking |
+
+#### Arc 7: From Library to Platform
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 22 | **Stores All the Way Down: Adding State to Reactive Programming** | Store interface design, `get()/set()/source()` |
+| 23 | **Why Our Computed States Are Eagerly Reactive** | Sessions 12795037 + f23a9e35 — STANDALONE mode |
+| 24 | **From Zustand to Reactive Orchestration** | Compat layer strategy, `createStore` pattern |
+| 25 | **The Missing Middle: Why Signals Aren't Enough for AI Streaming** | TC39 debate, Gemini research §Signals vs Streams |
+
+#### Arc 8: Engineering Deep Cuts (Bonus)
+
+| # | Title | Source Material |
+|---|-------|----------------|
+| 26 | **switchMap Error Handling: The Bug That Tests Didn't Catch** | Session f9dc5740 |
+| 27 | **Skip DIRTY: How We Halved Dispatch for Single-Dep Paths** | Session f47ed59e — SINGLE_DEP signaling |
+| 28 | **Bitmask Overflow at >32 Dependencies** | Session 67ad8cc6 — 863-test suite |
+| 29 | **Why We Don't Use queueMicrotask (And Neither Should You)** | Architecture §1.18 — microtask breaks glitch-free |
+
+### Market-Positioning Posts (standalone, from Gemini marketing research)
+
+These are independent of the chronicle arc and can be published in any order:
 
 | # | Topic | Source Material | Why It Matters |
 |---|-------|----------------|----------------|
-| 1 | **"When Not to Dedup: Understanding Callbag Operator Semantics"** | Session 4f72f2b0 — found & fixed incorrect dedup in subscribe | Teaches callbag philosophy, contrasts with RxJS defaults |
-| 2 | **"Output Slot: Memory-Efficient Multicast"** | Session 8693d636 — `null → fn → Set` saves ~200 bytes/node | Concrete V8 optimization story, easy to benchmark |
-| 3 | **"Bitmask Flag Packing in TypeScript"** | Session 476164b4 — saves 16+ bytes/store via hidden class opt | Applicable beyond this library |
-
-#### Medium Posts (5-8 hrs each)
-
-| # | Topic | Source Material | Why It Matters |
-|---|-------|----------------|----------------|
-| 4 | **"Why Control Signals Don't Belong in the Data Stream"** | v2→v3 transition, sessions 8452282f + 8601463b, `architecture-v3.md` | Most unique insight — explains what makes callbag-recharge different |
-| 5 | **"Why Our Computed States Are Eagerly Reactive"** | Sessions 12795037 + f23a9e35 — STANDALONE mode | Contrasts with Preact Signals/SolidJS lazy approach |
-| 6 | **"Diamond Resolution Without Pull-Phase Computation"** | Session ce974b95, `architecture.md` §8 | Core correctness story |
-
-#### Deep Dives (10+ hrs each)
-
-| # | Topic | Source Material | Why It Matters |
-|---|-------|----------------|----------------|
-| 7 | **"From Dual-Channel to Two-Phase Push: v1→v4 Journey"** | All architecture docs + archived v1/v2/v3 | The definitive "evolution of design" post |
-| 8 | **"The Cost of Correctness"** | Session 88e9bd81 — 9.8M ops/sec vs Preact 34M, but correct diamonds | Honest benchmarking builds trust |
-| 9 | **"Callbag-Recharge vs Zustand/Jotai/SolidJS"** | Session 47f1a07f, `src/archive/docs/state-management.md` | Maps mental models across libraries |
-
-#### Market-Positioning Posts (from Gemini marketing research, March 2026)
-
-| # | Topic | Source Material | Why It Matters |
-|---|-------|----------------|----------------|
-| 10 | **"The Missing Middle: Why Signals Aren't Enough for AI Streaming"** | TC39 Signals debate, Gemini research §Signals vs Streams | Positions callbag-recharge as the bridge between simple UI signals and full stream power — the most common question developers are asking in 2025 |
-| 11 | **"Durable Reactive Streams: LLM Responses That Survive Network Failures"** | Gemini research §Durability Crisis, Upstash resumable streams, checkpoint adapters | Solves an acute pain point (fragile LLM streams) with concrete code — high viral potential in AI dev communities |
-| 12 | **"The Trust Bottleneck: Observable State for Agentic AI"** | Gemini research §Agentic Trust, McKinsey/IBM/Salesforce agentic reports, Inspector architecture | Positions inspectable-node architecture against "black box" agent frameworks (LangGraph, CrewAI) — thought leadership for the agentic enterprise wave |
-| 13 | **"Zero-Dependency Orchestration: callbag-recharge vs Temporal/Inngest/DBOS"** | Gemini research §Lightweight Durability, DBOS Transact HN threads, orchestrate layer | Direct comparison post targeting developers frustrated with infrastructure-heavy durable execution — high search intent topic |
-| 14 | **"Vibe Coding Safety Rails: Why Your AI-Generated Code Needs Verifiable State"** | Gemini research §Vibe Coding Risks, glitch-free two-phase push, architecture §1.15 | Timely hook into the vibe coding trend — positions library as the reliability layer for AI-generated reactive logic |
-| 15 | **"From Zustand to Reactive Orchestration: The Compatibility Wrapper Strategy"** | Gemini research §Trojan Horse, compat layer (Zustand/Jotai/Signals), createStore pattern | Migration guide that doubles as adoption content — shows existing Zustand/Jotai users how to upgrade without rewriting |
-
-### Bonus Topics (from bugs & discoveries)
-
-| Topic | Source |
-|-------|--------|
-| "switchMap Error Handling: The Bug That Tests Didn't Catch" | Session f9dc5740 |
-| "Benchmark Regression Exposed 3 Operator Bugs" | Session ecc3a7e6 |
-| "Bitmask Overflow at >32 Deps" | Session 67ad8cc6 — 863-test suite |
-| "Why We Removed the ADOPT Protocol" | Session 2d2c2674 — "measure first, speculate later" |
+| M1 | **"Durable Reactive Streams: LLM Responses That Survive Network Failures"** | Gemini research §Durability Crisis, checkpoint adapters | Solves acute pain point — high viral potential in AI dev communities |
+| M2 | **"The Trust Bottleneck: Observable State for Agentic AI"** | Gemini research §Agentic Trust, Inspector architecture | Thought leadership for the agentic enterprise wave |
+| M3 | **"Zero-Dependency Orchestration: callbag-recharge vs Temporal/Inngest/DBOS"** | Gemini research §Lightweight Durability, orchestrate layer | High search intent — developers frustrated with heavy infra |
+| M4 | **"Vibe Coding Safety Rails: Why Your AI-Generated Code Needs Verifiable State"** | Gemini research §Vibe Coding Risks, architecture §1.15 | Timely hook into vibe coding trend |
+| M5 | **"From Zustand to Reactive Orchestration: The Compatibility Wrapper Strategy"** | Gemini research §Trojan Horse, compat layers | Migration guide that doubles as adoption content |
 
 ---
 

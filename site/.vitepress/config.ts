@@ -90,6 +90,7 @@ export default defineConfig({
 			{ text: "Edge AI", link: "/edge-ai" },
 			{ text: "Demos", link: "/demos/" },
 			{ text: "Architecture", link: "/architecture/" },
+			{ text: "Blog", link: "/blog/" },
 		],
 
 		sidebar: {
@@ -588,6 +589,33 @@ export default defineConfig({
 				{
 					text: "Architecture",
 					items: [{ text: "Design & Internals", link: "/architecture/" }],
+				},
+			],
+			"/blog/": [
+				{
+					text: "The callbag-recharge Chronicle",
+					collapsed: false,
+					items: [
+						{ text: "Blog Home", link: "/blog/" },
+						{
+							text: "Arc 1: Origins",
+							collapsed: false,
+							items: [
+								{
+									text: "1. Callbag Is Dead. Long Live Callbag.",
+									link: "/blog/01-callbag-is-dead-long-live-callbag",
+								},
+								{
+									text: "2. The Protocol That Already Solved Your Problem",
+									link: "/blog/02-the-protocol-that-already-solved-your-problem",
+								},
+								{
+									text: "3. Signals Are Not Enough",
+									link: "/blog/03-signals-are-not-enough",
+								},
+							],
+						},
+					],
 				},
 			],
 		},

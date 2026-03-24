@@ -458,7 +458,7 @@ Pulsar-inspired topic/subscription. `topic` (persistent stream), `subscription` 
 
 ### Memory (`src/memory/`)
 
-`collection` (reactive node set with O(1) tag lookup via `reactiveIndex`, auto-eviction via `reactiveScored`), `decay` (time-weighted scoring — recency, frequency, importance), `node` (memory node: `content` + `meta` + `scoreStore`), `vectorIndex` (in-process HNSW vector search — cosine/euclidean/dotProduct, ~1-10 μs for <10K vectors).
+`collection` (reactive node set with O(1) tag lookup via `reactiveIndex`, auto-eviction via `reactiveScored`), `decay` (time-weighted scoring — recency, frequency, importance), `node` (memory node: `content` + `meta` + `scoreStore`), `vectorIndex` (in-process HNSW vector search — cosine/euclidean/dotProduct, ~1-10 μs for <10K vectors), `sessionSync` (reactive diff engine — wires a collection to a pluggable `SessionTransport` via structural + per-node subscriptions), `wsTransport` (WebSocket transport), `httpTransport` (HTTP transport with optional batching).
 
 `reactiveScored` maintains a live min-heap: when a node's `meta` emits, the heap sifts to the new position in O(log n). Eviction is O(log n) extract-min — no O(n) scan. Per-key heap watchers use `subscribe` (not `effect`) — lightweight DATA-only sink, no DIRTY/RESOLVED overhead (§1.19).
 
