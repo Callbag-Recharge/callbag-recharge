@@ -140,6 +140,12 @@ const REGISTRY = {
 	contentStats: "src/utils/contentStats.ts",
 	cursorInfo: "src/utils/cursorInfo.ts",
 
+	// Memory
+	collection: "src/memory/collection.ts",
+	memoryNode: "src/memory/node.ts",
+	knowledgeGraph: "src/memory/knowledgeGraph.ts",
+	vectorIndex: "src/memory/vectorIndex.ts",
+
 	// Data
 	reactiveLog: "src/data/reactiveLog.ts",
 	reactiveMap: "src/data/reactiveMap.ts",

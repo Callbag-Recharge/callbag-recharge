@@ -62,7 +62,7 @@ src/
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
 ├── orchestrate/     ← workflow nodes (pipeline, task, branch, approval, gate, taskState, executionLog)
 ├── messaging/       ← Pulsar-inspired topic/subscription system (topic, subscription, repeatPublish)
-├── memory/          ← agent memory primitives (collection, decay, node, vectorIndex)
+├── memory/          ← agent memory primitives (collection, decay, node, vectorIndex, knowledgeGraph)
 ├── patterns/        ← composed recipes (chatStream, formField, agentLoop, textEditor, pagination, …)
 ├── worker/          ← reactive cross-thread bridge (workerBridge, workerSelf, WorkerTransport)
 ├── adapters/        ← external system connectors (fromHTTP, fromWebSocket, fromLLM, fromMCP, …)

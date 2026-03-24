@@ -228,9 +228,8 @@ export function collection<T>(opts?: CollectionOptions<T>): CollectionInterface<
 						return target;
 					}
 
-					case "admit":
 					default:
-						break; // fall through to normal add
+						break; // fall through to normal add (including "admit")
 				}
 			}
 

@@ -3,8 +3,9 @@ import { effect } from "../../core/effect";
 import { subscribe } from "../../core/subscribe";
 import { collection } from "../../memory/collection";
 import { computeScore, decay } from "../../memory/decay";
+import { knowledgeGraph } from "../../memory/knowledgeGraph";
 import { memoryNode } from "../../memory/node";
-import type { AdmissionDecision, MemoryMeta, MemoryNode } from "../../memory/types";
+import type { MemoryMeta } from "../../memory/types";
 
 // ---------------------------------------------------------------------------
 // MemoryNode
@@ -487,7 +488,7 @@ describe("collection — Phase 6d: Admission Policy", () => {
 
 	it("admissionPolicy 'merge' combines content via reducer", () => {
 		const col = collection<string[]>({
-			admissionPolicy: (incoming, nodes) => {
+			admissionPolicy: (_incoming, nodes) => {
 				const target = nodes.find((n) => n.meta.get().tags.has("facts"));
 				if (target) {
 					return {
@@ -648,8 +649,8 @@ describe("collection — Phase 6d: Summarize", () => {
 
 	it("summarize() throws for empty/invalid node list", () => {
 		const col = collection<string>();
-		expect(() => col.summarize([], (nodes) => "")).toThrow("No valid nodes to summarize");
-		expect(() => col.summarize(["nonexistent"], (nodes) => "")).toThrow(
+		expect(() => col.summarize([], (_nodes) => "")).toThrow("No valid nodes to summarize");
+		expect(() => col.summarize(["nonexistent"], (_nodes) => "")).toThrow(
 			"No valid nodes to summarize",
 		);
 		col.destroy();
@@ -658,7 +659,7 @@ describe("collection — Phase 6d: Summarize", () => {
 	it("summarize() throws on destroyed collection", () => {
 		const col = collection<string>();
 		col.destroy();
-		expect(() => col.summarize(["a"], (n) => "")).toThrow("Collection is destroyed");
+		expect(() => col.summarize(["a"], (_n) => "")).toThrow("Collection is destroyed");
 	});
 
 	it("summarize() updates tag index correctly", () => {
@@ -666,7 +667,7 @@ describe("collection — Phase 6d: Summarize", () => {
 		col.add("a", { id: "n1", tags: ["x"] });
 		col.add("b", { id: "n2", tags: ["x", "y"] });
 
-		col.summarize(["n1", "n2"], (nodes) => "combined", { id: "s1", tags: ["x", "z"] });
+		col.summarize(["n1", "n2"], (_nodes) => "combined", { id: "s1", tags: ["x", "z"] });
 
 		// Old nodes' tags should be cleaned up
 		expect(col.byTag("y")).toHaveLength(0);
@@ -684,12 +685,553 @@ describe("collection — Phase 6d: Summarize", () => {
 		// "n2" doesn't exist — only "n1" gets summarized
 		const s = col.summarize(["n1", "n2"], (nodes) => {
 			expect(nodes).toHaveLength(1);
-			return nodes[0].content.get() + " (summarized)";
+			return `${nodes[0].content.get()} (summarized)`;
 		});
 
 		expect(s.content.get()).toBe("a (summarized)");
 		expect(col.has("n1")).toBe(false);
 		expect(col.size.get()).toBe(1);
 		col.destroy();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Phase 6c: Knowledge Graph
+// ---------------------------------------------------------------------------
+describe("knowledgeGraph — Phase 6c: Entity & Relation CRUD", () => {
+	it("addEntity/removeEntity/getEntity/hasEntity", () => {
+		const kg = knowledgeGraph<string>();
+		const alice = kg.addEntity("Alice", { id: "alice" });
+		expect(alice).toBeDefined();
+		expect(kg.hasEntity("alice")).toBe(true);
+		expect(kg.getEntity("alice")).toBe(alice);
+		expect(kg.entityCount.get()).toBe(1);
+
+		expect(kg.removeEntity("alice")).toBe(true);
+		expect(kg.hasEntity("alice")).toBe(false);
+		expect(kg.entityCount.get()).toBe(0);
+
+		expect(kg.removeEntity("nonexistent")).toBe(false);
+		kg.destroy();
+	});
+
+	it("entities store is reactive", () => {
+		const kg = knowledgeGraph<string>();
+		const log: number[] = [];
+		const dispose = effect([kg.entityCount], () => {
+			log.push(kg.entityCount.get());
+		});
+
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+
+		expect(log).toEqual([0, 1, 2]);
+		dispose();
+		kg.destroy();
+	});
+
+	it("addRelation creates a directed relation", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("Alice", { id: "alice" });
+		kg.addEntity("Bob", { id: "bob" });
+
+		const rel = kg.addRelation("alice", "bob", "knows", {
+			id: "r1",
+			weight: 0.8,
+			metadata: { since: 2020 },
+		});
+
+		expect(rel.id).toBe("r1");
+		expect(rel.sourceId).toBe("alice");
+		expect(rel.targetId).toBe("bob");
+		expect(rel.type).toBe("knows");
+		expect(rel.weight).toBe(0.8);
+		expect(rel.metadata).toEqual({ since: 2020 });
+		expect(rel.createdAt).toBeGreaterThan(0);
+
+		expect(kg.hasRelation("r1")).toBe(true);
+		expect(kg.getRelation("r1")).toBe(rel);
+		expect(kg.relationCount.get()).toBe(1);
+		kg.destroy();
+	});
+
+	it("addRelation throws for missing entities", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("Alice", { id: "alice" });
+
+		expect(() => kg.addRelation("alice", "bob", "knows")).toThrow('Target entity "bob" not found');
+		expect(() => kg.addRelation("nobody", "alice", "knows")).toThrow(
+			'Source entity "nobody" not found',
+		);
+		kg.destroy();
+	});
+
+	it("addRelation throws for duplicate relation ID", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "x", { id: "r1" });
+
+		expect(() => kg.addRelation("a", "b", "y", { id: "r1" })).toThrow(
+			'Relation ID "r1" already exists',
+		);
+		kg.destroy();
+	});
+
+	it("addRelation defaults weight to 1", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		const rel = kg.addRelation("a", "b", "knows");
+		expect(rel.weight).toBe(1);
+		kg.destroy();
+	});
+
+	it("addRelation clamps initial weight to 0-1", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+
+		const r1 = kg.addRelation("a", "b", "x", { weight: 5 });
+		expect(r1.weight).toBe(1);
+
+		const r2 = kg.addRelation("a", "c", "x", { weight: -2 });
+		expect(r2.weight).toBe(0);
+		kg.destroy();
+	});
+
+	it("removeRelation by ID", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "knows", { id: "r1" });
+
+		expect(kg.removeRelation("r1")).toBe(true);
+		expect(kg.hasRelation("r1")).toBe(false);
+		expect(kg.relationCount.get()).toBe(0);
+
+		expect(kg.removeRelation("nonexistent")).toBe(false);
+		kg.destroy();
+	});
+
+	it("removeRelationsBetween removes matching relations", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "knows", { id: "r1" });
+		kg.addRelation("a", "b", "works-with", { id: "r2" });
+		kg.addRelation("a", "b", "knows", { id: "r3" });
+
+		// Remove only "knows" relations
+		const removed = kg.removeRelationsBetween("a", "b", "knows");
+		expect(removed).toBe(2);
+		expect(kg.hasRelation("r1")).toBe(false);
+		expect(kg.hasRelation("r3")).toBe(false);
+		expect(kg.hasRelation("r2")).toBe(true); // works-with preserved
+		kg.destroy();
+	});
+
+	it("removeRelationsBetween without type removes all", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "knows");
+		kg.addRelation("a", "b", "works-with");
+
+		expect(kg.removeRelationsBetween("a", "b")).toBe(2);
+		expect(kg.relationCount.get()).toBe(0);
+		kg.destroy();
+	});
+
+	it("updateRelation modifies weight, metadata, and updatedAt (cloned)", () => {
+		vi.useFakeTimers();
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		const rel = kg.addRelation("a", "b", "knows", { id: "r1", weight: 0.5 });
+		const t0 = rel.updatedAt;
+
+		vi.advanceTimersByTime(100);
+		expect(kg.updateRelation("r1", { weight: 0.9, metadata: { note: "close" } })).toBe(true);
+
+		const updated = kg.getRelation("r1")!;
+		expect(updated.weight).toBe(0.9);
+		expect(updated.metadata).toEqual({ note: "close" });
+		expect(updated.updatedAt).toBeGreaterThan(t0);
+
+		// Original reference is not mutated (clone on update)
+		expect(rel.weight).toBe(0.5);
+		expect(rel).not.toBe(updated);
+
+		expect(kg.updateRelation("nonexistent", { weight: 0.5 })).toBe(false);
+		vi.useRealTimers();
+		kg.destroy();
+	});
+
+	it("updateRelation clamps weight to 0-1", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "x", { id: "r1" });
+
+		kg.updateRelation("r1", { weight: 1.5 });
+		expect(kg.getRelation("r1")!.weight).toBe(1);
+
+		kg.updateRelation("r1", { weight: -0.5 });
+		expect(kg.getRelation("r1")!.weight).toBe(0);
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Graph Queries", () => {
+	function buildTriangle() {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addRelation("a", "b", "knows");
+		kg.addRelation("b", "c", "knows");
+		kg.addRelation("a", "c", "works-with");
+		return kg;
+	}
+
+	it("outgoing/incoming return correct relations", () => {
+		const kg = buildTriangle();
+		expect(kg.outgoing("a")).toHaveLength(2);
+		expect(kg.outgoing("a", "knows")).toHaveLength(1);
+		expect(kg.incoming("c")).toHaveLength(2);
+		expect(kg.incoming("c", "works-with")).toHaveLength(1);
+		expect(kg.incoming("a")).toHaveLength(0);
+		kg.destroy();
+	});
+
+	it("neighbors returns correct entities", () => {
+		const kg = buildTriangle();
+
+		const outNeighbors = kg.neighbors("a", { direction: "out" });
+		expect(outNeighbors.map((n) => n.id).sort()).toEqual(["b", "c"]);
+
+		const inNeighbors = kg.neighbors("c", { direction: "in" });
+		expect(inNeighbors.map((n) => n.id).sort()).toEqual(["a", "b"]);
+
+		const knowsNeighbors = kg.neighbors("a", { direction: "out", type: "knows" });
+		expect(knowsNeighbors).toHaveLength(1);
+		expect(knowsNeighbors[0].id).toBe("b");
+		kg.destroy();
+	});
+
+	it("traverse performs BFS", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addEntity("D", { id: "d" });
+		kg.addRelation("a", "b", "x");
+		kg.addRelation("b", "c", "x");
+		kg.addRelation("c", "d", "x");
+
+		// Full traversal
+		const all = kg.traverse("a");
+		expect(all.map((n) => n.id)).toEqual(["b", "c", "d"]);
+
+		// With maxDepth
+		const depth1 = kg.traverse("a", { maxDepth: 1 });
+		expect(depth1.map((n) => n.id)).toEqual(["b"]);
+
+		// With maxNodes
+		const limited = kg.traverse("a", { maxNodes: 2 });
+		expect(limited).toHaveLength(2);
+		expect(limited.map((n) => n.id)).toEqual(["b", "c"]);
+
+		// From nonexistent node
+		expect(kg.traverse("nonexistent")).toEqual([]);
+		kg.destroy();
+	});
+
+	it("traverse respects direction", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addRelation("a", "b", "x");
+		kg.addRelation("b", "c", "x");
+
+		// Traversing backwards from "c"
+		const backward = kg.traverse("c", { direction: "in" });
+		expect(backward.map((n) => n.id)).toEqual(["b", "a"]);
+
+		// Both directions from "b"
+		const both = kg.traverse("b", { direction: "both" });
+		expect(both.map((n) => n.id).sort()).toEqual(["a", "c"]);
+		kg.destroy();
+	});
+
+	it("traverse filters by relation type", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addRelation("a", "b", "knows");
+		kg.addRelation("a", "c", "works-with");
+
+		const knowsOnly = kg.traverse("a", { type: "knows" });
+		expect(knowsOnly.map((n) => n.id)).toEqual(["b"]);
+		kg.destroy();
+	});
+
+	it("shortestPath finds path via BFS", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addEntity("D", { id: "d" });
+		kg.addRelation("a", "b", "x");
+		kg.addRelation("b", "c", "x");
+		kg.addRelation("a", "d", "x");
+		kg.addRelation("d", "c", "x");
+
+		// Should find a→b→c or a→d→c (both length 3)
+		const path = kg.shortestPath("a", "c");
+		expect(path).toBeDefined();
+		expect(path![0]).toBe("a");
+		expect(path![path!.length - 1]).toBe("c");
+		expect(path!).toHaveLength(3);
+
+		// Same node
+		expect(kg.shortestPath("a", "a")).toEqual(["a"]);
+
+		// No path (directed — c has no outgoing)
+		expect(kg.shortestPath("c", "a", { direction: "out" })).toBeUndefined();
+
+		// No path for nonexistent node
+		expect(kg.shortestPath("a", "nonexistent")).toBeUndefined();
+		kg.destroy();
+	});
+
+	it("subgraph extracts entities and internal relations", () => {
+		const kg = buildTriangle();
+		kg.addEntity("D", { id: "d" });
+		kg.addRelation("c", "d", "knows");
+
+		const sg = kg.subgraph(["a", "b", "c"]);
+		expect(sg.entities).toHaveLength(3);
+		// Only a→b, b→c, a→c (not c→d since "d" is outside subgraph)
+		expect(sg.relations).toHaveLength(3);
+		expect(sg.relations.every((r) => r.sourceId !== "d" && r.targetId !== "d")).toBe(true);
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Cascade Deletion", () => {
+	it("removeEntity cascades to remove all relations", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+		kg.addRelation("a", "b", "knows", { id: "r1" });
+		kg.addRelation("b", "c", "knows", { id: "r2" });
+		kg.addRelation("c", "a", "knows", { id: "r3" });
+
+		expect(kg.relationCount.get()).toBe(3);
+
+		kg.removeEntity("b");
+		// r1 (a→b) and r2 (b→c) should be removed
+		expect(kg.hasRelation("r1")).toBe(false);
+		expect(kg.hasRelation("r2")).toBe(false);
+		expect(kg.hasRelation("r3")).toBe(true); // c→a still exists
+		expect(kg.relationCount.get()).toBe(1);
+		kg.destroy();
+	});
+
+	it("eviction cascades to remove relations", () => {
+		const kg = knowledgeGraph<string>({
+			maxSize: 2,
+			weights: { recency: 0, frequency: 0, importance: 1 },
+		});
+
+		kg.addEntity("Low", { id: "low", importance: 0.1 });
+		kg.addEntity("High", { id: "high", importance: 0.9 });
+		kg.addRelation("low", "high", "knows", { id: "r1" });
+		expect(kg.relationCount.get()).toBe(1);
+
+		// Adding a 3rd entity evicts "low"
+		kg.addEntity("Mid", { id: "mid", importance: 0.5 });
+		expect(kg.hasEntity("low")).toBe(false);
+		// Relation involving "low" should be gone
+		expect(kg.hasRelation("r1")).toBe(false);
+		expect(kg.relationCount.get()).toBe(0);
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Reactive Queries", () => {
+	it("relationsOf returns reactive store", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+
+		const relsOf = kg.relationsOf("a", "out");
+		expect(relsOf.get()).toEqual([]);
+
+		kg.addRelation("a", "b", "knows");
+		expect(relsOf.get()).toHaveLength(1);
+		expect(relsOf.get()[0].type).toBe("knows");
+		kg.destroy();
+	});
+
+	it("relationsOf is cached per entityId+direction", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+
+		const s1 = kg.relationsOf("a", "out");
+		const s2 = kg.relationsOf("a", "out");
+		expect(s1).toBe(s2); // same store instance
+		kg.destroy();
+	});
+
+	it("neighborsOf returns reactive store", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+
+		const n = kg.neighborsOf("a", "out");
+		expect(n.get()).toEqual([]);
+
+		kg.addRelation("a", "b", "knows");
+		expect(n.get()).toHaveLength(1);
+		expect(n.get()[0].id).toBe("b");
+		kg.destroy();
+	});
+
+	it("relationCount is reactive", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+
+		const log: number[] = [];
+		const dispose = effect([kg.relationCount], () => {
+			log.push(kg.relationCount.get());
+		});
+
+		kg.addRelation("a", "b", "knows", { id: "r1" });
+		kg.addRelation("a", "b", "works-with", { id: "r2" });
+		kg.removeRelation("r1");
+
+		expect(log).toEqual([0, 1, 2, 1]);
+		dispose();
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Type Index", () => {
+	it("typeIndex tracks relation types reactively", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+
+		kg.addRelation("a", "b", "knows", { id: "r1" });
+		kg.addRelation("a", "c", "knows", { id: "r2" });
+		kg.addRelation("b", "c", "works-with", { id: "r3" });
+
+		const knowsSet = kg.typeIndex.get("knows");
+		expect(knowsSet.has("r1")).toBe(true);
+		expect(knowsSet.has("r2")).toBe(true);
+		expect(knowsSet.size).toBe(2);
+
+		const worksWithSet = kg.typeIndex.get("works-with");
+		expect(worksWithSet.has("r3")).toBe(true);
+		expect(worksWithSet.size).toBe(1);
+
+		kg.removeRelation("r1");
+		expect(kg.typeIndex.get("knows").has("r1")).toBe(false);
+		expect(kg.typeIndex.get("knows").size).toBe(1);
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Temporal Queries", () => {
+	it("relationsInRange finds relations by time", () => {
+		vi.useFakeTimers({ now: 1000 });
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addEntity("C", { id: "c" });
+
+		kg.addRelation("a", "b", "knows", { id: "r1" }); // t=1000
+
+		vi.advanceTimersByTime(500);
+		kg.addRelation("b", "c", "knows", { id: "r2" }); // t=1500
+
+		vi.advanceTimersByTime(500);
+		kg.addRelation("a", "c", "knows", { id: "r3" }); // t=2000
+
+		// Range covering only r2
+		const range = kg.relationsInRange(1200, 1800);
+		expect(range).toHaveLength(1);
+		expect(range[0].id).toBe("r2");
+
+		// Range covering all
+		const all = kg.relationsInRange(0, 3000);
+		expect(all).toHaveLength(3);
+
+		vi.useRealTimers();
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Collection Access", () => {
+	it("exposes underlying collection for topK, byTag, etc.", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a", importance: 0.9, tags: ["person"] });
+		kg.addEntity("B", { id: "b", importance: 0.1, tags: ["place"] });
+
+		const topNodes = kg.collection.topK(1, { recency: 0, frequency: 0, importance: 1 });
+		expect(topNodes[0].id).toBe("a");
+
+		const people = kg.collection.byTag("person");
+		expect(people).toHaveLength(1);
+		expect(people[0].id).toBe("a");
+		kg.destroy();
+	});
+});
+
+describe("knowledgeGraph — Phase 6c: Lifecycle", () => {
+	it("destroy tears down everything", () => {
+		const kg = knowledgeGraph<string>();
+		kg.addEntity("A", { id: "a" });
+		kg.addEntity("B", { id: "b" });
+		kg.addRelation("a", "b", "knows");
+
+		let ended = false;
+		subscribe(kg.relationCount, () => {}, {
+			onEnd: () => {
+				ended = true;
+			},
+		});
+
+		kg.destroy();
+		expect(ended).toBe(true);
+		expect(() => kg.addEntity("C")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.addRelation("a", "b", "x")).toThrow("KnowledgeGraph is destroyed");
+	});
+
+	it("throws on operations after destroy", () => {
+		const kg = knowledgeGraph<string>();
+		kg.destroy();
+
+		expect(() => kg.addEntity("X")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.removeEntity("x")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.addRelation("a", "b", "x")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.removeRelation("r1")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.removeRelationsBetween("a", "b")).toThrow("KnowledgeGraph is destroyed");
+		expect(() => kg.updateRelation("r1", { weight: 0.5 })).toThrow("KnowledgeGraph is destroyed");
+	});
+
+	it("double destroy is safe", () => {
+		const kg = knowledgeGraph<string>();
+		kg.destroy();
+		kg.destroy(); // should not throw
 	});
 });

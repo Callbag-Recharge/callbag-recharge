@@ -69,6 +69,10 @@
 
 RESET/PAUSE/RESUME/TEARDOWN as TYPE 3 STATE signals. All 6 core nodes handle lifecycle signals. Tier 2 extras forward via `onSignal`. Timer utils, memory layer, orchestrate, adapters, patterns, and compat all migrated. `subscribe()` returns `Subscription` with `signal()` method. Operator generation counter for stale closure prevention.
 
+### Phase 6c: Knowledge Graph — Complete
+
+`knowledgeGraph` — reactive entity relationships with temporal tracking and graph-based retrieval. Wraps `Collection<T>` for entities (inherits decay, scoring, admission, eviction). Directed typed relations with `weight` (0–1), `metadata`, `createdAt`/`updatedAt`. Graph queries: `outgoing`, `incoming`, `neighbors`, `traverse` (BFS), `shortestPath`, `subgraph`. Reactive: `relationsOf`, `neighborsOf`, `relationCount`. `typeIndex` (ReactiveIndex) for relation type lookups. Cascade deletion via `subscribe` on collection.nodes (§1.19). 32 new tests.
+
 ### Phase 6d: Memory Lifecycle — Complete
 
 `admissionPolicy` on `collection` — gate every `add()` with admit/reject/update/merge decisions for reactive dedup and conflict resolution. `forgetPolicy` — quality predicate pruned before each admission and on explicit `gc()`. `summarize(nodeIds, reducer)` — atomic consolidation of multiple nodes into one (single `batch()` wave). All policies run synchronously through the reactive graph. 14 new tests.
@@ -137,7 +141,7 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | ~~6b~~ | ~~In-process vector index~~ | **Shipped** — `vectorIndex` HNSW in `src/memory/`. | — |
 | ~~6d~~ | ~~Consolidation + self-editing~~ | **Shipped** — `admissionPolicy` (admit/reject/update/merge), `forgetPolicy`, `summarize()`, `gc()` on `collection`. | — |
 | ~~6a~~ | ~~Session transport adapters~~ | **Shipped** — `sessionSync` (reactive diff engine), `wsTransport`, `httpTransport` (with batching) in `src/memory/`. | — |
-| 6c | Knowledge graph (reactive) | Entity relationships with temporal tracking. Graph-based retrieval. | XL |
+| ~~6c~~ | ~~Knowledge graph (reactive)~~ | **Shipped** — `knowledgeGraph` in `src/memory/`. Entity CRUD (wraps `collection`), directed typed relations with temporal tracking (`weight`, `createdAt`, `updatedAt`), BFS traversal, shortest path, subgraph extraction. Cascade deletion via `subscribe`. Reactive `relationsOf`, `neighborsOf`, `relationCount`. `typeIndex` for relation type lookups. | — |
 | 6e | Lightweight collection variant | `lightCollection` — skips `reactiveScored`, uses FIFO/LRU. For high-throughput paths where eviction quality < raw speed. | S |
 
 ### Phase 7: More Adapters

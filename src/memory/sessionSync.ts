@@ -17,7 +17,6 @@ import type {
 	Collection,
 	MemoryNode,
 	SerializedNode,
-	SessionEvent,
 	SessionSyncOptions,
 	SessionTransport,
 } from "./types";

@@ -271,6 +271,145 @@ export interface WsTransportOptions<T = unknown> {
 	serialize?: (event: SessionEvent<T>) => string;
 }
 
+// ---------------------------------------------------------------------------
+// Knowledge Graph (Phase 6c)
+// ---------------------------------------------------------------------------
+
+/** A directed, typed edge between two entities with temporal tracking. */
+export interface Relation {
+	/** Unique relation ID. */
+	readonly id: string;
+	/** Source entity ID. */
+	readonly sourceId: string;
+	/** Target entity ID. */
+	readonly targetId: string;
+	/** Relation type (e.g. "knows", "related-to", "depends-on"). */
+	readonly type: string;
+	/** Strength/confidence of the relation (0–1). Default: 1. */
+	weight: number;
+	/** Arbitrary user data attached to the relation. */
+	metadata?: Record<string, unknown>;
+	/** When the relation was created. */
+	readonly createdAt: number;
+	/** When the relation was last updated. */
+	updatedAt: number;
+}
+
+export interface AddRelationOptions {
+	/** Custom relation ID. Auto-generated if omitted. */
+	id?: string;
+	/** Weight (0–1). Default: 1. */
+	weight?: number;
+	/** Arbitrary metadata. */
+	metadata?: Record<string, unknown>;
+}
+
+export interface TraverseOptions {
+	/** Edge direction to follow. Default: "out". */
+	direction?: "out" | "in" | "both";
+	/** Filter by relation type. */
+	type?: string;
+	/** Maximum BFS depth. Default: Infinity. */
+	maxDepth?: number;
+	/** Maximum result count. Default: Infinity. */
+	maxNodes?: number;
+}
+
+export interface KnowledgeGraph<T> {
+	// --- Entity ops (delegates to internal Collection) ---
+
+	/** Add an entity to the graph. */
+	addEntity(content: T, opts?: MemoryNodeOptions): MemoryNode<T> | undefined;
+	/** Remove an entity and all its relations. */
+	removeEntity(id: string): boolean;
+	/** Get an entity by ID. */
+	getEntity(id: string): MemoryNode<T> | undefined;
+	/** Check if an entity exists. */
+	hasEntity(id: string): boolean;
+	/** Reactive store of all entities. */
+	entities: Store<MemoryNode<T>[]>;
+	/** Reactive entity count. */
+	entityCount: Store<number>;
+
+	// --- Relation CRUD ---
+
+	/** Create a directed relation between two entities. Throws if either entity doesn't exist. */
+	addRelation(
+		sourceId: string,
+		targetId: string,
+		type: string,
+		opts?: AddRelationOptions,
+	): Relation;
+	/** Remove a relation by ID. */
+	removeRelation(relationId: string): boolean;
+	/** Remove all relations between two entities, optionally filtered by type. Returns count removed. */
+	removeRelationsBetween(sourceId: string, targetId: string, type?: string): number;
+	/** Get a relation by ID. */
+	getRelation(id: string): Relation | undefined;
+	/** Check if a relation exists. */
+	hasRelation(id: string): boolean;
+	/** Update a relation's weight and/or metadata. */
+	updateRelation(
+		id: string,
+		updates: { weight?: number; metadata?: Record<string, unknown> },
+	): boolean;
+	/** Reactive relation count. */
+	relationCount: Store<number>;
+
+	// --- Graph queries (snapshot) ---
+
+	/** Get outgoing relations from an entity, optionally filtered by type. */
+	outgoing(entityId: string, type?: string): Relation[];
+	/** Get incoming relations to an entity, optionally filtered by type. */
+	incoming(entityId: string, type?: string): Relation[];
+	/** Get neighbor entities. */
+	neighbors(
+		entityId: string,
+		opts?: { direction?: "out" | "in" | "both"; type?: string },
+	): MemoryNode<T>[];
+	/** BFS traversal from a start entity. */
+	traverse(startId: string, opts?: TraverseOptions): MemoryNode<T>[];
+	/** Shortest path (BFS) between two entities. Returns entity IDs or undefined if no path. */
+	shortestPath(
+		fromId: string,
+		toId: string,
+		opts?: { type?: string; direction?: "out" | "in" | "both" },
+	): string[] | undefined;
+	/** Extract a subgraph containing the given entities and all relations between them. */
+	subgraph(entityIds: string[]): { entities: MemoryNode<T>[]; relations: Relation[] };
+
+	// --- Reactive queries ---
+
+	/** Reactive store of relations for an entity. Cached per entityId+direction. */
+	relationsOf(entityId: string, direction?: "out" | "in" | "both"): Store<Relation[]>;
+	/** Reactive store of neighbor entities. */
+	neighborsOf(entityId: string, direction?: "out" | "in" | "both"): Store<MemoryNode<T>[]>;
+
+	// --- Temporal ---
+
+	/** Get relations created or updated within a time range. */
+	relationsInRange(from: number, to: number): Relation[];
+
+	// --- Indexes ---
+
+	/** Reactive index: relation type → Set<relationId>. */
+	typeIndex: ReactiveIndex;
+
+	// --- Access to underlying Collection ---
+
+	/** The internal entity collection (for topK, byTag, gc, summarize, etc.). */
+	collection: Collection<T>;
+
+	// --- Lifecycle ---
+
+	/** Tear down all entities, relations, and internal stores. */
+	destroy(): void;
+}
+
+export interface KnowledgeGraphOptions<T = unknown> extends CollectionOptions<T> {
+	// All CollectionOptions pass through to the internal collection.
+}
+
 export interface HttpTransportOptions<T = unknown> {
 	/** HTTP method. Default: "POST". */
 	method?: string;

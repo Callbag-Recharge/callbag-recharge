@@ -5,10 +5,12 @@
 export { collection } from "./collection";
 export { computeScore, decay } from "./decay";
 export { httpTransport } from "./httpTransport";
+export { knowledgeGraph } from "./knowledgeGraph";
 export { memoryNode } from "./node";
 export { sessionSync } from "./sessionSync";
 // Types
 export type {
+	AddRelationOptions,
 	AdmissionDecision,
 	AdmissionPolicyFn,
 	Collection,
@@ -18,15 +20,19 @@ export type {
 	DistanceMetric,
 	ForgetPolicyFn,
 	HttpTransportOptions,
+	KnowledgeGraph,
+	KnowledgeGraphOptions,
 	MemoryMeta,
 	MemoryNode,
 	MemoryNodeOptions,
+	Relation,
 	ScoreWeights,
 	SerializedMeta,
 	SerializedNode,
 	SessionEvent,
 	SessionSyncOptions,
 	SessionTransport,
+	TraverseOptions,
 	VectorIndex,
 	VectorIndexOptions,
 	VectorSearchResult,
