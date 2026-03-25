@@ -36,9 +36,9 @@ export function memoryNode<T>(initialContent: T, opts?: MemoryNodeOptions): Memo
 
 	const initialMeta: MemoryMeta = {
 		id,
-		createdAt: now,
-		updatedAt: now,
-		accessedAt: now,
+		createdAt: opts?.createdAt ?? now,
+		updatedAt: opts?.updatedAt ?? now,
+		accessedAt: opts?.accessedAt ?? now,
 		accessCount: 0,
 		importance: opts?.importance ?? 0.5,
 		tags: new Set(opts?.tags),

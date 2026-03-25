@@ -503,6 +503,15 @@ This is defensive — no current code path causes `node.meta` to END independent
 
 **Proposed fix:** Either (a) null out `vector` and clear `neighbors` on delete to free the heavy fields while keeping the tombstone lightweight, or (b) implement periodic compaction that rebuilds the index, reindexing `idToIdx`. Option (a) is simpler but doesn't shrink the `nodes` array; option (b) gives full reclamation but requires a rebuild pass.
 
+### 6. agentMemory: scope tag collision mitigation
+
+**Status:** Not implemented. **Impact:** Low (correctness edge case). **Priority:** Low — only matters if LLM-extracted tags happen to match the `scope:` prefix.
+
+`agentMemory` uses tag-based scoping with a `scope:` prefix (e.g., `scope:user:alice`, `scope:agent:coder`). LLM-extracted fact tags (e.g., `"preference"`, `"technical"`) are stored alongside scope tags on the same node. If an LLM extraction returns a tag that happens to start with `scope:`, it would create a false scope match — a memory tagged `scope:user:bob` by the LLM could appear in `getAll({ userId: "bob" })` searches.
+
+**Current risk:** Low in practice — the `scope:user:`, `scope:agent:` prefixes are specific enough that LLM-extracted tags are unlikely to collide. But it's a correctness gap.
+
+**Proposed fix:** Use a longer, reserved prefix that the LLM would never generate: `__scope:v1:user:alice` or a UUID-based namespace `__ns:7f3a:user:alice`. Strip any tags matching the reserved prefix pattern from LLM-extracted facts before storage. Cost: one string check per extracted tag on the `add()` path.
 
 ---
 

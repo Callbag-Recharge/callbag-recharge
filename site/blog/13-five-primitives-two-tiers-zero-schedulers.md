@@ -50,4 +50,4 @@ For single-dep reactions that do not need DIRTY/RESOLVED bookkeeping, **subscrib
 
 ---
 
-*Chronicle continues with [Promises Are the New Callback Hell](./14-promises-are-the-new-callback-hell) — why we went callbag-native inside the library.*
+*Chronicle continues with [Output Slot: How null->fn->Set Saves 90% Memory](./14-output-slot-how-null-to-fn-to-set-saves-90-percent-memory) — our first Arc 5 deep dive.*

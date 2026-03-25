@@ -20,7 +20,7 @@
 | Orchestrate | 17 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop`, `forEach`, `onFailure`, `wait`, `subPipeline` |
 | Patterns | 10 | `createStore`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `focusManager`, `selection`, `textBuffer`, `rateLimiter` |
 | Adapters | 5 | `fromHTTP`, `fromMCP`, `toSSE`, `fromWebhook`, `fromWebSocket`/`toWebSocket` |
-| AI | 6 | `chatStream`, `agentLoop`, `toolCallState`, `memoryStore`, `hybridRoute`, `fromLLM` — Tier 5 surface; barrel also re-exports `checkpoint`, `indexedDBAdapter`, `tokenTracker` from `utils/` |
+| AI | 10 | `chatStream`, `agentLoop`, `toolCallState`, `toolRegistry`, `memoryStore`, `agentMemory`, `hybridRoute`, `fromLLM`, `systemPromptBuilder`, `conversationSummary` — Tier 5 surface; barrel also re-exports `checkpoint`, `indexedDBAdapter`, `tokenTracker` from `utils/` |
 | Worker | 4 | `workerBridge`, `workerSelf`, `WorkerTransport`, wire protocol |
 | Compat | 8 | Jotai, Nanostores, TC39 Signals, Zustand, Vue (`useStore`/`useSubscribe`/`useSubscribeRecord`), React (`useStore`/`useSubscribe`), Svelte (`useSubscribe`), Solid (`useSubscribe`) |
 
@@ -168,6 +168,89 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | ~~6c~~ | ~~Knowledge graph (reactive)~~ | **Shipped** — `knowledgeGraph` in `src/memory/`. Entity CRUD (wraps `collection`), directed typed relations with temporal tracking (`weight`, `createdAt`, `updatedAt`), BFS traversal, shortest path, subgraph extraction. Cascade deletion via `subscribe`. Reactive `relationsOf`, `neighborsOf`, `relationCount`. `typeIndex` for relation type lookups. | — |
 | ~~6e~~ | ~~Lightweight collection variant~~ | **Shipped** — `lightCollection` in `src/memory/`. FIFO or LRU eviction (no reactive scoring overhead). Same `Collection<T>` interface — drop-in for high-throughput paths. | — |
 
+### Phase 7.1-6: agentMemory v1 — Complete
+
+`agentMemory` — Mem0-equivalent reactive agentic memory. LLM fact extraction → embedding → dedup via cosine similarity → persistence via checkpoint adapter. Scoped isolation (user/agent tags). `inner.collection` / `inner.vectorIndex` per §1.14. 44 tests across 5 files. `systemPromptBuilder` also shipped (reactive multi-section prompt assembly with per-section/total token budgets).
+
+---
+
+### Phase SA: Four Standalone Products
+
+> **Goal:** Polish orchestrate, messaging, jobQueue, and agentMemory into standalone
+> out-of-the-box products. Ordered by dependency chain.
+>
+> **Design session:** `src/archive/docs/SESSION-tool-registry-job-queue-multiagent.md` (Session 2)
+
+#### SA-1: Orchestration Engine Polish
+
+> **Goal:** Make orchestrate/ a polished standalone workflow engine.
+>
+> **Depends on:** Nothing (existing 21 modules).
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SA-1a | Pipeline timeout | Global pipeline-level timeout (currently only task-level) | S |
+| SA-1b | N-way switch step | `switch(dep, cases)` — branch() is binary; need N outcomes | S-M |
+| SA-1c | Per-step metrics | Reactive latency/throughput/error-rate stores per step | S |
+| SA-1d | Pipeline pause/resume | Pause all active tasks, resume from same point | S-M |
+| SA-1e | Admin introspection | `pipeline.inspect()` → snapshot of all step statuses, pending approvals, active tasks | S |
+| SA-1f | Backoff presets | Integrate `utils/backoff` strategies into task retry (currently raw delay callback) | S |
+
+#### SA-2: Messaging Bus Distribution
+
+> **Goal:** Add distribution to messaging (topic bridge + transport adapters).
+>
+> **Depends on:** SA-1 (orchestration polish for pipelineRunner).
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SA-2a | Message transport interface | Messaging-native transport abstraction (separate from memory/'s transports — carries `TopicMessage<T>` not `SessionEvent<T>`) | S |
+| SA-2b | `wsMessageTransport` | WebSocket transport adapter for topic bridge (browser + Node) | M |
+| SA-2c | `h2MessageTransport` | HTTP/2 bidirectional stream transport (Node only) | M |
+| SA-2d | `topicBridge` | Bidirectional local↔remote topic sync with echo-dedup via message ID | M |
+| SA-2e | Message filtering | Server-side filter on subscription (by key, header, content predicate) | S |
+| SA-2f | Consumer lag + TTL | Time-based consumer lag metric; per-topic TTL auto-expiry | S |
+| SA-2g | Admin API | `listTopics()`, `inspectSubscription(name)`, `resetCursor(name)` | S-M |
+| SA-2h | Backpressure signaling | Producer gets reactive store signal when consumers can't keep up | S |
+
+#### SA-3: Job Queue Standalone
+
+> **Goal:** Polish jobQueue into a standalone durable job processing product.
+>
+> **Depends on:** SA-2 (topic bridge for distributed jobs).
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SA-3a | Job progress | `job.progress(0.5)` callback in processor; `queue.progress` reactive store | S-M |
+| SA-3b | Priority ordering | Priority queue ordering in subscription pull (topic supports priority field) | S-M |
+| SA-3c | Scheduled jobs | `queue.add(data, { runAt: Date })` — delayed execution via timer | S |
+| SA-3d | Job removal + introspection | `queue.remove(jobId)`, `queue.getJob(id)` → status/attempts/result/error | S-M |
+| SA-3e | Batch add | `queue.addBatch(items[])` — atomic batch add | S |
+| SA-3f | Rate limiting | `rateLimit: { max: N, windowMs: M }` — throttle job starts | S-M |
+| SA-3g | Distributed jobs | Distributed job queue via topic bridge (SA-2d) | M |
+| SA-3h | Job state persistence | Job metadata, completion status, result persistence (not just topic persistence) | M |
+
+#### SA-4: agentMemory v2 (Composing Products 2 & 3)
+
+> **Goal:** Upgrade agentMemory from inline processing to composing jobQueue + topic.
+>
+> **Depends on:** SA-3 (jobQueue standalone).
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SA-4a | Extraction via jobQueue | Route LLM fact extraction through `jobQueue` (retry, stall detection, DLQ) | M |
+| SA-4b | Embedding via jobQueue | Route embedding through `jobQueue` (parallel, retry). Extraction queue concurrency 1, embedding queue concurrency N | M |
+| SA-4c | Memory event topic | `topic<MemoryEvent>` for broadcasting add/update/delete events to other agents | S-M |
+| SA-4d | Graph extraction | Optional `knowledgeGraph` integration — extract entities + relations alongside facts | M |
+| SA-4e | Shared memory via bridge | Multi-process shared memory via topic bridge (SA-2d) | M |
+| SA-4f | Update tests | Revise test suite for jobQueue-backed extraction + embedding | M |
+| SA-4g | Shared LLM race | Concurrent `add()` calls share one `fromLLM` — jobQueue serialization (SA-4a) solves naturally | S |
+| SA-4h | Configurable search overfetch | Current 2x overfetch for scope filtering may be insufficient; make overfetch factor configurable | S |
+| SA-4i | Cancellable embed | `search()`/`add()` abort doesn't cancel in-flight `embed()` call — requires `EmbedFn` signature accepting `AbortSignal` | S-M |
+| SA-4j | Per-operation status | Concurrent add + search clobbers single status store — jobQueue tracks per-operation status independently | M |
+
+---
+
 ### Phase 7: More Adapters
 
 > **Goal:** Connect any external system with thin (~20-50 line) adapters.
@@ -217,7 +300,7 @@ Moved from their previous locations to `src/ai/`. `ai/index.ts` barrel exports a
 | ~~7.1-2~~ | ~~`embeddingIndex`~~ | **Shipped** — In-browser semantic search. Loads embedding model via Transformers.js (peer dep, dynamic import). Pre-computed vectors from binary file. Uses `vectorIndex` (HNSW) from `memory/`. Generation counter prevents stale async results (cancellableAction pattern). `teardown()` on destroy. | — |
 | ~~7.1-3~~ | ~~`ragPipeline`~~ | **Shipped** — Reactive RAG: `query: Store<string>` input; `docs` and `context` are `derived` stores that re-compute whenever search results, summary, or memory change. `latestAsync` cancels stale in-flight semantic searches on rapid query changes. `firstValueFrom(rawSkip(1)(results.source), { signal })` waits for embedding result before generating; AbortSignal from `latestAsync` cleans up on superseded queries. Merges + deduplicates FTS5 + semantic results. `destroy()` tears down all subscriptions and derived stores. | — |
 | ~~7.1-4~~ | ~~`conversationSummary`~~ | **Shipped** — Rolling summarizer: monitors `chat.messages`, triggers `llm.generate()` when token count exceeds threshold after an assistant turn. Shared-LLM safe: `status === 'pending'` guard resets `summarizing` flag when RAG aborts an in-flight summary. `ConversationSummaryStore extends Store<string>` with `destroy()`. | — |
-| 7.1-5 | `systemPromptBuilder` | `systemPromptBuilder({ sections: Array<{ name, content: Store<string>, maxTokens? }> })` — reactive derived that assembles final system prompt from multiple sources. Manages token budget allocation across sections (library docs, user memories, search results, rules). | S |
+| ~~7.1-5~~ | ~~`systemPromptBuilder`~~ | **Shipped** — Reactive derived that assembles a system prompt from multiple `Store<string>` sections. Per-section `maxTokens` truncates at word boundaries; `maxTotalTokens` trims back-to-front (prioritizing earlier sections). Empty sections omitted. `SystemPromptBuilderStore extends Store<string>` with `destroy()`. | — |
 
 #### 7.1-6: Build-time doc indexing script
 

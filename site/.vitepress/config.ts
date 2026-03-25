@@ -695,12 +695,94 @@ export default defineConfig({
 							],
 						},
 						{
-							text: "Arc 5: Callbag-Native",
+							text: "Arc 5: Architecture v4",
 							collapsed: false,
 							items: [
 								{
-									text: "14. Promises Are the New Callback Hell",
-									link: "/blog/14-promises-are-the-new-callback-hell",
+									text: "14. Output Slot: How null->fn->Set Saves 90% Memory",
+									link: "/blog/14-output-slot-how-null-to-fn-to-set-saves-90-percent-memory",
+								},
+								{
+									text: "15. When We Removed the ADOPT Protocol",
+									link: "/blog/15-when-we-removed-the-adopt-protocol",
+								},
+								{
+									text: "16. Lazy Tier 2: The switchMap Footgun We Had to Kill",
+									link: "/blog/16-lazy-tier-2-the-switchmap-footgun-we-had-to-kill",
+								},
+								{
+									text: "17. Bitmask Flag Packing in TypeScript",
+									link: "/blog/17-bitmask-flag-packing-in-typescript",
+								},
+							],
+						},
+						{
+							text: "Arc 6: Correctness Stories",
+							collapsed: false,
+							items: [
+								{
+									text: "18. Diamond Resolution Without Pull-Phase Computation",
+									link: "/blog/18-diamond-resolution-without-pull-phase-computation",
+								},
+								{
+									text: "19. When Not to Dedup: Understanding Callbag Operator Semantics",
+									link: "/blog/19-when-not-to-dedup-understanding-callbag-operator-semantics",
+								},
+								{
+									text: "20. Benchmark Regression Exposed 3 Operator Bugs",
+									link: "/blog/20-benchmark-regression-exposed-3-operator-bugs",
+								},
+								{
+									text: "21. The Cost of Correctness: 9.8M ops/sec vs Preact's 34M",
+									link: "/blog/21-the-cost-of-correctness-9-8m-ops-vs-preacts-34m",
+								},
+							],
+						},
+						{
+							text: "Arc 7: From Library to Platform",
+							collapsed: false,
+							items: [
+								{
+									text: "23. Stores All the Way Down: Adding State to Reactive Programming",
+									link: "/blog/23-stores-all-the-way-down-adding-state-to-reactive-programming",
+								},
+								{
+									text: "24. Why Our Computed States Are Eagerly Reactive",
+									link: "/blog/24-why-our-computed-states-are-eagerly-reactive",
+								},
+								{
+									text: "25. From Zustand to Reactive Orchestration",
+									link: "/blog/25-from-zustand-to-reactive-orchestration",
+								},
+								{
+									text: "26. The Missing Middle: Why Signals Aren't Enough for AI Streaming",
+									link: "/blog/26-the-missing-middle-why-signals-arent-enough-for-ai-streaming",
+								},
+							],
+						},
+						{
+							text: "Arc 8: Engineering Deep Cuts",
+							collapsed: false,
+							items: [
+								{
+									text: "22. Promises Are the New Callback Hell",
+									link: "/blog/22-promises-are-the-new-callback-hell",
+								},
+								{
+									text: "27. switchMap Error Handling: The Bug That Tests Didn't Catch",
+									link: "/blog/27-switchmap-error-handling-the-bug-that-tests-didnt-catch",
+								},
+								{
+									text: "28. Skip DIRTY: How We Halved Dispatch for Single-Dep Paths",
+									link: "/blog/28-skip-dirty-how-we-halved-dispatch-for-single-dep-paths",
+								},
+								{
+									text: "29. Bitmask Overflow at >32 Dependencies",
+									link: "/blog/29-bitmask-overflow-at-more-than-32-dependencies",
+								},
+								{
+									text: "30. Why We Don't Use queueMicrotask (And Neither Should You)",
+									link: "/blog/30-why-we-dont-use-queuemicrotask-and-neither-should-you",
 								},
 							],
 						},

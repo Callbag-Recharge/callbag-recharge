@@ -65,6 +65,12 @@ export interface MemoryNodeOptions {
 	importance?: number;
 	/** Initial tags. */
 	tags?: string[];
+	/** Override createdAt timestamp (for hydration from persistence). */
+	createdAt?: number;
+	/** Override updatedAt timestamp (for hydration from persistence). */
+	updatedAt?: number;
+	/** Override accessedAt timestamp (for hydration from persistence). */
+	accessedAt?: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -328,7 +328,7 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through callbag-native Promise elimination (March 24, 2026)
+**Archive Status:** Complete through four-product standalone architecture (March 25, 2026)
 
 ### Gemini Marketing Research (March 21) — Market Positioning & Growth Strategy
 **Topic:** Competitive landscape analysis, agentic AI trends, streaming durability gap, and developer marketing strategy for callbag-recharge
@@ -400,6 +400,21 @@ Comprehensive audit found that while §1.16 ("no raw `new Promise`") was mostly 
 **Rejected:** Keep Promise APIs for convenience (breaks reactive continuity); only fix `new Promise` literals (misses deeper issue); add `forkJoin` immediately (wait for recurrence).
 
 **Outcome:** Architecture §1.20 (callbag-native output), CLAUDE.md replacement patterns, roadmap in-progress item. Implementation deferred to next session.
+
+### Session tool-registry-job-queue-multiagent (March 25) — Tool Registry + Job Queue Integration + Multi-Agent Gap Analysis
+**Topic:** Designing `toolRegistry` primitive bridging `toolCallState` → `jobQueue`, evaluating feasibility of an OpenClaw-like multi-agent backend app
+
+Implemented `toolRegistry` — reactive tool dispatch with dual execution modes (inline or jobQueue-backed). Each tool can run directly via `rawFromAny` or route through a `jobQueue` for durable execution with retry, stall detection, and DLQ. `execute()` returns a callbag source (not Promise) for native `agentLoop` act phase integration. `definitions()` outputs OpenAI-compatible function calling format.
+
+**Key insight:** The combination of `toolRegistry` + `jobQueue` + `agentLoop` creates a natural backend agent pattern that's architecturally simpler than LangGraph/CrewAI — the reactive graph IS the orchestration engine, no separate DAG scheduler needed.
+
+**Gap analysis for OpenClaw-like demo:** 7 gaps identified. Gap #1 (toolRegistry) now shipped. Remaining: multi-agent routing (#2), structured output parsing in fromLLM (#3), conversation threading (#4), sandbox/code execution (#5), file system adapter (#6), full session persistence (#7).
+
+**Rejected:** Returning Promise from `execute()` (breaks §1.20); wrapping `toolCallState` internally (different concern); setTimeout for timeout (use fromTimer per §1.18); building multi-agent routing in same session (separate M-L effort).
+
+**Outcome:** `toolRegistry` shipped in `ai/` with 15 tests. Architecture sketch for supervisor → agents → tool queues → shared memory. Next: extend `fromLLM` for `tool_calls` parsing, then `agentPool`/`supervisor` primitive.
+
+**Session 2 (March 25):** Extended to four standalone products architecture. agentMemory (Mem0-equivalent) composes jobQueue (extraction + embedding) and topic (multi-agent coordination). Distribution via topic bridge with transport adapters. Orchestration/messaging/jobQueue each polished as standalone products. Implementation order: orchestration → messaging → jobQueue → agentMemory.
 
 ---
 

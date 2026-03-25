@@ -41,13 +41,39 @@ Behind-the-scenes stories from building callbag-recharge — the architecture de
 | 12 | [RESOLVED: The Signal That Skips Entire Subtrees](./12-resolved-the-signal-that-skips-entire-subtrees) | 7 min |
 | 13 | [Five Primitives, Two Tiers, Zero Schedulers](./13-five-primitives-two-tiers-zero-schedulers) | 8 min |
 
-### Arc 5: Callbag-Native — Promise Elimination
+### Arc 5: Architecture v4 — Performance Without Compromise
 
 | # | Post | Read time |
 |---|------|-----------|
-| 14 | [Promises Are the New Callback Hell](./14-promises-are-the-new-callback-hell) | 10 min |
+| 14 | [Output Slot: How null->fn->Set Saves 90% Memory](./14-output-slot-how-null-to-fn-to-set-saves-90-percent-memory) | 7 min |
+| 15 | [When We Removed the ADOPT Protocol](./15-when-we-removed-the-adopt-protocol) | 6 min |
+| 16 | [Lazy Tier 2: The switchMap Footgun We Had to Kill](./16-lazy-tier-2-the-switchmap-footgun-we-had-to-kill) | 6 min |
+| 17 | [Bitmask Flag Packing in TypeScript](./17-bitmask-flag-packing-in-typescript) | 6 min |
 
-<!--
-### Arc 6: Architecture v4 — Performance Without Compromise
-Coming soon.
--->
+### Arc 6: Correctness Stories
+
+| # | Post | Read time |
+|---|------|-----------|
+| 18 | [Diamond Resolution Without Pull-Phase Computation](./18-diamond-resolution-without-pull-phase-computation) | 6 min |
+| 19 | [When Not to Dedup: Understanding Callbag Operator Semantics](./19-when-not-to-dedup-understanding-callbag-operator-semantics) | 5 min |
+| 20 | [Benchmark Regression Exposed 3 Operator Bugs](./20-benchmark-regression-exposed-3-operator-bugs) | 5 min |
+| 21 | [The Cost of Correctness: 9.8M ops/sec vs Preact's 34M](./21-the-cost-of-correctness-9-8m-ops-vs-preacts-34m) | 6 min |
+
+### Arc 7: From Library to Platform
+
+| # | Post | Read time |
+|---|------|-----------|
+| 23 | [Stores All the Way Down: Adding State to Reactive Programming](./23-stores-all-the-way-down-adding-state-to-reactive-programming) | 6 min |
+| 24 | [Why Our Computed States Are Eagerly Reactive](./24-why-our-computed-states-are-eagerly-reactive) | 6 min |
+| 25 | [From Zustand to Reactive Orchestration](./25-from-zustand-to-reactive-orchestration) | 6 min |
+| 26 | [The Missing Middle: Why Signals Aren't Enough for AI Streaming](./26-the-missing-middle-why-signals-arent-enough-for-ai-streaming) | 6 min |
+
+### Arc 8: Engineering Deep Cuts
+
+| # | Post | Read time |
+|---|------|-----------|
+| 22 | [Promises Are the New Callback Hell](./22-promises-are-the-new-callback-hell) | 6 min |
+| 27 | [switchMap Error Handling: The Bug That Tests Didn't Catch](./27-switchmap-error-handling-the-bug-that-tests-didnt-catch) | 5 min |
+| 28 | [Skip DIRTY: How We Halved Dispatch for Single-Dep Paths](./28-skip-dirty-how-we-halved-dispatch-for-single-dep-paths) | 5 min |
+| 29 | [Bitmask Overflow at >32 Dependencies](./29-bitmask-overflow-at-more-than-32-dependencies) | 5 min |
+| 30 | [Why We Don't Use queueMicrotask (And Neither Should You)](./30-why-we-dont-use-queuemicrotask-and-neither-should-you) | 5 min |

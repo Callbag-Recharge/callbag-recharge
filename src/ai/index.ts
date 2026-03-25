@@ -14,6 +14,7 @@
 //   - fromLLM         — unified reactive source for LLM inference
 //   - checkpoint      — durable step boundary (re-exported from utils)
 //   - indexedDBAdapter— IndexedDB checkpoint adapter (re-exported from utils)
+//   - agentMemory     — Mem0-equivalent reactive agentic memory
 //   - tokenTracker    — token/cost tracking operator (re-exported from utils)
 // ---------------------------------------------------------------------------
 
@@ -37,6 +38,16 @@ export type {
 	GatedAgentLoopResult,
 } from "./agentLoop";
 export { agentLoop } from "./agentLoop";
+export { agentMemory } from "./agentMemory";
+export type {
+	AgentMemoryOptions,
+	AgentMemoryResult,
+	AgentMemoryScope,
+	AgentMemorySearchResult,
+	AgentMemoryStatus,
+	EmbedFn,
+	ExtractedFact,
+} from "./agentMemory/types";
 export type {
 	ChatMessage,
 	ChatStreamFactory,
@@ -85,6 +96,12 @@ export type {
 	RagPipelineResult,
 } from "./ragPipeline";
 export { ragPipeline } from "./ragPipeline";
+export type {
+	PromptSection,
+	SystemPromptBuilderOptions,
+	SystemPromptBuilderStore,
+} from "./systemPromptBuilder";
+export { systemPromptBuilder } from "./systemPromptBuilder";
 export type {
 	ToolCallEntry,
 	ToolCallStateOptions,
