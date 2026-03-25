@@ -238,7 +238,7 @@ export function docIndex(opts: DocIndexOptions): DocIndexResult {
 			// FTS5 MATCH query — wrap in double-quotes for phrase matching to
 			// prevent FTS5 operator injection (AND, OR, NOT, NEAR, *, etc.)
 			const escaped = query.replace(/"/g, '""');
-			const sql = `SELECT id, title, snippet(docs, 1, '<mark>', '</mark>', '…', 32) as excerpt, rank, source, tags FROM docs WHERE docs MATCH '"${escaped}"' ORDER BY rank LIMIT ${limit}`;
+			const sql = `SELECT rowid as id, title, snippet(docs, 1, '<mark>', '</mark>', '…', 32) as excerpt, rank, source, tags FROM docs WHERE docs MATCH '"${escaped}"' ORDER BY rank LIMIT ${limit}`;
 
 			sqlite3.exec(dbHandle, sql, (row: any[], columns: string[]) => {
 				const idIdx = columns.indexOf("id");
@@ -276,6 +276,7 @@ export function docIndex(opts: DocIndexOptions): DocIndexResult {
 	}
 
 	function destroy(): void {
+		if (destroyed) return;
 		destroyed = true;
 		if (sqlite3 && dbHandle !== null) {
 			try {
