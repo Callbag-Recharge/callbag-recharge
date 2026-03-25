@@ -418,11 +418,12 @@ describe("task — no deps", () => {
 			init: task((_signal) => "initialized"),
 		});
 
-		const values: any[] = [];
-		subscribe(wf.steps.init, (v) => values.push(v));
-
+		// No-deps tasks execute synchronously during pipeline construction.
+		// The value is already in the store by the time we subscribe, and
+		// subscribe() follows RxJS semantics (no initial-value callback),
+		// so check via get() instead.
 		await new Promise((r) => setTimeout(r, 50));
-		expect(values).toContain("initialized");
+		expect(wf.steps.init.get()).toBe("initialized");
 
 		wf.destroy();
 	});

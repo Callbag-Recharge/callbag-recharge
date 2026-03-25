@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { toSSE } from "../../adapters/sse";
 import { state } from "../../index";
+import { firstValueFrom } from "../../raw/firstValueFrom";
 
 describe("toSSE", () => {
 	it("creates SSE store with handler", () => {
@@ -155,6 +156,6 @@ describe("toSSE", () => {
 	it("listen() rejects without port", async () => {
 		const source = state("hello");
 		const sse = toSSE(source);
-		await expect(sse.listen()).rejects.toThrow("port is required");
+		await expect(firstValueFrom(sse.listen())).rejects.toThrow("port is required");
 	});
 });

@@ -15,7 +15,7 @@ Focus on the README and in-repo docs. No external site yet.
 | **llms.txt** — simple machine-readable summary in repo root | P1 | TODO |
 | **docs/** — architecture, API reference (already exist) | P1 | Done |
 | **src/archive/docs/** — recovered historical docs for blog material | P1 | Done |
-| **VitePress blog** — `/blog/` section with sidebar, Arcs 1–3 written | P1 | Done |
+| **VitePress blog** — `/blog/` section with sidebar, Arcs 1–5 (through promise elimination) written | P1 | Done |
 
 ## Phase 2: Post-Publish (When Users Arrive)
 
@@ -55,7 +55,7 @@ Each "engineering evolution" post follows this pattern:
 3. **The Insight** — "We realized the callbag protocol actually allows Z."
 4. **The Solution** — "In v4, we implement [pattern]. Here's the code."
 
-### Chronicle Blog Series (29 posts across 8 arcs)
+### Chronicle Blog Series (30 numbered posts across 8 arcs)
 
 #### Arc 1: Origins — Why Revive Callbag? ✅ SHIPPED (March 24, 2026)
 
@@ -85,50 +85,58 @@ Source material: `src/archive/docs/architecture-v1.md`; session `47f1a07f` (expl
 
 Source material: `src/archive/docs/architecture-v2.md`; sessions 269923a2 (two-phase push), ce974b95 (memoization) for implementation context.
 
-#### Arc 4: Architecture v3 — The Type 3 Breakthrough
+#### Arc 4: Architecture v3 — The Type 3 Breakthrough ✅ SHIPPED (March 24, 2026)
 
-| # | Title | Source Material |
-|---|-------|----------------|
-| 10 | **The Day We Read the Callbag Spec (Again)** | Session 8452282f — type 3 breakthrough brainstorm |
-| 11 | **Why Control Signals Don't Belong in the Data Stream** | `architecture-v3.md`, sessions 8452282f + 8601463b |
-| 12 | **RESOLVED: The Signal That Skips Entire Subtrees** | Session ce974b95 — push-phase memoization cascade |
-| 13 | **Five Primitives, Two Tiers, Zero Schedulers** | v3 primitive unification (producer, state, derived, operator, effect) |
+| # | Title | File | Status |
+|---|-------|------|--------|
+| 10 | **The Day We Read the Callbag Spec (Again)** | `site/blog/10-the-day-we-read-the-callbag-spec-again.md` | Done |
+| 11 | **Why Control Signals Don't Belong in the Data Stream** | `site/blog/11-why-control-signals-dont-belong-in-the-data-stream.md` | Done |
+| 12 | **RESOLVED: The Signal That Skips Entire Subtrees** | `site/blog/12-resolved-the-signal-that-skips-entire-subtrees.md` | Done |
+| 13 | **Five Primitives, Two Tiers, Zero Schedulers** | `site/blog/13-five-primitives-two-tiers-zero-schedulers.md` | Done |
+
+Source material: `src/archive/docs/architecture-v3.md`; `SESSION-8452282f-type3-breakthrough.md`; sessions 8452282f, 8601463b, ce974b95 (per inventory below).
+
+#### Companion post (chronicle numbering): Callbag-native promise elimination ✅ SHIPPED (March 24, 2026)
+
+| # | Title | File |
+|---|-------|------|
+| 14 | **Promises Are the New Callback Hell** | `site/blog/14-promises-are-the-new-callback-hell.md` |
 
 #### Arc 5: Architecture v4 — Performance Without Compromise
 
 | # | Title | Source Material |
 |---|-------|----------------|
-| 14 | **Output Slot: How null→fn→Set Saves 90% Memory** | Session 8693d636 — lazy allocation |
-| 15 | **When We Removed the ADOPT Protocol** | Session 2d2c2674 — simplification |
-| 16 | **Lazy Tier 2: The switchMap Footgun We Had to Kill** | Session lazy-tier2-option-d3 |
-| 17 | **Bitmask Flag Packing in TypeScript** | Session 476164b4 — V8 hidden class optimization |
+| 15 | **Output Slot: How null→fn→Set Saves 90% Memory** | Session 8693d636 — lazy allocation |
+| 16 | **When We Removed the ADOPT Protocol** | Session 2d2c2674 — simplification |
+| 17 | **Lazy Tier 2: The switchMap Footgun We Had to Kill** | Session lazy-tier2-option-d3 |
+| 18 | **Bitmask Flag Packing in TypeScript** | Session 476164b4 — V8 hidden class optimization |
 
 #### Arc 6: Correctness Stories
 
 | # | Title | Source Material |
 |---|-------|----------------|
-| 18 | **Diamond Resolution Without Pull-Phase Computation** | Session ce974b95, `architecture.md` §8 |
-| 19 | **When Not to Dedup: Understanding Callbag Operator Semantics** | Session 4f72f2b0 — no-default-dedup decision |
-| 20 | **Benchmark Regression Exposed 3 Operator Bugs** | Session ecc3a7e6 — benchmarks as design validators |
-| 21 | **The Cost of Correctness: 9.8M ops/sec vs Preact's 34M** | Session 88e9bd81 — honest benchmarking |
+| 19 | **Diamond Resolution Without Pull-Phase Computation** | Session ce974b95, `architecture.md` §8 |
+| 20 | **When Not to Dedup: Understanding Callbag Operator Semantics** | Session 4f72f2b0 — no-default-dedup decision |
+| 21 | **Benchmark Regression Exposed 3 Operator Bugs** | Session ecc3a7e6 — benchmarks as design validators |
+| 22 | **The Cost of Correctness: 9.8M ops/sec vs Preact's 34M** | Session 88e9bd81 — honest benchmarking |
 
 #### Arc 7: From Library to Platform
 
 | # | Title | Source Material |
 |---|-------|----------------|
-| 22 | **Stores All the Way Down: Adding State to Reactive Programming** | Store interface design, `get()/set()/source()` |
-| 23 | **Why Our Computed States Are Eagerly Reactive** | Sessions 12795037 + f23a9e35 — STANDALONE mode |
-| 24 | **From Zustand to Reactive Orchestration** | Compat layer strategy, `createStore` pattern |
-| 25 | **The Missing Middle: Why Signals Aren't Enough for AI Streaming** | TC39 debate, Gemini research §Signals vs Streams |
+| 23 | **Stores All the Way Down: Adding State to Reactive Programming** | Store interface design, `get()/set()/source()` |
+| 24 | **Why Our Computed States Are Eagerly Reactive** | Sessions 12795037 + f23a9e35 — STANDALONE mode |
+| 25 | **From Zustand to Reactive Orchestration** | Compat layer strategy, `createStore` pattern |
+| 26 | **The Missing Middle: Why Signals Aren't Enough for AI Streaming** | TC39 debate, Gemini research §Signals vs Streams |
 
 #### Arc 8: Engineering Deep Cuts (Bonus)
 
 | # | Title | Source Material |
 |---|-------|----------------|
-| 26 | **switchMap Error Handling: The Bug That Tests Didn't Catch** | Session f9dc5740 |
-| 27 | **Skip DIRTY: How We Halved Dispatch for Single-Dep Paths** | Session f47ed59e — SINGLE_DEP signaling |
-| 28 | **Bitmask Overflow at >32 Dependencies** | Session 67ad8cc6 — 863-test suite |
-| 29 | **Why We Don't Use queueMicrotask (And Neither Should You)** | Architecture §1.18 — microtask breaks glitch-free |
+| 27 | **switchMap Error Handling: The Bug That Tests Didn't Catch** | Session f9dc5740 |
+| 28 | **Skip DIRTY: How We Halved Dispatch for Single-Dep Paths** | Session f47ed59e — SINGLE_DEP signaling |
+| 29 | **Bitmask Overflow at >32 Dependencies** | Session 67ad8cc6 — 863-test suite |
+| 30 | **Why We Don't Use queueMicrotask (And Neither Should You)** | Architecture §1.18 — microtask breaks glitch-free |
 
 ### Market-Positioning Posts (standalone, from Gemini marketing research)
 

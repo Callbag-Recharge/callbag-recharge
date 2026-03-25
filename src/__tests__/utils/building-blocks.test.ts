@@ -3,6 +3,7 @@ import { Inspector } from "../../core/inspector";
 import { state } from "../../core/state";
 import { dagLayout } from "../../orchestrate/dagLayout";
 import { workflowNode } from "../../orchestrate/workflowNode";
+import { firstValueFrom } from "../../raw/firstValueFrom";
 import { autoSave } from "../../utils/autoSave";
 import { memoryAdapter } from "../../utils/checkpoint";
 import { contentStats } from "../../utils/contentStats";
@@ -606,7 +607,7 @@ describe("workflowNode", () => {
 
 		const node = workflowNode("n1", "Test Node");
 
-		const promise = node.simulate([100, 200], 0.2);
+		const promise = firstValueFrom(node.simulate([100, 200], 0.2));
 		// Advance timers to cover the fromTimer duration
 		vi.advanceTimersByTime(200);
 		const result = await promise;
@@ -625,7 +626,7 @@ describe("workflowNode", () => {
 
 		const node = workflowNode("n1", "Test Node");
 
-		const promise = node.simulate([100, 200], 0.5);
+		const promise = firstValueFrom(node.simulate([100, 200], 0.5));
 		vi.advanceTimersByTime(200);
 
 		await expect(promise).rejects.toThrow("Test Node failed");
@@ -641,7 +642,7 @@ describe("workflowNode", () => {
 
 		const node = workflowNode("n1", "Test Node");
 
-		const promise = node.simulate([50, 100], 0.5);
+		const promise = firstValueFrom(node.simulate([50, 100], 0.5));
 		vi.advanceTimersByTime(200);
 		await promise.catch(() => {});
 
@@ -658,7 +659,7 @@ describe("workflowNode", () => {
 
 		const node = workflowNode("n1", "Test Node");
 
-		const promise = node.simulate([100, 200], 0.5);
+		const promise = firstValueFrom(node.simulate([100, 200], 0.5));
 		vi.advanceTimersByTime(200);
 		await promise;
 
@@ -677,7 +678,7 @@ describe("workflowNode", () => {
 
 		const node = workflowNode("n1", "Test Node");
 
-		const promise = node.simulate([100, 200], 0.5);
+		const promise = firstValueFrom(node.simulate([100, 200], 0.5));
 		vi.advanceTimersByTime(200);
 		await promise.catch(() => {});
 
@@ -698,7 +699,7 @@ describe("workflowNode", () => {
 
 		const obs = Inspector.observe(node.breakerState);
 
-		const promise = node.simulate([50, 100], 0.5);
+		const promise = firstValueFrom(node.simulate([50, 100], 0.5));
 		vi.advanceTimersByTime(200);
 		await promise.catch(() => {});
 

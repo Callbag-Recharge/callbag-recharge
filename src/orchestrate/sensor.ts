@@ -15,7 +15,7 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN, teardown } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
 import { firstValueFrom } from "../extra/firstValueFrom";
@@ -23,7 +23,9 @@ import { interval } from "../extra/interval";
 import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import { firstValueFrom as rawFirstValueFrom } from "../raw/firstValueFrom";
+import { rawFromAny } from "../raw/fromAny";
 import { fromTimer } from "../raw/fromTimer";
+import { rawSubscribe } from "../raw/subscribe";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
 import type { TaskState } from "./types";
@@ -149,8 +151,6 @@ export function sensor<T>(
 						const firstCheck = await poll(signal, value);
 						if (stopped) throw new Error("sensor: cancelled");
 						if (firstCheck) {
-							safeEmit(value);
-							safeComplete();
 							return value;
 						}
 
@@ -165,8 +165,9 @@ export function sensor<T>(
 							if (stopped || polling) return;
 							polling = true;
 
-							Promise.resolve(poll(signal, value))
-								.then((result) => {
+							rawSubscribe(
+								rawFromAny(poll(signal, value)),
+								(result) => {
 									polling = false;
 									if (stopped) return;
 									if (result) {
@@ -174,14 +175,18 @@ export function sensor<T>(
 										tickSub = null;
 										done$.set({ ok: true });
 									}
-								})
-								.catch((err) => {
-									polling = false;
-									if (stopped) return;
-									tickSub?.unsubscribe();
-									tickSub = null;
-									done$.set({ ok: false, err });
-								});
+								},
+								{
+									onEnd: (err?: unknown) => {
+										polling = false;
+										if (err === undefined) return;
+										if (stopped) return;
+										tickSub?.unsubscribe();
+										tickSub = null;
+										done$.set({ ok: false, err });
+									},
+								},
+							);
 						});
 
 						// Race: poll success vs timeout
@@ -213,18 +218,29 @@ export function sensor<T>(
 							throw result.err;
 						}
 
-						safeEmit(value);
-						safeComplete();
 						return value;
-					}).catch(() => {
-						// Error tracked by taskState
-						if (!stopped) {
+					});
+
+					// Subscribe to status for emit/complete coordination
+					let statusUnsub: Subscription | null = null;
+					statusUnsub = subscribe(ts.status, (s) => {
+						if (s === "running" || s === "idle") return;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+						if (s === "success") {
+							safeEmit(ts.result.get() as T);
+							safeComplete();
+						} else if (!stopped) {
 							safeEmit(undefined);
 							safeComplete();
 						}
 					});
 
-					return cleanup;
+					return () => {
+						cleanup();
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+					};
 				});
 			}),
 		) as Store<T | undefined>;

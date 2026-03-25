@@ -20,12 +20,13 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
-import { firstValueFrom } from "../raw/firstValueFrom";
 import { fromTimer } from "../raw/fromTimer";
+import { rawSubscribe } from "../raw/subscribe";
 import type { RetryOptions } from "../utils/retry";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
@@ -212,73 +213,13 @@ export function task<T>(
 				// Run the task with cancellation support
 				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
+					let statusUnsub: Subscription | null = null;
 
 					const safeEmit = (v: T | undefined) => {
 						if (!stopped) emit(v);
 					};
 					const safeComplete = () => {
 						if (!stopped) complete();
-					};
-
-					const runTask = async (attempt: number): Promise<void> => {
-						if (stopped) return;
-						try {
-							const result = await ts.run(async (signal) => {
-								let maybePromise = fn(signal, values);
-
-								// Guard: async generators silently resolve to the generator
-								// object instead of yielded values. Detect and throw early.
-								if (
-									maybePromise != null &&
-									typeof (maybePromise as any)[Symbol.asyncIterator] === "function"
-								) {
-									throw new Error(
-										"task() does not support async generators. " +
-											"Use step() + fromAsyncIter() for multi-value async streams.",
-									);
-								}
-
-								// Apply timeout if configured — pass signal so timer is
-								// cancelled when the task completes or is destroyed
-								if (timeoutOpt !== undefined && maybePromise instanceof Promise) {
-									maybePromise = Promise.race([
-										maybePromise,
-										firstValueFrom(fromTimer(timeoutOpt, signal)).then(() => {
-											throw new Error(`Timeout: ${timeoutOpt}ms`);
-										}),
-									]);
-								}
-
-								const r = await maybePromise;
-								opts?.onSuccess?.(r);
-								safeEmit(r);
-								safeComplete();
-								return r;
-							});
-							void result;
-						} catch (e) {
-							if (stopped) return;
-							// Retry logic
-							if (attempt < retryCount) {
-								if (retryWhile && !retryWhile(e)) {
-									// Predicate says don't retry
-									handleError(e);
-									return;
-								}
-								const delay = retryDelay ? retryDelay(attempt, e) : 0;
-								if (delay === null) {
-									handleError(e);
-									return;
-								}
-								ts.reset(); // Reset so we can run() again
-								if (delay > 0) {
-									await firstValueFrom(fromTimer(delay));
-								}
-								if (stopped) return;
-								return runTask(attempt + 1);
-							}
-							handleError(e);
-						}
 					};
 
 					const handleError = (e: unknown) => {
@@ -297,11 +238,79 @@ export function task<T>(
 						}
 					};
 
-					runTask(0).catch(() => {
-						// Swallowed — already handled inside
-					});
+					function runTask(attempt: number): void {
+						if (stopped) return;
+
+						// Subscribe to status BEFORE calling run() so we catch
+						// synchronous completions (run() is void, not async).
+						statusUnsub = subscribe(ts.status, (s) => {
+							if (s === "running" || s === "idle") return;
+							statusUnsub?.unsubscribe();
+							statusUnsub = null;
+
+							if (s === "success") {
+								const r = ts.result.get() as T;
+								opts?.onSuccess?.(r);
+								safeEmit(r);
+								safeComplete();
+							} else if (s === "error") {
+								if (stopped) return;
+								const e = ts.error.get();
+								// Retry logic
+								if (attempt < retryCount) {
+									if (retryWhile && !retryWhile(e)) {
+										handleError(e);
+										return;
+									}
+									const delay = retryDelay ? retryDelay(attempt, e) : 0;
+									if (delay === null) {
+										handleError(e);
+										return;
+									}
+									ts.reset(); // Reset so we can run() again
+									if (delay > 0) {
+										rawSubscribe(fromTimer(delay), () => {
+											if (!stopped) runTask(attempt + 1);
+										});
+									} else {
+										if (!stopped) runTask(attempt + 1);
+									}
+								} else {
+									handleError(e);
+								}
+							} else if (s === "skipped") {
+								safeEmit(undefined);
+								safeComplete();
+							}
+						});
+
+						ts.run(
+							(signal) => {
+								const maybeResult = fn(signal, values);
+
+								// Guard: async generators silently resolve to the generator
+								// object instead of yielded values. Detect and throw early.
+								if (
+									maybeResult != null &&
+									typeof (maybeResult as any)[Symbol.asyncIterator] === "function"
+								) {
+									throw new Error(
+										"task() does not support async generators. " +
+											"Use step() + fromAsyncIter() for multi-value async streams.",
+									);
+								}
+
+								return maybeResult;
+							},
+							timeoutOpt !== undefined ? { timeout: timeoutOpt } : undefined,
+						);
+					}
+
+					runTask(0);
 					return () => {
 						stopped = true;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
 					};
 				});
 			}),

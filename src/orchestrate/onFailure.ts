@@ -16,8 +16,9 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
@@ -114,6 +115,7 @@ export function onFailure<T>(
 
 				return producer<T | undefined>(({ emit, complete }) => {
 					let stopped = false;
+					let statusUnsub: Subscription | null = null;
 
 					const safeEmit = (v: T | undefined) => {
 						if (!stopped) emit(v);
@@ -122,14 +124,16 @@ export function onFailure<T>(
 						if (!stopped) complete();
 					};
 
-					ts.run(async (signal) => {
-						const result = await handler(signal, error);
-						safeEmit(result);
-						safeComplete();
-						return result;
-					}).catch(() => {
-						// Handler itself failed — error tracked by taskState
-						if (!stopped) {
+					ts.run((signal) => handler(signal, error));
+
+					statusUnsub = subscribe(ts.status, (s) => {
+						if (s === "running" || s === "idle") return;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+						if (s === "success") {
+							safeEmit(ts.result.get() as T);
+							safeComplete();
+						} else {
 							safeEmit(undefined);
 							safeComplete();
 						}
@@ -137,6 +141,8 @@ export function onFailure<T>(
 
 					return () => {
 						stopped = true;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
 					};
 				});
 			}),

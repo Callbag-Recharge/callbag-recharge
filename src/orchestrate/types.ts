@@ -52,7 +52,7 @@ export interface TaskState<T = unknown> extends NodeV0 {
 	 * The fn receives an AbortSignal that is aborted on reset(), restart(),
 	 * or destroy(). Users can forward it to fetch(), etc. for cancellation.
 	 */
-	run(fn: (signal: AbortSignal) => T | Promise<T>): Promise<T>;
+	run(fn: (signal: AbortSignal) => T | Promise<T>, opts?: { timeout?: number }): void;
 
 	/**
 	 * Mark this task as skipped (e.g., circuit breaker open, guard predicate false).

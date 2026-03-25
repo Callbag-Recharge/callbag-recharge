@@ -673,12 +673,34 @@ export default defineConfig({
 							],
 						},
 						{
-							text: "Arc 4: Callbag-Native",
+							text: "Arc 4: Architecture v3",
 							collapsed: false,
 							items: [
 								{
-									text: "10. Promises Are the New Callback Hell",
-									link: "/blog/10-promises-are-the-new-callback-hell",
+									text: "10. The Day We Read the Callbag Spec (Again)",
+									link: "/blog/10-the-day-we-read-the-callbag-spec-again",
+								},
+								{
+									text: "11. Why Control Signals Don't Belong in the Data Stream",
+									link: "/blog/11-why-control-signals-dont-belong-in-the-data-stream",
+								},
+								{
+									text: "12. RESOLVED: The Signal That Skips Entire Subtrees",
+									link: "/blog/12-resolved-the-signal-that-skips-entire-subtrees",
+								},
+								{
+									text: "13. Five Primitives, Two Tiers, Zero Schedulers",
+									link: "/blog/13-five-primitives-two-tiers-zero-schedulers",
+								},
+							],
+						},
+						{
+							text: "Arc 5: Callbag-Native",
+							collapsed: false,
+							items: [
+								{
+									text: "14. Promises Are the New Callback Hell",
+									link: "/blog/14-promises-are-the-new-callback-hell",
 								},
 							],
 						},

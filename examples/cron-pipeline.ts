@@ -6,7 +6,7 @@
  */
 
 import { derived, effect, pipe } from "callbag-recharge";
-import { exhaustMap, firstValueFrom, fromPromise, fromTimer, retry } from "callbag-recharge/extra";
+import { exhaustMap, fromPromise, fromTimer, retry, subscribe } from "callbag-recharge/extra";
 import { fromCron } from "callbag-recharge/orchestrate";
 
 // ── Simulated data fetchers ──────────────────────────────────
@@ -63,7 +63,7 @@ const dispose = effect([aggregate], () => {
 });
 
 // Let the cron tick once, then clean up
-firstValueFrom(fromTimer(62_000)).then(() => {
+subscribe(fromTimer(62_000), () => {
 	dispose();
 	console.log("Pipeline stopped.");
 	process.exit(0);

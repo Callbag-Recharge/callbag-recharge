@@ -8,7 +8,7 @@ outline: deep
 
 # Promises Are the New Callback Hell
 
-*Arc 4, Post 10 — Callbag-Native: Promise Elimination*
+*Chronicle 14 — Callbag-Native: Promise Elimination*
 
 ---
 

@@ -17,9 +17,10 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
@@ -206,13 +207,18 @@ export function join<T>(
 						const badIndex = i;
 						ts.restart();
 						return producer<T[] | undefined>(({ emit, complete }) => {
-							ts.run(async (_signal) => {
+							// Subscribe to status BEFORE calling run() so we catch
+							// synchronous completions (run() is void, not async).
+							const unsub = subscribe(ts.status, (s) => {
+								if (s === "running" || s === "idle") return;
+								unsub.unsubscribe();
+								emit(undefined);
+								complete();
+							});
+							ts.run((_signal) => {
 								throw new TypeError(
 									`join(): dep ${badIndex} emitted non-array value (${typeof raw[badIndex]})`,
 								);
-							}).catch(() => {
-								emit(undefined);
-								complete();
 							});
 							return undefined;
 						});
@@ -225,8 +231,24 @@ export function join<T>(
 
 				return producer<T[] | undefined>(({ emit, complete }) => {
 					let stopped = false;
+					let statusUnsub: Subscription | null = null;
 
-					ts.run(async (_signal) => {
+					// Subscribe to status BEFORE calling run() so we catch
+					// synchronous completions (run() is void, not async).
+					statusUnsub = subscribe(ts.status, (s) => {
+						if (s === "running" || s === "idle") return;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+						if (s === "success" && !stopped) {
+							emit(ts.result.get() as T[]);
+							complete();
+						} else if (!stopped) {
+							emit(undefined);
+							complete();
+						}
+					});
+
+					ts.run((_signal) => {
 						let result: T[];
 
 						if (strategy === "append") {
@@ -243,20 +265,13 @@ export function join<T>(
 							) as T[];
 						}
 
-						if (!stopped) {
-							emit(result);
-							complete();
-						}
 						return result;
-					}).catch(() => {
-						if (!stopped) {
-							emit(undefined);
-							complete();
-						}
 					});
 
 					return () => {
 						stopped = true;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
 					};
 				});
 			}),

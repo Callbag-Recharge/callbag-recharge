@@ -204,7 +204,7 @@ export function chatStream(factory: ChatStreamFactory, opts?: ChatStreamOptions)
 								if (signal.aborted) return;
 								partialStore.set("");
 								streamingStore.set(false);
-								errorStore.set(new Error("Rate limiter rejected"));
+								errorStore.set(err);
 								abortController = null;
 							}
 						},

@@ -18,6 +18,7 @@
 
 import { derived } from "../../core/derived";
 import { state } from "../../core/state";
+import { subscribe } from "../../core/subscribe";
 import type { Store } from "../../core/types";
 import { cancellableAction } from "../../utils/cancellableAction";
 
@@ -95,20 +96,28 @@ export function pagination<T>(opts: PaginationOptions<T>): PaginationResult<T> {
 	function fetchPage(page: number): void {
 		previousPage = pageStore.get();
 		// Don't update page optimistically — wait for success
-		action
-			.execute(page)
-			.then((result) => {
-				if (result !== undefined) {
-					pageStore.set(page);
-					dataStore.set(result);
-					hasNextStore.set(result.length >= opts.pageSize);
-				}
-				// result === undefined means cancelled — don't update anything
-			})
-			.catch(() => {
+		action.execute(page);
+
+		// Watch loading store to detect completion
+		const unsub = subscribe(action.loading, (loading) => {
+			if (loading) return; // still in progress
+			unsub.unsubscribe();
+
+			const err = action.error.get();
+			if (err !== undefined) {
 				// Error handled by action.error store — restore page
 				pageStore.set(previousPage);
-			});
+				return;
+			}
+
+			const result = action.data.get();
+			if (result !== undefined) {
+				pageStore.set(page);
+				dataStore.set(result);
+				hasNextStore.set(result.length >= opts.pageSize);
+			}
+			// result === undefined means cancelled — don't update anything
+		});
 	}
 
 	function goTo(page: number): void {

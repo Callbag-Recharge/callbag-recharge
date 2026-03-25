@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { WebhookRequest } from "../../adapters/webhook";
 import { fromWebhook } from "../../adapters/webhook";
 import { subscribe } from "../../extra/subscribe";
+import { firstValueFrom } from "../../raw/firstValueFrom";
 
 // ==========================================================================
 // fromWebhook
@@ -235,15 +236,15 @@ describe("fromWebhook", () => {
 	it("listen() rejects if already listening", async () => {
 		const port = 19876 + Math.floor(Math.random() * 1000);
 		webhook = fromWebhook({ port, path: "/" });
-		await webhook.listen();
-		await expect(webhook.listen()).rejects.toThrow(/already listening/);
+		await firstValueFrom(webhook.listen());
+		await expect(firstValueFrom(webhook.listen())).rejects.toThrow(/already listening/);
 		webhook.close();
 		webhook = null;
 	});
 
 	it("listen() rejects without port", async () => {
 		webhook = fromWebhook({ path: "/" });
-		await expect(webhook.listen()).rejects.toThrow(/port is required/);
+		await expect(firstValueFrom(webhook.listen())).rejects.toThrow(/port is required/);
 	});
 
 	it("listen() and close() lifecycle with request-response", async () => {
@@ -254,7 +255,7 @@ describe("fromWebhook", () => {
 			req.respond({ echo: req.body.hello });
 		});
 
-		await webhook.listen();
+		await firstValueFrom(webhook.listen());
 
 		// Send a real HTTP request
 		const body = JSON.stringify({ hello: "world" });

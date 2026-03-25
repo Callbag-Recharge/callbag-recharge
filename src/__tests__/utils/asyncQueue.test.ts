@@ -313,7 +313,7 @@ describe("asyncQueue", () => {
 	// Callbag cancellation
 	// -----------------------------------------------------------------------
 	describe("callbag cancellation", () => {
-		it("unsubscribing before task completes suppresses result", async () => {
+		it("unsubscribing after task started suppresses result but task still runs", async () => {
 			let resolve: (v: string) => void;
 			const q = asyncQueue(async () => {
 				return new Promise<string>((r) => {
@@ -324,7 +324,7 @@ describe("asyncQueue", () => {
 			const values: string[] = [];
 			const sub = rawSubscribe(q.enqueue(null), (v: string) => values.push(v));
 
-			// Cancel before task finishes
+			// Cancel after task already started (concurrency=1, drain runs immediately)
 			sub.unsubscribe();
 
 			// Complete the task after cancel
@@ -333,8 +333,45 @@ describe("asyncQueue", () => {
 
 			// Value should NOT have been delivered
 			expect(values).toEqual([]);
-			// But the task still completed internally
+			// Task ran to completion (was already in-flight)
 			expect(q.completed.get()).toBe(1);
+		});
+
+		it("cancelled entry in queue is skipped by drain — no wasted work", async () => {
+			let resolve: (v: string) => void;
+			const q = asyncQueue(
+				async (label: string) => {
+					if (label === "blocker") {
+						return new Promise<string>((r) => {
+							resolve = r;
+						});
+					}
+					return label;
+				},
+				{ concurrency: 1 },
+			);
+
+			// Start a blocking task (fills the single concurrency slot)
+			const p1 = toPromise<string>(q.enqueue("blocker"));
+
+			// Enqueue a second task, then cancel it before it starts
+			const values2: string[] = [];
+			const sub2 = rawSubscribe(q.enqueue("cancelled-task"), (v: string) => values2.push(v));
+			sub2.unsubscribe(); // cancel before drain picks it up
+
+			// Enqueue a third task that should run after blocker
+			const p3 = toPromise<string>(q.enqueue("third"));
+
+			// Unblock the first task
+			resolve!("done");
+			await p1;
+
+			// Third task should complete — cancelled task was skipped
+			const result3 = await p3;
+			expect(result3).toBe("third");
+			expect(values2).toEqual([]); // never started
+			// Only 2 completed: blocker + third (cancelled was skipped)
+			expect(q.completed.get()).toBe(2);
 		});
 
 		it("unsubscribing does not affect other enqueued tasks", async () => {
@@ -350,7 +387,7 @@ describe("asyncQueue", () => {
 			const sub1 = rawSubscribe(q.enqueue(1), (v: number) => values1.push(v));
 			const p2 = toPromise<number>(q.enqueue(2));
 
-			// Cancel first task's subscription
+			// Cancel first task's subscription (already in-flight)
 			sub1.unsubscribe();
 
 			// Second task should still complete

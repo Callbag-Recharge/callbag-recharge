@@ -12,7 +12,8 @@ import type { ProducerStore } from "../core/types";
  *
  * This is the store-level wrapper around the raw callbag `fromTimer`.
  * Use this when you need a full `ProducerStore` with lifecycle tracking.
- * Use `raw/fromTimer` + `firstValueFrom` for lightweight promise bridges.
+ * Use `raw/fromTimer` + `rawSubscribe` for lightweight callbag-only delays.
+ * Use `firstValueFrom` only at system boundaries when exiting callbag-land.
  *
  * @param ms - Delay in milliseconds.
  * @param signal - Optional AbortSignal to cancel the delay early.

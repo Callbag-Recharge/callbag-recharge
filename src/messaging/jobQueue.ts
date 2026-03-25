@@ -18,10 +18,10 @@ import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
-import { firstValueFrom } from "../extra/firstValueFrom";
 import { interval } from "../extra/interval";
-import { firstValueFrom as rawFirstValueFrom } from "../raw/firstValueFrom";
+import { rawFromAny } from "../raw/fromAny";
 import { fromTimer } from "../raw/fromTimer";
+import { rawSubscribe } from "../raw/subscribe";
 import { exponential } from "../utils/backoff";
 import { subscription } from "./subscription";
 import { topic } from "./topic";
@@ -152,23 +152,31 @@ export function jobQueue<T, R = void>(
 		_waitingStore.set(Math.max(0, _sub.backlog.get()));
 	}
 
-	// --- Job processing (while-loop, no recursion) ---
+	// --- Job processing (recursive continuation, no async/await) ---
 
-	async function _processJob(rec: JobRecord<T, R>): Promise<void> {
-		while (true) {
-			rec.status = "active";
-			rec.startTime = Date.now();
-			rec.attempts++;
-			_processing++;
+	function _processJob(rec: JobRecord<T, R>): void {
+		if (_destroyed) {
+			_finishJob(rec);
+			return;
+		}
 
-			batch(() => {
-				_activeStore.update((v) => v + 1);
-				_updateWaiting();
-			});
+		rec.status = "active";
+		rec.startTime = Date.now();
+		rec.attempts++;
+		_processing++;
 
-			try {
-				const result = await processor(rec.abort.signal, rec.data);
-				if (_destroyed) return;
+		batch(() => {
+			_activeStore.update((v) => v + 1);
+			_updateWaiting();
+		});
+
+		rawSubscribe(
+			rawFromAny(processor(rec.abort.signal, rec.data)),
+			(result: R) => {
+				if (_destroyed) {
+					_finishJob(rec);
+					return;
+				}
 
 				rec.status = "completed";
 				rec.result = result;
@@ -184,58 +192,87 @@ export function jobQueue<T, R = void>(
 				});
 
 				_emit("completed", rec);
-				return;
-			} catch (err) {
-				if (_destroyed) return;
-
-				rec.duration = Date.now() - rec.startTime!;
-				_processing--;
-
-				batch(() => {
-					_activeStore.update((v) => Math.max(0, v - 1));
-				});
-
-				if (rec.attempts < maxRetries) {
-					const delay = backoffStrategy(rec.attempts - 1, err, undefined);
-					if (delay === null) {
-						_failJob(rec, err);
+				_finishJob(rec);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err === undefined) return; // success — handled in DATA callback
+					if (_destroyed) {
+						_finishJob(rec);
 						return;
 					}
 
-					if (delay > 0) {
-						await rawFirstValueFrom(fromTimer(delay, rec.abort.signal));
-					}
+					rec.duration = Date.now() - rec.startTime!;
+					_processing--;
 
-					// Wait for unpause if paused (push-based via _pausedStore, no polling)
-					if (_pausedStore.get()) {
-						try {
-							await firstValueFrom(_pausedStore, (v) => !v);
-						} catch {
-							// Source ended (destroyed) — bail out
+					batch(() => {
+						_activeStore.update((v) => Math.max(0, v - 1));
+					});
+
+					if (rec.attempts < maxRetries) {
+						const delay = backoffStrategy(rec.attempts - 1, err, undefined);
+						if (delay === null) {
+							_failJob(rec, err);
+							_finishJob(rec);
 							return;
 						}
+
+						const retryAfterDelay = () => {
+							// Wait for unpause if paused (push-based via _pausedStore, no polling)
+							if (_pausedStore.get()) {
+								const unsub = subscribe(_pausedStore, (v) => {
+									if (v) return; // still paused
+									unsub.unsubscribe();
+									if (_destroyed) {
+										_finishJob(rec);
+										return;
+									}
+									rec.abort = _createJobAbort();
+									_processJob(rec); // retry
+								});
+								return;
+							}
+
+							if (_destroyed) {
+								_finishJob(rec);
+								return;
+							}
+							// Re-create abort controller for the retry attempt
+							rec.abort = _createJobAbort();
+							_processJob(rec); // retry
+						};
+
+						if (delay > 0) {
+							rawSubscribe(
+								fromTimer(delay, rec.abort.signal),
+								() => {
+									retryAfterDelay();
+								},
+								{
+									onEnd: (timerErr?: unknown) => {
+										if (timerErr !== undefined) {
+											// Timer aborted (job cancelled) — bail out
+											_finishJob(rec);
+										}
+									},
+								},
+							);
+						} else {
+							retryAfterDelay();
+						}
+						return;
 					}
 
-					if (_destroyed) return;
-					// Re-create abort controller for the retry attempt
-					rec.abort = _createJobAbort();
-					continue; // retry via while loop
-				}
-
-				_failJob(rec, err);
-				return;
-			}
-		}
+					_failJob(rec, err);
+					_finishJob(rec);
+				},
+			},
+		);
 	}
 
-	// Wrapper that handles cleanup around the while loop
-	async function _runJob(rec: JobRecord<T, R>): Promise<void> {
-		try {
-			await _processJob(rec);
-		} finally {
-			_jobs.delete(rec.seq);
-			if (!_destroyed) _tryPull();
-		}
+	function _finishJob(rec: JobRecord<T, R>): void {
+		_jobs.delete(rec.seq);
+		if (!_destroyed) _tryPull();
 	}
 
 	function _failJob(rec: JobRecord<T, R>, err: unknown): void {
@@ -290,9 +327,7 @@ export function jobQueue<T, R = void>(
 				abort: _createJobAbort(),
 			};
 			_jobs.set(msg.seq, rec);
-			_runJob(rec).catch(() => {
-				// Errors handled inside _processJob; swallow unhandled rejections
-			});
+			_processJob(rec);
 		}
 	}
 

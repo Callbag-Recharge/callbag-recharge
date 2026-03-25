@@ -11,6 +11,8 @@ import { derived } from "../../core/derived";
 import { teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { rawFromAny } from "../../raw/fromAny";
+import { rawSubscribe } from "../../raw/subscribe";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -53,9 +55,11 @@ export interface CommandBusResult<Commands extends Record<string, CommandDef<any
 	/** Whether redo is available. */
 	canRedo: Store<boolean>;
 	/** Undo the last command. Returns false if nothing to undo. */
-	undo(): boolean | Promise<boolean>;
+	undo(): boolean;
 	/** Redo the last undone command. Returns false if nothing to redo. */
-	redo(): boolean | Promise<boolean>;
+	redo(): boolean;
+	/** Last error from an async undo/redo operation. */
+	undoRedoError: Store<unknown | undefined>;
 
 	/** Subscribe to specific command executions. Returns unsubscribe function. */
 	on<K extends keyof Commands & string>(
@@ -120,6 +124,10 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		name: `${prefix}.canRedo`,
 	});
 
+	const undoRedoError = state<unknown | undefined>(undefined, {
+		name: `${prefix}.undoRedoError`,
+	});
+
 	// Per-command listeners
 	const listeners = new Map<string, Set<(args: any) => void>>();
 
@@ -182,7 +190,7 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		return result;
 	}
 
-	function undo(): boolean | Promise<boolean> {
+	function undo(): boolean {
 		if (disposed) return false;
 		const stack = undoStack.get();
 		if (stack.length === 0) return false;
@@ -192,17 +200,22 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		if (!cmd?.undo) return false;
 
 		const result = cmd.undo(entry.args);
+		undoRedoError.set(undefined);
+		// Fire-and-forget for async undo — track errors via store
+		if (result && typeof (result as any).then === "function") {
+			rawSubscribe(rawFromAny(result), () => {}, {
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) undoRedoError.set(err);
+				},
+			});
+		}
 
 		undoStack.update((s) => s.slice(0, -1));
 		redoStack.update((s) => [...s, entry]);
-
-		if (result instanceof Promise) {
-			return result.then(() => true);
-		}
 		return true;
 	}
 
-	function redo(): boolean | Promise<boolean> {
+	function redo(): boolean {
 		if (disposed) return false;
 		const stack = redoStack.get();
 		if (stack.length === 0) return false;
@@ -212,14 +225,19 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		if (!cmd) return false;
 
 		const result = executeWithMiddleware(entry.name, entry.args);
+		undoRedoError.set(undefined);
+		// Fire-and-forget for async redo — track errors via store
+		if (result && typeof (result as any).then === "function") {
+			rawSubscribe(rawFromAny(result), () => {}, {
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) undoRedoError.set(err);
+				},
+			});
+		}
 
 		redoStack.update((s) => s.slice(0, -1));
 		undoStack.update((s) => [...s, entry]);
 		lastCommandStore.set({ ...entry, timestamp: Date.now() });
-
-		if (result instanceof Promise) {
-			return result.then(() => true);
-		}
 		return true;
 	}
 
@@ -260,6 +278,7 @@ export function commandBus<Commands extends Record<string, CommandDef<any, any>>
 		canRedo,
 		undo,
 		redo,
+		undoRedoError,
 		on: on as any,
 		dispose,
 	};

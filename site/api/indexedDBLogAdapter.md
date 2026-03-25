@@ -31,5 +31,5 @@ const log = executionLog({ persist: adapter });
 ## Options / Behavior Details
 
 - **Browser only:** Uses the IndexedDB API. Not available in Node.js without polyfills.
-- **Async:** All operations return Promises.
+- **Async:** All operations return callbag sources.
 - **Auto-creates:** Database and object store are created on first use.

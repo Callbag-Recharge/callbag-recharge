@@ -66,7 +66,7 @@ const unsub = subscribe(fullResponse, (text) => {
 prompt.set("Tell me a joke");
 
 // After the stream completes, clean up
-firstValueFrom(fromTimer(500)).then(() => {
+subscribe(fromTimer(500), () => {
 	console.log("\n--- done ---");
 	unsub();
 });

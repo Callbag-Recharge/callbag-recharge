@@ -10,9 +10,10 @@ import type { CallbagSource } from "./subscribe";
 /**
  * Creates a raw callbag source that emits `undefined` once after a delay,
  * then completes (END). If the signal is already aborted or aborts during
- * the delay, emits immediately.
+ * the delay, sends END with the abort reason as an error (no DATA emitted).
  *
- * Use with `firstValueFrom` to replace raw `new Promise` + `setTimeout`.
+ * Use with `rawSubscribe` to replace raw `new Promise` + `setTimeout`.
+ * Use `firstValueFrom` only at system boundaries when exiting callbag-land.
  *
  * @param ms - Delay in milliseconds.
  * @param signal - Optional AbortSignal to cancel the delay early.
@@ -37,7 +38,11 @@ export function fromTimer(ms: number, signal?: AbortSignal): CallbagSource {
 		}
 
 		function onAbort() {
-			finish();
+			if (done) return;
+			done = true;
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
+			sink(2 /* END */, signal!.reason);
 		}
 
 		// Talkback: sink can send END to cancel
@@ -50,7 +55,7 @@ export function fromTimer(ms: number, signal?: AbortSignal): CallbagSource {
 		});
 
 		if (signal?.aborted) {
-			finish();
+			onAbort();
 			return;
 		}
 

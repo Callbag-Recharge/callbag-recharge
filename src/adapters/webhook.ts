@@ -20,8 +20,8 @@ import type { LifecycleSignal } from "../core/protocol";
 import { PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
-import { firstValueFrom } from "../raw/firstValueFrom";
 import { fromNodeCallback } from "../raw/fromNodeCallback";
+import type { CallbagSource } from "../raw/subscribe";
 import type { WithStatusStatus } from "../utils/withStatus";
 import { withStatus } from "../utils/withStatus";
 
@@ -76,8 +76,8 @@ export interface WebhookStore<T = unknown> extends Store<WebhookRequest<T> | und
 	 * instead of creating a new one.
 	 */
 	handler: (req: any, res: any) => void;
-	/** Start listening on the configured port. Returns a promise that resolves when ready. */
-	listen(): Promise<void>;
+	/** Start listening on the configured port. Returns a callbag source that emits when ready. */
+	listen(): CallbagSource;
 	/** Close the server and clean up. */
 	close(): void;
 }
@@ -247,32 +247,38 @@ export function fromWebhook<T = unknown>(opts?: WebhookOptions): WebhookStore<T>
 		});
 	}
 
-	function listen(): Promise<void> {
+	function listen(): CallbagSource {
 		if (!opts?.port) {
-			return Promise.reject(new Error("fromWebhook: port is required for listen()"));
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				sink(0, () => {});
+				sink(2, new Error("fromWebhook: port is required for listen()"));
+			};
 		}
 		if (server) {
-			return Promise.reject(new Error("fromWebhook: already listening. Call close() first."));
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				sink(0, () => {});
+				sink(2, new Error("fromWebhook: already listening. Call close() first."));
+			};
 		}
-		return firstValueFrom(
-			fromNodeCallback((resolve, reject) => {
-				try {
-					// Dynamic import to avoid bundling node:http in browser builds
-					const http = require("node:http");
-					server = http.createServer(handler);
-					server.once("listening", () => resolve());
-					server.once("error", (err: unknown) => {
-						server = null;
-						reject(err);
-					});
-					server.listen(opts!.port, hostname);
-					return undefined;
-				} catch (err) {
+		return fromNodeCallback((resolve, reject) => {
+			try {
+				// Dynamic import to avoid bundling node:http in browser builds
+				const http = require("node:http");
+				server = http.createServer(handler);
+				server.once("listening", () => resolve());
+				server.once("error", (err: unknown) => {
+					server = null;
 					reject(err);
-					return undefined;
-				}
-			}),
-		);
+				});
+				server.listen(opts!.port, hostname);
+				return undefined;
+			} catch (err) {
+				reject(err);
+				return undefined;
+			}
+		});
 	}
 
 	function close() {

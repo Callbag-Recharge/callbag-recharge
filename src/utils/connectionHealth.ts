@@ -13,6 +13,8 @@
 import { derived } from "../core/derived";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { rawFromAny } from "../raw/fromAny";
+import { rawSubscribe } from "../raw/subscribe";
 import type { BackoffStrategy } from "./backoff";
 
 export interface ConnectionHealthOptions {
@@ -142,7 +144,7 @@ export function connectionHealth(opts?: ConnectionHealthOptions): ConnectionHeal
 		scheduleNextHeartbeat();
 	}
 
-	async function doHeartbeat(): Promise<void> {
+	function doHeartbeat(): void {
 		if (!callbacks || stopped || heartbeatInFlight) return;
 		heartbeatInFlight = true;
 
@@ -152,27 +154,34 @@ export function connectionHealth(opts?: ConnectionHealthOptions): ConnectionHeal
 			ac.abort();
 		}, timeoutMs);
 
-		try {
-			await callbacks.heartbeat(ac.signal);
-			if (heartbeatTimeoutTimer !== null) {
-				clearTimeout(heartbeatTimeoutTimer);
-				heartbeatTimeoutTimer = null;
-			}
-			heartbeatInFlight = false;
-			// Chain next heartbeat after this one completes (no overlap)
-			scheduleNextHeartbeat();
-		} catch {
-			if (heartbeatTimeoutTimer !== null) {
-				clearTimeout(heartbeatTimeoutTimer);
-				heartbeatTimeoutTimer = null;
-			}
-			heartbeatInFlight = false;
-			if (stopped) return;
-			// Heartbeat failed — trigger reconnect
-			statusStore.set("disconnected");
-			callbacks.disconnect();
-			scheduleReconnect();
-		}
+		rawSubscribe(
+			rawFromAny(callbacks.heartbeat(ac.signal)),
+			() => {
+				if (heartbeatTimeoutTimer !== null) {
+					clearTimeout(heartbeatTimeoutTimer);
+					heartbeatTimeoutTimer = null;
+				}
+				heartbeatInFlight = false;
+				// Chain next heartbeat after this one completes (no overlap)
+				scheduleNextHeartbeat();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) {
+						if (heartbeatTimeoutTimer !== null) {
+							clearTimeout(heartbeatTimeoutTimer);
+							heartbeatTimeoutTimer = null;
+						}
+						heartbeatInFlight = false;
+						if (stopped) return;
+						// Heartbeat failed — trigger reconnect
+						statusStore.set("disconnected");
+						callbacks!.disconnect();
+						scheduleReconnect();
+					}
+				},
+			},
+		);
 	}
 
 	function scheduleReconnect(): void {
@@ -201,26 +210,33 @@ export function connectionHealth(opts?: ConnectionHealthOptions): ConnectionHeal
 		}, delay);
 	}
 
-	async function doConnect(): Promise<void> {
+	function doConnect(): void {
 		if (stopped || !callbacks) return;
 
 		statusStore.set("connecting");
 		abortController = new AbortController();
 
-		try {
-			await callbacks.connect(abortController.signal);
-			if (stopped) return;
-			abortController = null;
-			statusStore.set("connected");
-			reconnectCountStore.set(0);
-			prevDelay = undefined;
-			startHeartbeat();
-		} catch {
-			if (stopped) return;
-			abortController = null;
-			statusStore.set("disconnected");
-			scheduleReconnect();
-		}
+		rawSubscribe(
+			rawFromAny(callbacks.connect(abortController.signal)),
+			() => {
+				if (stopped) return;
+				abortController = null;
+				statusStore.set("connected");
+				reconnectCountStore.set(0);
+				prevDelay = undefined;
+				startHeartbeat();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) {
+						if (stopped) return;
+						abortController = null;
+						statusStore.set("disconnected");
+						scheduleReconnect();
+					}
+				},
+			},
+		);
 	}
 
 	function start(cbs: {

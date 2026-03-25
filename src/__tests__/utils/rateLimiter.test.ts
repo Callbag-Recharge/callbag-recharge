@@ -74,7 +74,7 @@ describe("tokenBucket", () => {
 	});
 
 	it("acquire with signal cancels the wait", async () => {
-		let time = 0;
+		const time = 0;
 		const rl = tokenBucket({ rate: 1, burst: 1, now: () => time });
 		rl.tryAcquire(); // exhaust
 
@@ -84,16 +84,12 @@ describe("tokenBucket", () => {
 		let ended = false;
 		let endError: unknown;
 		const values: number[] = [];
-		rawSubscribe(
-			source,
-			(v: number) => values.push(v),
-			{
-				onEnd: (err) => {
-					ended = true;
-					endError = err;
-				},
+		rawSubscribe(source, (v: number) => values.push(v), {
+			onEnd: (err) => {
+				ended = true;
+				endError = err;
 			},
-		);
+		});
 
 		// Abort before token refills
 		ac.abort(new Error("cancelled"));
@@ -109,11 +105,11 @@ describe("tokenBucket", () => {
 		ac.abort(new Error("pre-aborted"));
 
 		let endError: unknown;
-		rawSubscribe(
-			rl.acquire(ac.signal),
-			() => {},
-			{ onEnd: (err) => { endError = err; } },
-		);
+		rawSubscribe(rl.acquire(ac.signal), () => {}, {
+			onEnd: (err) => {
+				endError = err;
+			},
+		});
 
 		expect(endError).toBeInstanceOf(Error);
 	});

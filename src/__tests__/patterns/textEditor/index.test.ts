@@ -22,7 +22,8 @@ describe("textEditor", () => {
 		expect(editor.canSubmit.get()).toBe(false);
 		editor.buffer.replaceAll("ok");
 		expect(editor.canSubmit.get()).toBe(true);
-		await editor.submit();
+		editor.submit();
+		await new Promise((r) => setTimeout(r, 0));
 		expect(editor.submitting.get()).toBe(false);
 	});
 
@@ -36,7 +37,8 @@ describe("textEditor", () => {
 		});
 		editor.buffer.replaceAll("updated");
 		expect(editor.buffer.dirty.get()).toBe(true);
-		await editor.submit();
+		editor.submit();
+		await new Promise((r) => setTimeout(r, 0));
 		expect(submitted).toBe("updated");
 		expect(editor.buffer.dirty.get()).toBe(false);
 	});
@@ -68,7 +70,8 @@ describe("textEditor", () => {
 				throw new Error("submit fail");
 			},
 		});
-		await expect(editor.submit()).rejects.toThrow("submit fail");
+		editor.submit();
+		await new Promise((r) => setTimeout(r, 0));
 		expect(editor.submitting.get()).toBe(false);
 	});
 
@@ -132,7 +135,8 @@ describe("textEditor", () => {
 		});
 		editor.buffer.insert("!");
 		expect(editor.buffer.dirty.get()).toBe(true);
-		await expect(editor.submit()).rejects.toThrow("network");
+		editor.submit();
+		await new Promise((r) => setTimeout(r, 0));
 		expect(editor.submitting.get()).toBe(false);
 		expect(editor.buffer.dirty.get()).toBe(true);
 	});

@@ -68,4 +68,4 @@ We are not claiming v2 "beats" those libraries — they are excellent. Our const
 
 ---
 
-*Chronicle continues in Arc 4 — type 3 control signals and RESOLVED (see [blog home](./) for the series index).*
+*Chronicle continues in Arc 4 — [The Day We Read the Callbag Spec (Again)](./10-the-day-we-read-the-callbag-spec-again).*

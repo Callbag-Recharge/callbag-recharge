@@ -21,10 +21,11 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { firstValueFrom } from "../extra/firstValueFrom";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import type { PipelineResult, StepDef } from "./pipeline";
 import { pipeline } from "./pipeline";
@@ -161,6 +162,7 @@ export function loop<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
+					let statusUnsub: Subscription | null = null;
 
 					const safeEmit = (v: T | undefined) => {
 						if (!stopped && !emitted) {
@@ -174,6 +176,8 @@ export function loop<T>(
 
 					const cleanup = () => {
 						stopped = true;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
 						if (childPipeline) {
 							childPipeline.destroy();
 							childPipeline = null;
@@ -227,9 +231,6 @@ export function loop<T>(
 
 							// Check predicate
 							if (def.predicate(result, iteration)) {
-								// Done — emit final value
-								safeEmit(result);
-								safeComplete();
 								return result;
 							}
 
@@ -242,9 +243,16 @@ export function loop<T>(
 							throw new Error(`loop: exceeded maxIterations (${maxIterations})`);
 						}
 						throw new Error("loop: cancelled");
-					}).catch(() => {
-						// Error tracked by taskState
-						if (!stopped) {
+					});
+
+					statusUnsub = subscribe(ts.status, (s) => {
+						if (s === "running" || s === "idle") return;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+						if (s === "success") {
+							safeEmit(ts.result.get() as T);
+							safeComplete();
+						} else if (!stopped) {
 							safeEmit(undefined);
 							safeComplete();
 						}

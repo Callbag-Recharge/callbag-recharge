@@ -20,7 +20,7 @@ function taskState<T = unknown>(opts?: { id?: string }): TaskState<T>
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `run(fn)` | `(fn: (signal: AbortSignal) =&gt; T \` | Promise&lt;T&gt;) =&gt; Promise&lt;T&gt; |
+| `run(fn)` | `(fn: (signal: AbortSignal) =&gt; T \` | Promise&lt;T&gt;) =&gt; void |
 | `get()` | `() =&gt; TaskMeta&lt;T&gt;` | Returns the current metadata snapshot (status, result, error, duration, runCount). |
 | `status` | `Store&lt;TaskStatus&gt;` | Reactive store: 'idle' \ |
 | `result` | `Store&lt;T \` | undefined&gt; |
@@ -36,8 +36,9 @@ function taskState<T = unknown>(opts?: { id?: string }): TaskState<T>
 import { taskState } from 'callbag-recharge';
 
 const task = taskState<string>();
-await task.run((signal) => fetch('/api', { signal }).then(r => r.text()));
-task.status.get(); // 'success'
+task.run((signal) => fetch('/api', { signal }).then(r => r.text()));
+// subscribe to task.status for reactive completion notification
+task.status.get(); // 'success' (after completion)
 task.duration.get(); // e.g. 120
 ```
 

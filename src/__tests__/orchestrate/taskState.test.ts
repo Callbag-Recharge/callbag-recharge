@@ -2,6 +2,9 @@ import { describe, expect, it } from "vitest";
 import { effect } from "../../core/effect";
 import { taskState } from "../../orchestrate/taskState";
 
+/** Flush microtasks so rawFromPromise callbacks fire */
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
 describe("taskState", () => {
 	// --- Initial state ---
 
@@ -28,10 +31,10 @@ describe("taskState", () => {
 
 	// --- Sync run ---
 
-	it("tracks sync task success", async () => {
+	it("tracks sync task success", () => {
 		const task = taskState<number>();
-		const result = await task.run(() => 42);
-		expect(result).toBe(42);
+		task.run(() => 42);
+		// Sync tasks complete synchronously via rawFromAny plain-value path
 		expect(task.status.get()).toBe("success");
 		expect(task.result.get()).toBe(42);
 		expect(task.runCount.get()).toBe(1);
@@ -40,14 +43,12 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
-	it("tracks sync task error", async () => {
+	it("tracks sync task error", () => {
 		const task = taskState<number>();
 		const err = new Error("boom");
-		await expect(
-			task.run(() => {
-				throw err;
-			}),
-		).rejects.toThrow("boom");
+		task.run(() => {
+			throw err;
+		});
 		expect(task.status.get()).toBe("error");
 		expect(task.error.get()).toBe(err);
 		expect(task.runCount.get()).toBe(1);
@@ -58,10 +59,10 @@ describe("taskState", () => {
 
 	it("tracks async task success", async () => {
 		const task = taskState<string>();
-		const result = await task.run(async () => {
+		task.run(async () => {
 			return "done";
 		});
-		expect(result).toBe("done");
+		await flush();
 		expect(task.status.get()).toBe("success");
 		expect(task.result.get()).toBe("done");
 		task.destroy();
@@ -69,11 +70,10 @@ describe("taskState", () => {
 
 	it("tracks async task error", async () => {
 		const task = taskState<string>();
-		await expect(
-			task.run(async () => {
-				throw new Error("async fail");
-			}),
-		).rejects.toThrow("async fail");
+		task.run(async () => {
+			throw new Error("async fail");
+		});
+		await flush();
 		expect(task.status.get()).toBe("error");
 		expect(task.error.get()).toBeInstanceOf(Error);
 		task.destroy();
@@ -90,7 +90,7 @@ describe("taskState", () => {
 			return undefined;
 		});
 
-		await task.run(() => 1);
+		task.run(() => 1);
 
 		expect(statusLog).toContain("running");
 		expect(statusLog).toContain("success");
@@ -102,17 +102,17 @@ describe("taskState", () => {
 	it("rejects concurrent runs", async () => {
 		const task = taskState<number>();
 		let resolve: (v: number) => void;
-		const p = task.run(
+		task.run(
 			() =>
 				new Promise<number>((r) => {
 					resolve = r;
 				}),
 		);
 
-		await expect(task.run(() => 2)).rejects.toThrow("already running");
+		expect(() => task.run(() => 2)).toThrow("already running");
 
 		resolve!(1);
-		await p;
+		await flush();
 		task.destroy();
 	});
 
@@ -121,7 +121,7 @@ describe("taskState", () => {
 	it("reset during in-flight run discards result (generation guard)", async () => {
 		const task = taskState<number>();
 		let resolve: (v: number) => void;
-		const p = task.run(
+		task.run(
 			() =>
 				new Promise<number>((r) => {
 					resolve = r;
@@ -134,15 +134,15 @@ describe("taskState", () => {
 
 		// Resolve the in-flight promise — should NOT overwrite the idle state
 		resolve!(42);
-		await p;
+		await flush();
 		expect(task.status.get()).toBe("idle");
 		expect(task.runCount.get()).toBe(0);
 		task.destroy();
 	});
 
-	it("reset returns to idle", async () => {
+	it("reset returns to idle", () => {
 		const task = taskState<number>();
-		await task.run(() => 42);
+		task.run(() => 42);
 		expect(task.status.get()).toBe("success");
 
 		task.reset();
@@ -152,9 +152,9 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
-	it("restart preserves runCount, result, lastRun but resets status", async () => {
+	it("restart preserves runCount, result, lastRun but resets status", () => {
 		const task = taskState<number>();
-		await task.run(() => 42);
+		task.run(() => 42);
 		expect(task.status.get()).toBe("success");
 		expect(task.runCount.get()).toBe(1);
 		expect(task.result.get()).toBe(42);
@@ -174,7 +174,7 @@ describe("taskState", () => {
 	it("restart bumps generation (discards in-flight run)", async () => {
 		const task = taskState<number>();
 		let resolve!: (v: number) => void;
-		const p = task.run(
+		task.run(
 			() =>
 				new Promise<number>((r) => {
 					resolve = r;
@@ -183,7 +183,7 @@ describe("taskState", () => {
 
 		task.restart();
 		resolve(99);
-		await p;
+		await flush();
 
 		// Result should be discarded — status stays idle from restart
 		expect(task.status.get()).toBe("idle");
@@ -193,26 +193,24 @@ describe("taskState", () => {
 
 	// --- Multiple runs ---
 
-	it("increments runCount across runs", async () => {
+	it("increments runCount across runs", () => {
 		const task = taskState<number>();
-		await task.run(() => 1);
+		task.run(() => 1);
 		expect(task.runCount.get()).toBe(1);
 
-		await task.run(() => 2);
+		task.run(() => 2);
 		expect(task.runCount.get()).toBe(2);
 		expect(task.result.get()).toBe(2);
 		task.destroy();
 	});
 
-	it("preserves previous result on error", async () => {
+	it("preserves previous result on error", () => {
 		const task = taskState<number>();
-		await task.run(() => 42);
+		task.run(() => 42);
 
-		await expect(
-			task.run(() => {
-				throw new Error("fail");
-			}),
-		).rejects.toThrow();
+		task.run(() => {
+			throw new Error("fail");
+		});
 		expect(task.status.get()).toBe("error");
 		expect(task.result.get()).toBe(42); // previous result preserved
 		task.destroy();
@@ -232,18 +230,16 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
-	it("version increments on run completion", async () => {
+	it("version increments on run completion", () => {
 		const task = taskState<number>();
 		expect(task.version).toBe(0);
 
-		await task.run(() => 1);
+		task.run(() => 1);
 		expect(task.version).toBe(1);
 
-		await expect(
-			task.run(() => {
-				throw new Error();
-			}),
-		).rejects.toThrow();
+		task.run(() => {
+			throw new Error();
+		});
 		expect(task.version).toBe(2);
 
 		task.reset();
@@ -254,9 +250,9 @@ describe("taskState", () => {
 
 	// --- Snapshot ---
 
-	it("snapshot returns serializable representation", async () => {
+	it("snapshot returns serializable representation", () => {
 		const task = taskState<number>({ id: "snap-task" });
-		await task.run(() => 99);
+		task.run(() => 99);
 
 		const snap = task.snapshot();
 		expect(snap.type).toBe("taskState");
@@ -273,9 +269,9 @@ describe("taskState", () => {
 
 	// --- from() ---
 
-	it("from() restores from snapshot", async () => {
+	it("from() restores from snapshot", () => {
 		const task1 = taskState<number>({ id: "t1" });
-		await task1.run(() => 42);
+		task1.run(() => 42);
 		const snap = task1.snapshot();
 		task1.destroy();
 
@@ -286,7 +282,7 @@ describe("taskState", () => {
 		task2.destroy();
 	});
 
-	it("from() marks running tasks as errored", async () => {
+	it("from() marks running tasks as errored", () => {
 		// Manually create a snapshot with running status
 		const snap = {
 			type: "taskState" as const,
@@ -303,10 +299,10 @@ describe("taskState", () => {
 
 	// --- Lifecycle ---
 
-	it("destroy prevents further runs", async () => {
+	it("destroy prevents further runs", () => {
 		const task = taskState<number>();
 		task.destroy();
-		await expect(task.run(() => 1)).rejects.toThrow("destroyed");
+		expect(() => task.run(() => 1)).toThrow("destroyed");
 	});
 
 	it("destroy is idempotent", () => {
@@ -318,35 +314,34 @@ describe("taskState", () => {
 	it("destroy during in-flight run discards status transition", async () => {
 		const task = taskState<string>();
 		let resolve: (v: string) => void;
-		const p = task.run(() => new Promise<string>((r) => (resolve = r)));
+		task.run(() => new Promise<string>((r) => (resolve = r)));
 		expect(task.status.get()).toBe("running");
 
 		task.destroy();
 		resolve!("done");
-		const result = await p;
+		await flush();
 
-		// Result is returned but status was NOT updated (destroyed guard)
-		expect(result).toBe("done");
-		expect(task.status.get()).toBe("running"); // frozen — state store torn down
+		// Status was NOT updated (destroyed guard) — frozen at running
+		expect(task.status.get()).toBe("running");
 	});
 
 	it("destroy during in-flight error discards error transition", async () => {
 		const task = taskState<string>();
 		let reject: (e: Error) => void;
-		const p = task.run(() => new Promise<string>((_, r) => (reject = r)));
+		task.run(() => new Promise<string>((_, r) => (reject = r)));
 		expect(task.status.get()).toBe("running");
 
 		task.destroy();
 		reject!(new Error("boom"));
-		await expect(p).rejects.toThrow("boom");
+		await flush();
 
-		// Error is re-thrown but status was NOT updated (destroyed guard)
+		// Error is discarded — status was NOT updated (destroyed guard)
 		expect(task.status.get()).toBe("running"); // frozen
 	});
 
 	// --- Reactive ---
 
-	it("effect fires on status transitions", async () => {
+	it("effect fires on status transitions", () => {
 		const task = taskState<number>();
 		const log: string[] = [];
 		const dispose = effect([task.status], () => {
@@ -354,7 +349,7 @@ describe("taskState", () => {
 			return undefined;
 		});
 
-		await task.run(() => 123);
+		task.run(() => 123);
 		expect(log).toContain("idle"); // initial
 		expect(log).toContain("running");
 		expect(log).toContain("success");
@@ -365,10 +360,10 @@ describe("taskState", () => {
 
 	// --- AbortController ---
 
-	it("run() passes AbortSignal to fn", async () => {
+	it("run() passes AbortSignal to fn", () => {
 		const task = taskState<string>();
 		let receivedSignal: AbortSignal | undefined;
-		await task.run((signal) => {
+		task.run((signal) => {
 			receivedSignal = signal;
 			return "ok";
 		});
@@ -381,7 +376,7 @@ describe("taskState", () => {
 		const task = taskState<string>();
 		let receivedSignal: AbortSignal | undefined;
 		let resolve: (v: string) => void;
-		const p = task.run((signal) => {
+		task.run((signal) => {
 			receivedSignal = signal;
 			return new Promise<string>((r) => {
 				resolve = r;
@@ -393,7 +388,7 @@ describe("taskState", () => {
 		expect(receivedSignal!.aborted).toBe(true);
 
 		resolve!("ignored");
-		await p;
+		await flush();
 		expect(task.status.get()).toBe("idle");
 		task.destroy();
 	});
@@ -402,7 +397,7 @@ describe("taskState", () => {
 		const task = taskState<string>();
 		let receivedSignal: AbortSignal | undefined;
 		let resolve: (v: string) => void;
-		const p = task.run((signal) => {
+		task.run((signal) => {
 			receivedSignal = signal;
 			return new Promise<string>((r) => {
 				resolve = r;
@@ -414,7 +409,7 @@ describe("taskState", () => {
 		expect(receivedSignal!.aborted).toBe(true);
 
 		resolve!("ignored");
-		await p;
+		await flush();
 		expect(task.status.get()).toBe("idle");
 		task.destroy();
 	});
@@ -423,7 +418,7 @@ describe("taskState", () => {
 		const task = taskState<string>();
 		let receivedSignal: AbortSignal | undefined;
 		let resolve: (v: string) => void;
-		const p = task.run((signal) => {
+		task.run((signal) => {
 			receivedSignal = signal;
 			return new Promise<string>((r) => {
 				resolve = r;
@@ -435,13 +430,13 @@ describe("taskState", () => {
 		expect(receivedSignal!.aborted).toBe(true);
 
 		resolve!("ignored");
-		await p;
+		await flush();
 	});
 
-	it("signal is not aborted on successful completion", async () => {
+	it("signal is not aborted on successful completion", () => {
 		const task = taskState<number>();
 		let receivedSignal: AbortSignal | undefined;
-		await task.run((signal) => {
+		task.run((signal) => {
 			receivedSignal = signal;
 			return 42;
 		});
@@ -449,28 +444,26 @@ describe("taskState", () => {
 		task.destroy();
 	});
 
-	it("signal is not aborted on error completion", async () => {
+	it("signal is not aborted on error completion", () => {
 		const task = taskState<number>();
 		let receivedSignal: AbortSignal | undefined;
-		await expect(
-			task.run((signal) => {
-				receivedSignal = signal;
-				throw new Error("fail");
-			}),
-		).rejects.toThrow("fail");
+		task.run((signal) => {
+			receivedSignal = signal;
+			throw new Error("fail");
+		});
 		expect(receivedSignal!.aborted).toBe(false);
 		task.destroy();
 	});
 
-	it("each run gets a fresh AbortSignal", async () => {
+	it("each run gets a fresh AbortSignal", () => {
 		const task = taskState<number>();
 		const signals: AbortSignal[] = [];
 
-		await task.run((signal) => {
+		task.run((signal) => {
 			signals.push(signal);
 			return 1;
 		});
-		await task.run((signal) => {
+		task.run((signal) => {
 			signals.push(signal);
 			return 2;
 		});
@@ -486,7 +479,7 @@ describe("taskState", () => {
 		const task = taskState<string>();
 		let abortReason: any;
 
-		const p = task.run((signal) => {
+		task.run((signal) => {
 			return new Promise<string>((_, reject) => {
 				signal.addEventListener("abort", () => {
 					abortReason = signal.reason;
@@ -498,15 +491,14 @@ describe("taskState", () => {
 		task.reset();
 		expect(abortReason).toBeDefined();
 
-		// The promise rejects with AbortError, but generation guard discards it
-		await expect(p).rejects.toThrow("Aborted");
+		await flush();
 		expect(task.status.get()).toBe("idle"); // reset state persists
 		task.destroy();
 	});
 
 	// --- Companion stores ---
 
-	it("individual companion stores are independently subscribable", async () => {
+	it("individual companion stores are independently subscribable", () => {
 		const task = taskState<number>();
 		const statusLog: string[] = [];
 		const errorLog: (unknown | undefined)[] = [];
@@ -520,7 +512,7 @@ describe("taskState", () => {
 			return undefined;
 		});
 
-		await task.run(() => 42);
+		task.run(() => 42);
 
 		expect(statusLog).toContain("running");
 		expect(statusLog).toContain("success");

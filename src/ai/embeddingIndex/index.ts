@@ -21,7 +21,9 @@ import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
 import { vectorIndex as createVectorIndex } from "../../memory/vectorIndex";
+import { rawFromAny } from "../../raw/fromAny";
 import { latestAsync } from "../../raw/latestAsync";
+import { rawSubscribe } from "../../raw/subscribe";
 
 export interface ScoredDoc {
 	/** Document chunk ID (matches manifest keys). */
@@ -133,24 +135,15 @@ export function embeddingIndex(opts: EmbeddingIndexOptions): EmbeddingIndexResul
 		load();
 	}
 
-	async function loadDataOnly(): Promise<void> {
-		try {
-			const [manifestData, vectorBytes] = await Promise.all([
-				fetchFn(manifestUrl).then((res) => {
-					if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status} ${res.statusText}`);
-					return res.json() as Promise<EmbeddingManifest>;
-				}),
-				fetchFn(vectorsUrl).then((res) => {
-					if (!res.ok) throw new Error(`Failed to fetch vectors: ${res.status} ${res.statusText}`);
-					return res.arrayBuffer();
-				}),
-			]);
+	function loadDataOnly(): void {
+		let manifestData: EmbeddingManifest | null = null;
+		let vectorBytes: ArrayBuffer | null = null;
+		let remaining = 2;
+		let failed = false;
 
-			if (destroyed) return;
-
-			manifest = manifestData;
-			buildIndex(vectorBytes);
-		} catch (e) {
+		function onError(e: unknown): void {
+			if (failed) return;
+			failed = true;
 			if (!destroyed) {
 				batch(() => {
 					loaded.set(false);
@@ -158,40 +151,140 @@ export function embeddingIndex(opts: EmbeddingIndexOptions): EmbeddingIndexResul
 				});
 			}
 		}
-	}
 
-	async function load(): Promise<void> {
-		try {
-			const [manifestData, vectorBytes, pipelineFn] = await Promise.all([
+		function onPartDone(): void {
+			remaining--;
+			if (remaining > 0 || failed || destroyed) return;
+			manifest = manifestData!;
+			try {
+				buildIndex(vectorBytes!);
+			} catch (e) {
+				onError(e);
+			}
+		}
+
+		rawSubscribe(
+			rawFromAny(
 				fetchFn(manifestUrl).then((res) => {
 					if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status} ${res.statusText}`);
 					return res.json() as Promise<EmbeddingManifest>;
 				}),
+			),
+			(data: EmbeddingManifest) => {
+				manifestData = data;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
+
+		rawSubscribe(
+			rawFromAny(
 				fetchFn(vectorsUrl).then((res) => {
 					if (!res.ok) throw new Error(`Failed to fetch vectors: ${res.status} ${res.statusText}`);
 					return res.arrayBuffer();
 				}),
+			),
+			(bytes: ArrayBuffer) => {
+				vectorBytes = bytes;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
+	}
+
+	function load(): void {
+		let manifestData: EmbeddingManifest | null = null;
+		let vectorBytes: ArrayBuffer | null = null;
+		let pipelineFn: EmbeddingPipeline | null = null;
+		let remaining = 3;
+		let failed = false;
+
+		function onError(e: unknown): void {
+			if (failed) return;
+			failed = true;
+			if (!destroyed) {
+				batch(() => {
+					loaded.set(false);
+					error.set(e);
+				});
+			}
+		}
+
+		function onPartDone(): void {
+			remaining--;
+			if (remaining > 0 || failed || destroyed) return;
+			manifest = manifestData!;
+			embedFn = pipelineFn!;
+			try {
+				buildIndex(vectorBytes!);
+			} catch (e) {
+				onError(e);
+			}
+		}
+
+		rawSubscribe(
+			rawFromAny(
+				fetchFn(manifestUrl).then((res) => {
+					if (!res.ok) throw new Error(`Failed to fetch manifest: ${res.status} ${res.statusText}`);
+					return res.json() as Promise<EmbeddingManifest>;
+				}),
+			),
+			(data: EmbeddingManifest) => {
+				manifestData = data;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
+
+		rawSubscribe(
+			rawFromAny(
+				fetchFn(vectorsUrl).then((res) => {
+					if (!res.ok) throw new Error(`Failed to fetch vectors: ${res.status} ${res.statusText}`);
+					return res.arrayBuffer();
+				}),
+			),
+			(bytes: ArrayBuffer) => {
+				vectorBytes = bytes;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
+
+		rawSubscribe(
+			rawFromAny(
 				import("@huggingface/transformers").then((mod) => {
 					const pipeline = mod.pipeline ?? mod.default?.pipeline;
 					if (!pipeline)
 						throw new Error("Could not find pipeline export from @huggingface/transformers");
 					return pipeline("feature-extraction", modelId) as Promise<EmbeddingPipeline>;
 				}),
-			]);
-
-			if (destroyed) return;
-
-			manifest = manifestData;
-			embedFn = pipelineFn;
-			buildIndex(vectorBytes);
-		} catch (e) {
-			if (!destroyed) {
-				batch(() => {
-					loaded.set(false);
-					error.set(e);
-				});
-			}
-		}
+			),
+			(fn: EmbeddingPipeline) => {
+				pipelineFn = fn;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
 	}
 
 	function buildIndex(vectorBytes: ArrayBuffer): void {

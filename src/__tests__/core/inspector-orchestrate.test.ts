@@ -32,11 +32,11 @@ describe("Inspector.observeTaskState", () => {
 		const obs = Inspector.observeTaskState(ts);
 
 		const err = new Error("boom");
-		await ts
-			.run(async () => {
-				throw err;
-			})
-			.catch(() => {});
+		ts.run(async () => {
+			throw err;
+		});
+		// run() is now void — wait for the async throw to settle
+		await new Promise((r) => setTimeout(r, 10));
 
 		expect(obs.transitions).toHaveLength(2);
 		expect(obs.transitions[0]).toMatchObject({ from: "idle", to: "running" });

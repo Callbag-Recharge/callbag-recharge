@@ -1,6 +1,8 @@
 import { derived } from "../../core/derived";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { rawFromAny } from "../../raw/fromAny";
+import { rawSubscribe } from "../../raw/subscribe";
 import {
 	type AsyncValidator,
 	type SyncValidator,
@@ -47,7 +49,7 @@ export interface TextEditorResult {
 	error: Store<string>;
 	valid: Store<boolean>;
 	preview: Store<string>;
-	submit(): Promise<void>;
+	submit(): void;
 	cancel(): void;
 	canSubmit: Store<boolean>;
 	submitting: Store<boolean>;
@@ -162,13 +164,21 @@ export function textEditor(opts?: TextEditorOptions): TextEditorResult {
 		return nonEmpty && validation.valid.get() && !submitting.get();
 	});
 
-	async function submit(): Promise<void> {
+	function submit(): void {
 		if (!canSubmit.get()) return;
 		submitting.set(true);
-		try {
-			await opts?.onSubmit?.(buffer.content.get());
+		const result = opts?.onSubmit?.(buffer.content.get());
+		if (result && typeof (result as any).then === "function") {
+			rawSubscribe(rawFromAny(result), () => {}, {
+				onEnd: (error?: unknown) => {
+					if (!error) {
+						buffer.markClean();
+					}
+					submitting.set(false);
+				},
+			});
+		} else {
 			buffer.markClean();
-		} finally {
 			submitting.set(false);
 		}
 	}

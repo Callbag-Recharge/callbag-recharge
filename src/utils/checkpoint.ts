@@ -19,11 +19,11 @@ import { type CallbagSource, rawSubscribe } from "../raw/subscribe";
 
 export interface CheckpointAdapter {
 	/** Save a value for the given checkpoint id. May be sync or return a callbag source. */
-	save(id: string, value: unknown): void | CallbagSource;
+	save(id: string, value: unknown): undefined | CallbagSource;
 	/** Load a previously saved value. Returns undefined if none exists, or a callbag source. */
 	load(id: string): unknown | undefined | CallbagSource;
 	/** Clear a saved checkpoint. May be sync or return a callbag source. */
-	clear(id: string): void | CallbagSource;
+	clear(id: string): undefined | CallbagSource;
 }
 
 export interface CheckpointMeta {
@@ -43,7 +43,7 @@ export interface CheckpointedStore<A> extends Store<A | undefined> {
 }
 
 /** Safely subscribe to a potentially callbag adapter result (fire-and-forget). */
-function safeSubscribe(result: void | CallbagSource) {
+function safeSubscribe(result: undefined | CallbagSource) {
 	if (typeof result === "function") {
 		rawSubscribe(result, () => {});
 	}
@@ -163,7 +163,7 @@ export function checkpoint<A>(
 					rawSubscribe(
 						loaded as CallbagSource,
 						(saved: unknown) => {
-							if (!active) return;
+							if (!active || loadResolved) return;
 							if (saved !== undefined) {
 								emit(saved as A);
 								finishLoad(true);
@@ -228,12 +228,14 @@ export function memoryAdapter(): CheckpointAdapter {
 	return {
 		save(id, value) {
 			store.set(id, value);
+			return undefined;
 		},
 		load(id) {
 			return store.has(id) ? store.get(id) : undefined;
 		},
 		clear(id) {
 			store.delete(id);
+			return undefined;
 		},
 	};
 }

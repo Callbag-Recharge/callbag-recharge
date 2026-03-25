@@ -12,7 +12,8 @@
 
 import { state } from "../core/state";
 import type { Store } from "../core/types";
-import { firstValueFrom } from "../raw/firstValueFrom";
+import { rawFromAny } from "../raw/fromAny";
+import { rawSubscribe } from "../raw/subscribe";
 import type { RateLimiter } from "./rateLimiter";
 
 export type ActionFn<TInput, TResult> = (input: TInput, signal: AbortSignal) => Promise<TResult>;
@@ -29,8 +30,8 @@ export interface CancellableActionOptions<TResult> {
 }
 
 export interface CancellableActionResult<TInput, TResult> {
-	/** Execute the action. Cancels any in-progress execution. */
-	execute: (input: TInput) => Promise<TResult | undefined>;
+	/** Execute the action. Cancels any in-progress execution. Results tracked via `data` store. */
+	execute: (input: TInput) => void;
 	/** Cancel the current execution. */
 	cancel: () => void;
 	/** Reactive store of the latest result data. */
@@ -105,7 +106,7 @@ export function cancellableAction<TInput, TResult>(
 		}
 	}
 
-	async function execute(input: TInput): Promise<TResult | undefined> {
+	function execute(input: TInput): void {
 		cancel();
 
 		const currentId = ++executionId;
@@ -116,34 +117,44 @@ export function cancellableAction<TInput, TResult>(
 		errorStore.set(undefined);
 		if (!keepPrev) dataStore.set(undefined);
 
-		try {
-			// Rate limiting
-			if (opts?.rateLimiter) {
-				await firstValueFrom(opts.rateLimiter.acquire(signal));
-				if (signal.aborted || currentId !== executionId) return undefined;
-			}
+		function runAction() {
+			rawSubscribe(
+				rawFromAny(fn(input, signal)),
+				(result: TResult) => {
+					// Stale check — only update if this is still the latest execution
+					if (currentId !== executionId) return;
 
-			const result = await fn(input, signal);
+					dataStore.set(result);
+					loadingStore.set(false);
+					runCountStore.update((n) => n + 1);
+					abortController = null;
+				},
+				{
+					onEnd: (err?: unknown) => {
+						if (err === undefined) return;
+						if (currentId !== executionId) return;
+						if (signal.aborted) {
+							// Cancelled — don't set error state
+							loadingStore.set(false);
+							abortController = null;
+							return;
+						}
+						errorStore.set(err);
+						loadingStore.set(false);
+						abortController = null;
+					},
+				},
+			);
+		}
 
-			// Stale check — only update if this is still the latest execution
-			if (currentId !== executionId) return undefined;
-
-			dataStore.set(result);
-			loadingStore.set(false);
-			runCountStore.update((n) => n + 1);
-			abortController = null;
-			return result;
-		} catch (err) {
-			if (currentId !== executionId) return undefined;
-			if (signal.aborted) {
-				// Cancelled — don't set error state
-				loadingStore.set(false);
-				return undefined;
-			}
-			errorStore.set(err);
-			loadingStore.set(false);
-			abortController = null;
-			return undefined;
+		// Rate limiting
+		if (opts?.rateLimiter) {
+			rawSubscribe(opts.rateLimiter.acquire(signal), () => {
+				if (signal.aborted || currentId !== executionId) return;
+				runAction();
+			});
+		} else {
+			runAction();
 		}
 	}
 

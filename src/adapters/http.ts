@@ -17,6 +17,8 @@ import type { LifecycleSignal } from "../core/protocol";
 import { batch, PAUSE, RESET, RESUME } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { rawFromAny } from "../raw/fromAny";
+import { rawSubscribe } from "../raw/subscribe";
 import type { WithStatusStatus } from "../utils/withStatus";
 import { withStatus } from "../utils/withStatus";
 
@@ -97,7 +99,7 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 	let currentAbort: AbortController | null = null;
 	let active = false;
 
-	async function doFetch() {
+	function doFetch() {
 		if (!active || !_emit) return;
 
 		currentAbort = new AbortController();
@@ -120,56 +122,81 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 			requestTimeout,
 		);
 
-		try {
-			const body =
-				bodyOpt !== undefined
-					? typeof bodyOpt === "string"
-						? bodyOpt
-						: JSON.stringify(bodyOpt)
-					: undefined;
+		const body =
+			bodyOpt !== undefined
+				? typeof bodyOpt === "string"
+					? bodyOpt
+					: JSON.stringify(bodyOpt)
+				: undefined;
 
-			const response = await fetch(url, {
-				method,
-				headers,
-				body,
-				signal: combinedAbort.signal,
-			});
+		rawSubscribe(
+			rawFromAny(
+				fetch(url, {
+					method,
+					headers,
+					body,
+					signal: combinedAbort.signal,
+				}),
+			),
+			(response: Response) => {
+				if (!active) {
+					clearTimeout(timeoutId);
+					currentAbort = null;
+					return;
+				}
 
-			if (!active) return;
+				if (!response.ok) {
+					clearTimeout(timeoutId);
+					currentAbort = null;
+					_error?.(new Error(`HTTP ${response.status}: ${response.statusText}`));
+					return;
+				}
 
-			if (!response.ok) {
-				throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-			}
+				rawSubscribe(
+					rawFromAny(transform(response)),
+					(data: unknown) => {
+						clearTimeout(timeoutId);
+						currentAbort = null;
+						if (!active) return;
 
-			const data = (await transform(response)) as T;
-
-			if (!active) return;
-
-			batch(() => {
-				fetchCountStore.update((n) => n + 1);
-				_emit?.(data);
-			});
-		} catch (err: any) {
-			if (!active) return;
-			if (err?.name === "AbortError") return; // Cancelled
-			_error?.(err);
-		} finally {
-			clearTimeout(timeoutId);
-			currentAbort = null;
-		}
+						batch(() => {
+							fetchCountStore.update((n) => n + 1);
+							_emit?.(data as T);
+						});
+						schedulePoll();
+					},
+					{
+						onEnd: (err?: unknown) => {
+							clearTimeout(timeoutId);
+							currentAbort = null;
+							if (err !== undefined) {
+								if (!active) return;
+								if ((err as any)?.name === "AbortError") return;
+								_error?.(err);
+							}
+						},
+					},
+				);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					clearTimeout(timeoutId);
+					currentAbort = null;
+					if (err !== undefined) {
+						if (!active) return;
+						if ((err as any)?.name === "AbortError") return;
+						_error?.(err);
+					}
+				},
+			},
+		);
 	}
 
 	function schedulePoll() {
 		if (!active || paused || pollInterval <= 0) return;
 		pollTimer = setTimeout(() => {
 			pollTimer = null;
-			doFetch()
-				.then(() => {
-					if (active && !paused) schedulePoll();
-				})
-				.catch(() => {
-					// Already handled internally
-				});
+			doFetch();
 		}, pollInterval);
 	}
 
@@ -208,18 +235,14 @@ export function fromHTTP<T = unknown>(url: string, opts?: FromHTTPOptions): HTTP
 					}
 					fetchCountStore.set(0);
 					paused = false;
-					// Re-fetch from scratch
-					doFetch().then(() => {
-						if (active && !paused) schedulePoll();
-					});
+					// Re-fetch from scratch (schedulePoll called internally on success)
+					doFetch();
 				}
 				// TEARDOWN is handled by ProducerImpl._handleLifecycleSignal → complete()
 			});
 
-			// Initial fetch
-			doFetch().then(() => {
-				if (active && !paused) schedulePoll();
-			});
+			// Initial fetch (schedulePoll called internally on success)
+			doFetch();
 
 			return () => {
 				active = false;

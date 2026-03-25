@@ -31,5 +31,5 @@ const log = executionLog({ persist: adapter });
 ## Options / Behavior Details
 
 - **Node.js only:** Uses `node:fs` for file operations. Not available in browser builds.
-- **Async:** All operations return Promises.
+- **Async:** All operations return callbag sources.
 - **Format:** Each entry is one JSON line. Append-friendly — no read-modify-write.

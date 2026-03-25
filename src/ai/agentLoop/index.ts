@@ -30,7 +30,8 @@ import { producer } from "../../core/producer";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
 import type { GateController, GateOptions } from "../../orchestrate/gate";
-import { firstValueFrom } from "../../raw/firstValueFrom";
+import { rawFromAny } from "../../raw/fromAny";
+import { rawSubscribe } from "../../raw/subscribe";
 
 /** Thrown internally when an action is rejected via gate.reject(). Causes the loop to re-plan. */
 class GateRejected extends Error {
@@ -190,7 +191,7 @@ export function agentLoop<TContext, TAction>(
 	let stopped = false;
 	let running = false;
 	let generation = 0;
-	let loopPromise: Promise<void> | null = null;
+	let loopDoneCallback: (() => void) | null = null;
 
 	function addHistory(phase: AgentPhase, context: TContext, action?: TAction): void {
 		historyStore.update((prev) => [
@@ -199,13 +200,22 @@ export function agentLoop<TContext, TAction>(
 		]);
 	}
 
-	/** Wait for an action to be approved through the gate. */
-	function waitForApproval(action: TAction): Promise<TAction> {
-		if (!gateEnabled || !pendingStore) return Promise.resolve(action);
-		if (stopped) return Promise.resolve(action);
+	/** Wait for an action to be approved through the gate. Calls onApproved or onError. */
+	function waitForApproval(
+		action: TAction,
+		onApproved: (action: TAction) => void,
+		onError: (err: unknown) => void,
+	): void {
+		if (!gateEnabled || !pendingStore || stopped) {
+			onApproved(action);
+			return;
+		}
 
 		// If gate is open, pass through immediately
-		if (isOpenStore!.get()) return Promise.resolve(action);
+		if (isOpenStore!.get()) {
+			onApproved(action);
+			return;
+		}
 
 		// Enqueue and wait
 		gateQueue.push(action);
@@ -230,7 +240,17 @@ export function agentLoop<TContext, TAction>(
 			{ _skipInspect: true },
 		);
 
-		return firstValueFrom<TAction>(gateSource.source);
+		rawSubscribe(
+			gateSource.source,
+			(approvedAction: TAction) => {
+				onApproved(approvedAction);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
 	}
 
 	function dequeueAction(count: number): TAction[] {
@@ -239,17 +259,158 @@ export function agentLoop<TContext, TAction>(
 		return items;
 	}
 
-	async function runLoop(initialContext: TContext, gen: number): Promise<void> {
-		// Wait for previous loop to finish
-		if (loopPromise) {
-			stopped = true;
-			// Unblock any pending gate wait so loopPromise can settle
-			if (emitGate) {
-				emitGate(gateQueue[0] ?? (undefined as unknown as TAction));
-			}
-			await loopPromise;
+	function finishLoop(): void {
+		running = false;
+		const cb = loopDoneCallback;
+		loopDoneCallback = null;
+		cb?.();
+	}
+
+	function handleError(err: unknown, ctx: TContext): void {
+		if (!stopped) {
+			errorStore.set(err);
+			phaseStore.set("errored");
+			addHistory("errored", ctx);
 		}
-		// Check if superseded by a newer start() call
+		finishLoop();
+	}
+
+	/** Run one iteration of the observe→plan→[gate→]act cycle, then recurse or finish. */
+	function runIteration(ctx: TContext, iteration: number, gen: number): void {
+		if (stopped || gen !== generation) {
+			finishLoop();
+			return;
+		}
+
+		if (iteration >= maxIterations) {
+			phaseStore.set("completed");
+			addHistory("completed", ctx);
+			finishLoop();
+			return;
+		}
+
+		const nextIteration = iteration + 1;
+		iterationStore.set(nextIteration);
+
+		// Observe
+		phaseStore.set("observe");
+		addHistory("observe", ctx);
+		let observeResult: TContext | Promise<TContext>;
+		try {
+			observeResult = opts.observe(ctx);
+		} catch (err) {
+			handleError(err, ctx);
+			return;
+		}
+		rawSubscribe(
+			rawFromAny(observeResult),
+			(observedCtx: TContext) => {
+				contextStore.set(observedCtx);
+				if (stopped || gen !== generation) {
+					finishLoop();
+					return;
+				}
+
+				// Plan
+				phaseStore.set("plan");
+				addHistory("plan", observedCtx);
+				let planResult: TAction | Promise<TAction>;
+				try {
+					planResult = opts.plan(observedCtx);
+				} catch (err) {
+					handleError(err, observedCtx);
+					return;
+				}
+				rawSubscribe(
+					rawFromAny(planResult),
+					(action: TAction) => {
+						lastActionStore.set(action);
+						if (stopped || gen !== generation) {
+							finishLoop();
+							return;
+						}
+
+						const proceedToAct = (finalAction: TAction) => {
+							lastActionStore.set(finalAction);
+							if (stopped || gen !== generation) {
+								finishLoop();
+								return;
+							}
+
+							// Act
+							phaseStore.set("act");
+							addHistory("act", observedCtx, finalAction);
+							let actResult: TContext | Promise<TContext>;
+							try {
+								actResult = opts.act(finalAction, observedCtx);
+							} catch (err) {
+								handleError(err, observedCtx);
+								return;
+							}
+							rawSubscribe(
+								rawFromAny(actResult),
+								(newCtx: TContext) => {
+									contextStore.set(newCtx);
+									if (stopped || gen !== generation) {
+										finishLoop();
+										return;
+									}
+
+									// Check continuation
+									if (!shouldContinue(newCtx, nextIteration)) {
+										phaseStore.set("completed");
+										addHistory("completed", newCtx);
+										finishLoop();
+									} else {
+										runIteration(newCtx, nextIteration, gen);
+									}
+								},
+								{
+									onEnd: (err?: unknown) => {
+										if (err !== undefined) handleError(err, observedCtx);
+									},
+								},
+							);
+						};
+
+						// Gate: await approval if enabled
+						if (gateEnabled) {
+							phaseStore.set("awaiting_approval");
+							addHistory("awaiting_approval", observedCtx, action);
+							waitForApproval(
+								action,
+								(approvedAction) => {
+									proceedToAct(approvedAction);
+								},
+								(err) => {
+									// reject() fires GateRejected — re-plan on next iteration
+									if (err instanceof GateRejected && !stopped) {
+										runIteration(observedCtx, nextIteration, gen);
+									} else {
+										handleError(err, observedCtx);
+									}
+								},
+							);
+						} else {
+							proceedToAct(action);
+						}
+					},
+					{
+						onEnd: (err?: unknown) => {
+							if (err !== undefined) handleError(err, observedCtx);
+						},
+					},
+				);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) handleError(err, ctx);
+				},
+			},
+		);
+	}
+
+	function startLoop(initialContext: TContext, gen: number): void {
 		if (gen !== generation) return;
 
 		running = true;
@@ -259,96 +420,44 @@ export function agentLoop<TContext, TAction>(
 		errorGate = null;
 		pendingStore?.set([]);
 
-		let ctx = initialContext;
-		let iteration = 0;
-		contextStore.set(ctx);
+		contextStore.set(initialContext);
 		iterationStore.set(0);
 		errorStore.set(undefined);
 		lastActionStore.set(undefined);
 
-		try {
-			for (;;) {
-				if (stopped) break;
-
-				if (iteration >= maxIterations) {
-					phaseStore.set("completed");
-					addHistory("completed", ctx);
-					break;
-				}
-
-				iteration++;
-				iterationStore.set(iteration);
-
-				// Observe
-				phaseStore.set("observe");
-				addHistory("observe", ctx);
-				ctx = await opts.observe(ctx);
-				contextStore.set(ctx);
-				if (stopped) break;
-
-				// Plan
-				phaseStore.set("plan");
-				addHistory("plan", ctx);
-				let action = await opts.plan(ctx);
-				lastActionStore.set(action);
-				if (stopped) break;
-
-				// Gate: await approval if enabled
-				if (gateEnabled) {
-					phaseStore.set("awaiting_approval");
-					addHistory("awaiting_approval", ctx, action);
-					try {
-						action = await waitForApproval(action);
-					} catch (e) {
-						// reject() fires GateRejected — re-plan on next iteration
-						if (e instanceof GateRejected && !stopped) continue;
-						throw e;
-					}
-					lastActionStore.set(action); // may have been modified
-					if (stopped) break;
-				}
-
-				// Act
-				phaseStore.set("act");
-				addHistory("act", ctx, action);
-				ctx = await opts.act(action, ctx);
-				contextStore.set(ctx);
-				if (stopped) break;
-
-				// Check continuation
-				if (!shouldContinue(ctx, iteration)) {
-					phaseStore.set("completed");
-					addHistory("completed", ctx);
-					break;
-				}
-			}
-		} catch (err) {
-			if (!stopped) {
-				errorStore.set(err);
-				phaseStore.set("errored");
-				addHistory("errored", ctx);
-			}
-		} finally {
-			running = false;
-		}
+		runIteration(initialContext, 0, gen);
 	}
 
 	function start(initialContext: TContext): void {
 		generation++;
 		const gen = generation;
 		historyStore.set([]);
-		loopPromise = runLoop(initialContext, gen).catch(() => {});
+
+		if (running) {
+			// Stop the current loop and schedule restart
+			stopped = true;
+			if (emitGate) {
+				emitGate(gateQueue[0] ?? (undefined as unknown as TAction));
+			}
+			loopDoneCallback = () => {
+				if (gen !== generation) return;
+				startLoop(initialContext, gen);
+			};
+		} else {
+			startLoop(initialContext, gen);
+		}
 	}
 
 	function stop(): void {
 		stopped = true;
-		// Unblock any pending gate wait — emit so the await settles.
-		// The value doesn't matter; `if (stopped) break` fires immediately after.
+		if (running) {
+			phaseStore.set("completed");
+		}
+		// Unblock any pending gate wait — emit so the callback fires.
+		// The value doesn't matter; `if (stopped)` check fires immediately after.
 		if (emitGate) {
 			emitGate(gateQueue[0] ?? (undefined as unknown as TAction));
 		}
-		if (!running) return;
-		phaseStore.set("completed");
 	}
 
 	const base: AgentLoopResultBase<TContext, TAction> = {

@@ -114,9 +114,9 @@ export function workerSelf<TImport extends readonly string[]>(
 		disposeEffect = effect(
 			[aggregated],
 			() => {
-				if (destroyed) return;
+				if (destroyed) return undefined;
 				const updates = aggregated.get();
-				if (Object.keys(updates).length === 0) return;
+				if (Object.keys(updates).length === 0) return undefined;
 
 				const transferList: Transferable[] = [];
 				for (const name of Object.keys(updates)) {
@@ -126,6 +126,7 @@ export function workerSelf<TImport extends readonly string[]>(
 
 				const msg: BatchMessage = { t: "b", u: updates };
 				transport.post(msg, transferList.length > 0 ? transferList : undefined);
+				return undefined;
 			},
 			{ name: "workerSelf:sender" },
 		);

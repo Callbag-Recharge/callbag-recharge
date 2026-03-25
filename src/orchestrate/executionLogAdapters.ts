@@ -82,8 +82,9 @@ export function sqliteLogAdapter(opts: SQLiteLogAdapterOptions): ExecutionLogPer
 	const deleteAllStmt = db.prepare(`DELETE FROM ${table}`);
 
 	return {
-		append(entry: ExecutionEntry): void {
+		append(entry: ExecutionEntry): undefined | CallbagSource {
 			insertStmt.run(JSON.stringify(entry));
+			return undefined;
 		},
 
 		load(): ExecutionEntry[] {
@@ -91,8 +92,9 @@ export function sqliteLogAdapter(opts: SQLiteLogAdapterOptions): ExecutionLogPer
 			return rows.map((row) => JSON.parse(row.entry) as ExecutionEntry);
 		},
 
-		clear(): void {
+		clear(): undefined | CallbagSource {
 			deleteAllStmt.run();
+			return undefined;
 		},
 	};
 }

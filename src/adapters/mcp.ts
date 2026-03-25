@@ -15,6 +15,8 @@
 import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { rawFromAny } from "../raw/fromAny";
+import { rawSubscribe } from "../raw/subscribe";
 import type { WithStatusStatus } from "../utils/withStatus";
 
 /**
@@ -56,8 +58,8 @@ export interface MCPToolStore<TArgs = Record<string, unknown>, TResult = unknown
 	status: Store<WithStatusStatus>;
 	/** Last error, if any. */
 	error: Store<unknown | undefined>;
-	/** Call the tool with arguments. */
-	call: (args: TArgs) => Promise<void>;
+	/** Call the tool with arguments. Results tracked via stores. */
+	call: (args: TArgs) => void;
 	/** Last arguments passed to call(). */
 	lastArgs: Store<TArgs | undefined>;
 	/** Duration of last call in ms. */
@@ -82,8 +84,8 @@ export interface MCPResult {
 	tools: Store<MCPToolInfo[]>;
 	/** Available resources (populated after refresh). */
 	resources: Store<MCPResource[]>;
-	/** Refresh the tools and resources lists. */
-	refresh: () => Promise<void>;
+	/** Refresh the tools and resources lists. Results tracked via stores. */
+	refresh: () => void;
 	/** Last refresh error, if any. */
 	refreshError: Store<unknown | undefined>;
 }
@@ -137,23 +139,33 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 		else if (typeof handler === "function") handler(err);
 	}
 
-	async function refresh(): Promise<void> {
+	function refresh(): void {
 		refreshErrorStore.set(undefined);
 		if (client.listTools) {
-			try {
-				const result = await client.listTools();
-				toolsStore.set(result.tools);
-			} catch (err) {
-				handleRefreshError(err);
-			}
+			rawSubscribe(
+				rawFromAny(client.listTools()),
+				(result) => {
+					toolsStore.set(result.tools);
+				},
+				{
+					onEnd: (err?: unknown) => {
+						if (err !== undefined) handleRefreshError(err);
+					},
+				},
+			);
 		}
 		if (client.listResources) {
-			try {
-				const result = await client.listResources();
-				resourcesStore.set(result.resources);
-			} catch (err) {
-				handleRefreshError(err);
-			}
+			rawSubscribe(
+				rawFromAny(client.listResources()),
+				(result) => {
+					resourcesStore.set(result.resources);
+				},
+				{
+					onEnd: (err?: unknown) => {
+						if (err !== undefined) handleRefreshError(err);
+					},
+				},
+			);
 		}
 	}
 
@@ -169,7 +181,7 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 
 		let calling = false;
 
-		async function call(args: TArgs): Promise<void> {
+		function call(args: TArgs): void {
 			if (calling) return; // concurrency guard
 			calling = true;
 			batch(() => {
@@ -179,61 +191,68 @@ export function fromMCP(opts: MCPOptions): MCPResult {
 			});
 			const startTime = Date.now();
 
-			try {
-				const response = await client.callTool({
-					name: toolName,
-					arguments: args as Record<string, unknown>,
-				});
+			rawSubscribe(
+				rawFromAny(
+					client.callTool({
+						name: toolName,
+						arguments: args as Record<string, unknown>,
+					}),
+				),
+				(response) => {
+					calling = false;
+					const duration = Date.now() - startTime;
 
-				const duration = Date.now() - startTime;
+					if (response.isError) {
+						const errorText = response.content
+							.filter((c: any) => c.type === "text")
+							.map((c: any) => c.text ?? "")
+							.join("\n");
+						const err = new Error(errorText || "MCP tool returned error");
+						batch(() => {
+							durationStore.set(duration);
+							errorStore.set(err);
+							statusStore.set("errored");
+						});
+						return;
+					}
 
-				if (response.isError) {
-					const errorText = response.content
-						.filter((c) => c.type === "text")
-						.map((c) => c.text ?? "")
-						.join("\n");
-					const err = new Error(errorText || "MCP tool returned error");
+					// Extract result — if single text content, return text; otherwise return full content
+					const textContent = response.content.filter((c: any) => c.type === "text");
+					let result: unknown;
+					if (textContent.length === 1) {
+						const text = textContent[0].text;
+						if (text !== undefined) {
+							try {
+								result = JSON.parse(text);
+							} catch {
+								result = text;
+							}
+						}
+					} else if (textContent.length > 1) {
+						result = textContent.map((c: any) => c.text ?? "");
+					} else {
+						result = response.content;
+					}
+
 					batch(() => {
 						durationStore.set(duration);
-						errorStore.set(err);
-						statusStore.set("errored");
+						resultStore.set(result as TResult);
+						statusStore.set("completed");
 					});
-					return;
-				}
-
-				// Extract result — if single text content, return text; otherwise return full content
-				const textContent = response.content.filter((c) => c.type === "text");
-				let result: unknown;
-				if (textContent.length === 1) {
-					const text = textContent[0].text;
-					if (text !== undefined) {
-						try {
-							result = JSON.parse(text);
-						} catch {
-							result = text;
-						}
-					}
-				} else if (textContent.length > 1) {
-					result = textContent.map((c) => c.text ?? "");
-				} else {
-					result = response.content;
-				}
-
-				batch(() => {
-					durationStore.set(duration);
-					resultStore.set(result as TResult);
-					statusStore.set("completed");
-				});
-			} catch (err) {
-				const duration = Date.now() - startTime;
-				batch(() => {
-					durationStore.set(duration);
-					errorStore.set(err);
-					statusStore.set("errored");
-				});
-			} finally {
-				calling = false;
-			}
+				},
+				{
+					onEnd: (err?: unknown) => {
+						calling = false;
+						if (err === undefined) return;
+						const duration = Date.now() - startTime;
+						batch(() => {
+							durationStore.set(duration);
+							errorStore.set(err);
+							statusStore.set("errored");
+						});
+					},
+				},
+			);
 		}
 
 		return {

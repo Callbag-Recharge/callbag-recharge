@@ -143,7 +143,7 @@ export function workerBridge<
 			[aggregated],
 			() => {
 				const updates = aggregated.get();
-				if (Object.keys(updates).length === 0) return;
+				if (Object.keys(updates).length === 0) return undefined;
 
 				// Build transfer list from all changed stores
 				const transferList: Transferable[] = [];
@@ -154,6 +154,7 @@ export function workerBridge<
 
 				const msg: BatchMessage = { t: "b", u: updates };
 				transport.post(msg, transferList.length > 0 ? transferList : undefined);
+				return undefined;
 			},
 			{ name: `${bridgeName}:sender` },
 		);

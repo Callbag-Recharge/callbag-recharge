@@ -7,7 +7,8 @@
 //
 // Usage:
 //   const task = taskState<Result>();
-//   await task.run((signal) => fetchData({ signal }));
+//   task.run((signal) => fetchData({ signal }));
+//   // subscribe to task.status for completion
 //   task.status.get()   // 'success'
 //   task.duration.get() // ms
 //   task.get()          // { status, result, error, ... } convenience
@@ -20,6 +21,11 @@
 import { batch, teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { WritableStore } from "../core/types";
+import { rawFromPromise } from "../raw/fromPromise";
+import { fromTimer } from "../raw/fromTimer";
+import { rawRace } from "../raw/race";
+import type { CallbagSource } from "../raw/subscribe";
+import { rawSubscribe } from "../raw/subscribe";
 import type { TaskMeta, TaskState, TaskStateSnapshot, TaskStatus } from "./types";
 
 let taskCounter = 0;
@@ -52,7 +58,7 @@ taskState.from = function from<T>(snap: TaskStateSnapshot<T>): TaskState<T> {
  *
  * @returns `TaskState<T>` — a task tracker with the following API:
  *
- * @returnsTable run(fn) | (fn: (signal: AbortSignal) => T \| Promise<T>) => Promise<T> | Execute an async function with lifecycle tracking.
+ * @returnsTable run(fn) | (fn: (signal: AbortSignal) => T \| Promise<T>) => void | Execute a function with lifecycle tracking. Results tracked via stores.
  * get() | () => TaskMeta<T> | Returns the current metadata snapshot (status, result, error, duration, runCount).
  * status | Store<TaskStatus> | Reactive store: 'idle' \| 'running' \| 'success' \| 'error'.
  * result | Store<T \| undefined> | Reactive store of the last successful result.
@@ -71,8 +77,9 @@ taskState.from = function from<T>(snap: TaskStateSnapshot<T>): TaskState<T> {
  * import { taskState } from 'callbag-recharge';
  *
  * const task = taskState<string>();
- * await task.run((signal) => fetch('/api', { signal }).then(r => r.text()));
- * task.status.get(); // 'success'
+ * task.run((signal) => fetch('/api', { signal }).then(r => r.text()));
+ * // subscribe to task.status for reactive completion notification
+ * task.status.get(); // 'success' (after completion)
  * task.duration.get(); // e.g. 120
  * ```
  *
@@ -151,7 +158,7 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 			};
 		},
 
-		async run(fn: (signal: AbortSignal) => T | Promise<T>): Promise<T> {
+		run(fn: (signal: AbortSignal) => T | Promise<T>, runOpts?: { timeout?: number }): void {
 			if (destroyed) throw new Error("TaskState is destroyed");
 			if (_status.get() === "running") throw new Error("Task is already running");
 
@@ -166,25 +173,13 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 				_error.set(undefined);
 			});
 
+			// Call user fn — may throw synchronously
+			let callResult: T | Promise<T>;
 			try {
-				const result = await fn(signal);
-				// P4: If destroyed or reset() was called during await, discard
-				if (destroyed || gen !== generation) return result;
-				abortController = null;
-				const duration = Date.now() - startTime;
-				batch(() => {
-					_status.set("success");
-					_result.set(result);
-					_error.set(undefined);
-					_lastRun.set(startTime);
-					_duration.set(duration);
-					_runCount.set(prevRunCount + 1);
-					_version.update((v) => v + 1);
-				});
-				return result;
+				callResult = fn(signal);
 			} catch (e) {
-				// P4: If destroyed or reset() was called during await, discard
-				if (destroyed || gen !== generation) throw e;
+				// P4: If destroyed or reset() was called, discard
+				if (destroyed || gen !== generation) return;
 				abortController = null;
 				const duration = Date.now() - startTime;
 				batch(() => {
@@ -196,8 +191,76 @@ export function taskState<T = unknown>(opts?: { id?: string }): TaskState<T> {
 					_runCount.set(prevRunCount + 1);
 					_version.update((v) => v + 1);
 				});
-				throw e;
+				return;
 			}
+
+			// Wrap result as a callbag source. Use rawFromPromise for PromiseLike,
+			// otherwise emit the value directly. Do NOT use rawFromAny here because
+			// it treats arrays/iterables as multi-value streams, but taskState.run()
+			// expects a single result value.
+			const isPromiseLike = callResult != null && typeof (callResult as any).then === "function";
+			let source: CallbagSource = isPromiseLike
+				? rawFromPromise(callResult as PromiseLike<T>)
+				: (((type: number, sink?: any) => {
+						if (type !== 0) return;
+						let cancelled = false;
+						sink(0, (t: number) => {
+							if (t === 2) cancelled = true;
+						});
+						if (!cancelled) sink(1, callResult);
+						if (!cancelled) sink(2);
+					}) as CallbagSource);
+
+			// Apply timeout via rawRace if configured
+			if (runOpts?.timeout !== undefined) {
+				const timeoutSource: CallbagSource = (type: number, sink?: any) => {
+					if (type !== 0) return;
+					const sub = rawSubscribe(fromTimer(runOpts.timeout!, signal), () => {
+						sink(2 /* END */, new Error(`Timeout: ${runOpts.timeout}ms`));
+					});
+					sink(0 /* START */, (t: number) => {
+						if (t === 2) sub.unsubscribe();
+					});
+				};
+				source = rawRace(source, timeoutSource);
+			}
+
+			rawSubscribe(
+				source,
+				(result: T) => {
+					// P4: If destroyed or reset() was called during async, discard
+					if (destroyed || gen !== generation) return;
+					abortController = null;
+					const duration = Date.now() - startTime;
+					batch(() => {
+						_status.set("success");
+						_result.set(result);
+						_error.set(undefined);
+						_lastRun.set(startTime);
+						_duration.set(duration);
+						_runCount.set(prevRunCount + 1);
+						_version.update((v) => v + 1);
+					});
+				},
+				{
+					onEnd: (err?: unknown) => {
+						if (err === undefined) return; // Normal completion
+						// P4: If destroyed or reset() was called during async, discard
+						if (destroyed || gen !== generation) return;
+						abortController = null;
+						const duration = Date.now() - startTime;
+						batch(() => {
+							_status.set("error");
+							_result.set(prevResult);
+							_error.set(err);
+							_lastRun.set(startTime);
+							_duration.set(duration);
+							_runCount.set(prevRunCount + 1);
+							_version.update((v) => v + 1);
+						});
+					},
+				},
+			);
 		},
 
 		markSkipped() {

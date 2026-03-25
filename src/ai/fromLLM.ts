@@ -17,6 +17,9 @@
 import { batch } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { rawFromAny } from "../raw/fromAny";
+import { rawFromAsyncIter } from "../raw/fromAsyncIter";
+import { rawSubscribe } from "../raw/subscribe";
 import type { WithStatusStatus } from "../utils/withStatus";
 
 export interface LLMMessage {
@@ -202,92 +205,149 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 		const body = buildBody(provider, model, messages, genOpts);
 		const headers = buildHeaders(provider, opts.apiKey);
 
-		streamResponse(url, headers, body, signal).catch(() => {});
+		streamResponse(url, headers, body, signal);
 	}
 
-	async function streamResponse(
+	function streamResponse(
 		url: string,
 		headers: Record<string, string>,
 		body: Record<string, unknown>,
 		signal: AbortSignal,
-	): Promise<void> {
-		try {
-			const response = await fetchFn(url, {
-				method: "POST",
-				headers,
-				body: JSON.stringify(body),
-				signal,
-			});
-
-			if (!response.ok) {
-				const text = await response.text().catch(() => "");
-				throw new Error(`LLM API error ${response.status}: ${text}`);
-			}
-
-			const reader = response.body?.getReader();
-			if (!reader) throw new Error("No response body");
-
-			const decoder = new TextDecoder();
-			let accumulated = "";
-			let buffer = "";
-
-			while (true) {
-				if (signal.aborted) return;
-				const { done, value } = await reader.read();
-				if (done) break;
-
-				buffer += decoder.decode(value, { stream: true });
-
-				// Parse SSE lines
-				const lines = buffer.split("\n");
-				buffer = lines.pop() ?? "";
-
-				for (const line of lines) {
-					if (signal.aborted) return;
-
-					const trimmed = line.trim();
-					if (!trimmed || trimmed.startsWith(":")) continue;
-					if (!trimmed.startsWith("data: ")) continue;
-
-					const data = trimmed.slice(6);
-					if (data === "[DONE]") continue;
-
-					try {
-						const parsed = JSON.parse(data);
-						const content = extractContent(provider, parsed);
-						if (content) {
-							accumulated += content;
-							storeState.set(accumulated);
-						}
-
-						// Extract token usage (usually in the final chunk)
-						const usage = extractUsage(provider, parsed);
-						if (usage) {
-							tokensState.set(usage);
-						}
-					} catch {
-						// Skip unparseable SSE data lines
-					}
+	): void {
+		rawSubscribe(
+			rawFromAny(
+				fetchFn(url, {
+					method: "POST",
+					headers,
+					body: JSON.stringify(body),
+					signal,
+				}),
+			),
+			(response: Response) => {
+				if (!response.ok) {
+					// Read error text then report
+					rawSubscribe(rawFromAny(response.text().catch(() => "")), (text: string) => {
+						if (signal.aborted) return;
+						batch(() => {
+							errorState.set(new Error(`LLM API error ${response.status}: ${text}`));
+							statusState.set("errored");
+						});
+						abortController = null;
+						(signal as any)._cleanup?.();
+					});
+					return;
 				}
-			}
 
-			// Flush any remaining bytes from the streaming decoder
-			decoder.decode();
+				const reader = response.body?.getReader();
+				if (!reader) {
+					if (signal.aborted) return;
+					batch(() => {
+						errorState.set(new Error("No response body"));
+						statusState.set("errored");
+					});
+					abortController = null;
+					(signal as any)._cleanup?.();
+					return;
+				}
 
-			if (signal.aborted) return;
-			statusState.set("completed");
-			abortController = null;
-		} catch (err) {
-			if (signal.aborted) return;
-			batch(() => {
-				errorState.set(err);
-				statusState.set("errored");
-			});
-			abortController = null;
-		} finally {
-			// Clean up combined signal listeners to prevent memory leaks
-			(signal as any)._cleanup?.();
-		}
+				// Stream chunks via async iterator adapter
+				const decoder = new TextDecoder();
+				let accumulated = "";
+				let buffer = "";
+
+				const readerIterable: AsyncIterable<Uint8Array> = {
+					[Symbol.asyncIterator]() {
+						return {
+							next() {
+								return reader.read() as Promise<IteratorResult<Uint8Array>>;
+							},
+							return() {
+								reader.cancel();
+								return Promise.resolve({ done: true, value: undefined });
+							},
+						};
+					},
+				};
+
+				rawSubscribe(
+					rawFromAsyncIter(readerIterable),
+					(value: Uint8Array) => {
+						if (signal.aborted) return;
+
+						buffer += decoder.decode(value, { stream: true });
+
+						// Parse SSE lines
+						const lines = buffer.split("\n");
+						buffer = lines.pop() ?? "";
+
+						for (const line of lines) {
+							if (signal.aborted) return;
+
+							const trimmed = line.trim();
+							if (!trimmed || trimmed.startsWith(":")) continue;
+							if (!trimmed.startsWith("data: ")) continue;
+
+							const data = trimmed.slice(6);
+							if (data === "[DONE]") continue;
+
+							try {
+								const parsed = JSON.parse(data);
+								const content = extractContent(provider, parsed);
+								if (content) {
+									accumulated += content;
+									storeState.set(accumulated);
+								}
+
+								// Extract token usage (usually in the final chunk)
+								const usage = extractUsage(provider, parsed);
+								if (usage) {
+									tokensState.set(usage);
+								}
+							} catch {
+								// Skip unparseable SSE data lines
+							}
+						}
+					},
+					{
+						onEnd: (err?: unknown) => {
+							// Flush any remaining bytes from the streaming decoder
+							decoder.decode();
+
+							if (signal.aborted) {
+								(signal as any)._cleanup?.();
+								return;
+							}
+							if (err !== undefined) {
+								batch(() => {
+									errorState.set(err);
+									statusState.set("errored");
+								});
+							} else {
+								statusState.set("completed");
+							}
+							abortController = null;
+							(signal as any)._cleanup?.();
+						},
+					},
+				);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) {
+						if (signal.aborted) {
+							(signal as any)._cleanup?.();
+							return;
+						}
+						batch(() => {
+							errorState.set(err);
+							statusState.set("errored");
+						});
+						abortController = null;
+						(signal as any)._cleanup?.();
+					}
+				},
+			},
+		);
 	}
 
 	return {

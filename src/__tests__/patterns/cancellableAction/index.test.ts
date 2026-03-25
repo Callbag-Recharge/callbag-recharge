@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from "vitest";
 import { cancellableAction } from "../../../utils/cancellableAction";
 import { tokenBucket } from "../../../utils/rateLimiter";
 
+const flush = () => new Promise((r) => setTimeout(r, 0));
+
 // ---------------------------------------------------------------------------
 // cancellableAction
 // ---------------------------------------------------------------------------
@@ -11,8 +13,8 @@ describe("cancellableAction", () => {
 			return `result: ${input}`;
 		});
 
-		const result = await action.execute("hello");
-		expect(result).toBe("result: hello");
+		action.execute("hello");
+		await flush();
 		expect(action.data.get()).toBe("result: hello");
 		expect(action.loading.get()).toBe(false);
 		expect(action.error.get()).toBeUndefined();
@@ -24,10 +26,10 @@ describe("cancellableAction", () => {
 			return input;
 		});
 
-		const promise = action.execute("test");
+		action.execute("test");
 		expect(action.loading.get()).toBe(true);
 
-		await promise;
+		await new Promise((r) => setTimeout(r, 80));
 		expect(action.loading.get()).toBe(false);
 	});
 
@@ -42,7 +44,9 @@ describe("cancellableAction", () => {
 
 		action.execute("first");
 		await new Promise((r) => setTimeout(r, 20));
-		await action.execute("second");
+		action.execute("second");
+
+		await new Promise((r) => setTimeout(r, 150));
 
 		// Only second should complete
 		expect(calls).toEqual(["second"]);
@@ -54,8 +58,9 @@ describe("cancellableAction", () => {
 			throw new Error("fail");
 		});
 
-		const result = await action.execute("test");
-		expect(result).toBeUndefined();
+		action.execute("test");
+		await flush();
+		expect(action.data.get()).toBeUndefined();
 		expect(action.error.get()).toBeInstanceOf(Error);
 		expect(action.loading.get()).toBe(false);
 	});
@@ -80,9 +85,11 @@ describe("cancellableAction", () => {
 		const action = cancellableAction(async (n: number) => n * 2);
 
 		expect(action.runCount.get()).toBe(0);
-		await action.execute(1);
+		action.execute(1);
+		await flush();
 		expect(action.runCount.get()).toBe(1);
-		await action.execute(2);
+		action.execute(2);
+		await flush();
 		expect(action.runCount.get()).toBe(2);
 	});
 
@@ -99,12 +106,13 @@ describe("cancellableAction", () => {
 			return n;
 		});
 
-		await action.execute(42);
+		action.execute(42);
+		await new Promise((r) => setTimeout(r, 80));
 		expect(action.data.get()).toBe(42);
 
-		const promise = action.execute(99);
+		action.execute(99);
 		expect(action.data.get()).toBeUndefined(); // cleared
-		await promise;
+		await new Promise((r) => setTimeout(r, 80));
 		expect(action.data.get()).toBe(99);
 	});
 
@@ -117,12 +125,13 @@ describe("cancellableAction", () => {
 			{ keepPreviousData: true },
 		);
 
-		await action.execute(42);
+		action.execute(42);
+		await new Promise((r) => setTimeout(r, 80));
 		expect(action.data.get()).toBe(42);
 
-		const promise = action.execute(99);
+		action.execute(99);
 		expect(action.data.get()).toBe(42); // preserved
-		await promise;
+		await new Promise((r) => setTimeout(r, 80));
 		expect(action.data.get()).toBe(99);
 	});
 
@@ -131,41 +140,35 @@ describe("cancellableAction", () => {
 		const rl = tokenBucket({ rate: 10, burst: 1, now: () => time });
 		rl.tryAcquire(); // exhaust the single token
 
-		const action = cancellableAction(
-			async (n: number) => n * 2,
-			{ rateLimiter: rl },
-		);
+		const action = cancellableAction(async (n: number) => n * 2, { rateLimiter: rl });
 
-		const promise = action.execute(5);
+		action.execute(5);
 		expect(action.loading.get()).toBe(true);
 
 		// Simulate time passing so token refills
 		time = 100;
-		const result = await promise;
+		// The rate limiter polls internally; wait for it to fire
+		await new Promise((r) => setTimeout(r, 120));
 
-		expect(result).toBe(10);
 		expect(action.data.get()).toBe(10);
 		expect(action.loading.get()).toBe(false);
 	});
 
 	it("cancelling during rateLimiter wait aborts cleanly", async () => {
-		let time = 0;
+		const time = 0;
 		const rl = tokenBucket({ rate: 1, burst: 1, now: () => time });
 		rl.tryAcquire(); // exhaust
 
-		const action = cancellableAction(
-			async (n: number) => n,
-			{ rateLimiter: rl },
-		);
+		const action = cancellableAction(async (n: number) => n, { rateLimiter: rl });
 
-		const promise = action.execute(42);
+		action.execute(42);
 		expect(action.loading.get()).toBe(true);
 
 		// Cancel while waiting for rate limiter
 		action.cancel();
 
-		const result = await promise;
-		expect(result).toBeUndefined();
+		await flush();
+		expect(action.data.get()).toBeUndefined();
 		expect(action.loading.get()).toBe(false);
 	});
 
@@ -176,13 +179,13 @@ describe("cancellableAction", () => {
 		});
 
 		// Start slow execution
-		const p1 = action.execute(10); // 100ms
+		action.execute(10); // 100ms
 		await new Promise((r) => setTimeout(r, 10));
 
 		// Start fast execution (cancels slow one)
-		const p2 = action.execute(1); // 10ms
+		action.execute(1); // 10ms
 
-		await Promise.allSettled([p1, p2]);
+		await new Promise((r) => setTimeout(r, 150));
 		expect(action.data.get()).toBe(1); // fast one wins
 	});
 });

@@ -21,10 +21,11 @@
 import { operator } from "../core/operator";
 import { pipe } from "../core/pipe";
 import { producer } from "../core/producer";
-import { DATA, END, RESET, STATE, TEARDOWN } from "../core/protocol";
+import { DATA, END, RESET, STATE, type Subscription, TEARDOWN } from "../core/protocol";
 import type { Store } from "../core/types";
 import { combine } from "../extra/combine";
 import { firstValueFrom } from "../extra/firstValueFrom";
+import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import type { PipelineResult, StepDef } from "./pipeline";
 import { pipeline } from "./pipeline";
@@ -150,6 +151,7 @@ export function subPipeline<T>(
 					let stopped = false;
 					let emitted = false;
 					let childPipeline: PipelineResult<any> | null = null;
+					let statusUnsub: Subscription | null = null;
 
 					const safeEmit = (v: T | undefined) => {
 						if (!stopped && !emitted) {
@@ -163,6 +165,8 @@ export function subPipeline<T>(
 
 					const cleanup = () => {
 						stopped = true;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
 						if (childPipeline) {
 							childPipeline.destroy();
 							childPipeline = null;
@@ -205,13 +209,17 @@ export function subPipeline<T>(
 							throw new Error("subPipeline: child pipeline errored");
 						}
 
-						const result = outputStore.get() as T;
-						safeEmit(result);
-						safeComplete();
-						return result;
-					}).catch(() => {
-						// Error tracked by taskState
-						if (!stopped && !emitted) {
+						return outputStore.get() as T;
+					});
+
+					statusUnsub = subscribe(ts.status, (s) => {
+						if (s === "running" || s === "idle") return;
+						statusUnsub?.unsubscribe();
+						statusUnsub = null;
+						if (s === "success") {
+							safeEmit(ts.result.get() as T);
+							safeComplete();
+						} else if (!stopped && !emitted) {
 							safeEmit(undefined);
 							safeComplete();
 						}

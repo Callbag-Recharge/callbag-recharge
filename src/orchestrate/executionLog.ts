@@ -41,11 +41,11 @@ export interface ExecutionEntry {
 
 export interface ExecutionLogPersistAdapter {
 	/** Append an entry to persistent storage. May be sync or return a callbag source. */
-	append(entry: ExecutionEntry): void | CallbagSource;
+	append(entry: ExecutionEntry): undefined | CallbagSource;
 	/** Load all persisted entries. May be sync or return a callbag source. */
 	load(): ExecutionEntry[] | CallbagSource;
 	/** Clear all persisted entries. May be sync or return a callbag source. */
-	clear(): void | CallbagSource;
+	clear(): undefined | CallbagSource;
 }
 
 export interface ExecutionLogOptions {
@@ -306,12 +306,14 @@ export function memoryLogAdapter(): ExecutionLogPersistAdapter {
 	return {
 		append(entry) {
 			entries.push(entry);
+			return undefined;
 		},
 		load() {
 			return [...entries];
 		},
 		clear() {
 			entries.length = 0;
+			return undefined;
 		},
 	};
 }

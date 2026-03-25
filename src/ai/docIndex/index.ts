@@ -16,6 +16,8 @@
 import { batch, teardown } from "../../core/protocol";
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { rawFromAny } from "../../raw/fromAny";
+import { rawSubscribe } from "../../raw/subscribe";
 
 export interface SearchResult {
 	/** Chunk ID from the docs table. */
@@ -98,19 +100,51 @@ export function docIndex(opts: DocIndexOptions): DocIndexResult {
 		load();
 	}
 
-	async function loadTestOnly(): Promise<void> {
-		try {
-			// Simulate async lifecycle for test consistency (fetch is mocked)
-			const res = await fetchFn(dbUrl);
-			if (!res.ok) throw new Error(`Failed to fetch DB: ${res.status} ${res.statusText}`);
-			if (destroyed) return;
-			// _sqlite is test-only: mock handles open_v2, no real DB bytes needed
-			dbHandle = sqlite3!.open_v2("docs.db");
-			batch(() => {
-				loaded.set(true);
-				error.set(undefined);
-			});
-		} catch (e) {
+	function loadTestOnly(): void {
+		// Simulate async lifecycle for test consistency (fetch is mocked)
+		rawSubscribe(
+			rawFromAny(fetchFn(dbUrl)),
+			(res: Response) => {
+				if (!res.ok) {
+					if (!destroyed) {
+						batch(() => {
+							loaded.set(false);
+							error.set(new Error(`Failed to fetch DB: ${res.status} ${res.statusText}`));
+						});
+					}
+					return;
+				}
+				if (destroyed) return;
+				// _sqlite is test-only: mock handles open_v2, no real DB bytes needed
+				dbHandle = sqlite3!.open_v2("docs.db");
+				batch(() => {
+					loaded.set(true);
+					error.set(undefined);
+				});
+			},
+			{
+				onEnd: (e?: unknown) => {
+					if (e !== undefined && !destroyed) {
+						batch(() => {
+							loaded.set(false);
+							error.set(e);
+						});
+					}
+				},
+			},
+		);
+	}
+
+	function load(): void {
+		let waSqliteMod: any = null;
+		let sqliteModule: any = null;
+		let dbBytesResult: ArrayBuffer | null = null;
+		let remaining = 2;
+		let failed = false;
+
+		function onError(e: unknown): void {
+			if (failed) return;
+			failed = true;
 			if (!destroyed) {
 				batch(() => {
 					loaded.set(false);
@@ -118,33 +152,19 @@ export function docIndex(opts: DocIndexOptions): DocIndexResult {
 				});
 			}
 		}
-	}
 
-	async function load(): Promise<void> {
-		try {
-			// Dynamic import — wa-sqlite is a peer dependency
-			const waSqliteMod = await import("@aspect-build/wa-sqlite");
+		function onPartDone(): void {
+			remaining--;
+			if (remaining > 0 || failed || destroyed) return;
 
-			// Fetch the DB file in parallel with WASM init
-			const factory = waSqliteMod.default ?? waSqliteMod;
-			const [sqliteModule, dbBytes] = await Promise.all([
-				typeof factory === "function" ? factory() : factory,
-				fetchFn(dbUrl).then((res) => {
-					if (!res.ok) throw new Error(`Failed to fetch DB: ${res.status} ${res.statusText}`);
-					return res.arrayBuffer();
-				}),
-			]);
-
-			if (destroyed) return;
-
-			// Build the SQLite API from the WASM module
+			// Both completed — build the SQLite API from the WASM module
 			const { SQLiteAPI } = waSqliteMod;
 			sqlite3 = SQLiteAPI(sqliteModule) as unknown as SqliteAPI;
 
 			// Write the DB bytes to the WASM virtual filesystem if VFS supports it
 			const vfs = sqliteModule.vfs;
 			if (vfs && typeof vfs.writeFile === "function") {
-				vfs.writeFile("docs.db", new Uint8Array(dbBytes));
+				vfs.writeFile("docs.db", new Uint8Array(dbBytesResult!));
 			}
 
 			dbHandle = sqlite3.open_v2("docs.db");
@@ -153,14 +173,52 @@ export function docIndex(opts: DocIndexOptions): DocIndexResult {
 				loaded.set(true);
 				error.set(undefined);
 			});
-		} catch (e) {
-			if (!destroyed) {
-				batch(() => {
-					loaded.set(false);
-					error.set(e);
-				});
-			}
 		}
+
+		// Part 1: Dynamic import + WASM init
+		rawSubscribe(
+			rawFromAny(import("@aspect-build/wa-sqlite")),
+			(mod: any) => {
+				waSqliteMod = mod;
+				const factory = mod.default ?? mod;
+				rawSubscribe(
+					rawFromAny(typeof factory === "function" ? factory() : factory),
+					(module: any) => {
+						sqliteModule = module;
+						onPartDone();
+					},
+					{
+						onEnd: (err?: unknown) => {
+							if (err !== undefined) onError(err);
+						},
+					},
+				);
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
+
+		// Part 2: Fetch DB file
+		rawSubscribe(
+			rawFromAny(
+				fetchFn(dbUrl).then((res) => {
+					if (!res.ok) throw new Error(`Failed to fetch DB: ${res.status} ${res.statusText}`);
+					return res.arrayBuffer();
+				}),
+			),
+			(bytes: ArrayBuffer) => {
+				dbBytesResult = bytes;
+				onPartDone();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err !== undefined) onError(err);
+				},
+			},
+		);
 	}
 
 	function search(query: string): void {

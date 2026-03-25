@@ -15,6 +15,8 @@
 
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { rawFromAny } from "../../raw/fromAny";
+import { rawSubscribe } from "../../raw/subscribe";
 
 export type ToolCallStatus = "idle" | "pending" | "executing" | "completed" | "errored";
 
@@ -58,7 +60,7 @@ export interface ToolCallStateResult<TArgs, TResult> {
 	/** Request a tool call. Sets status to 'pending'. */
 	request: (toolName: string, args: TArgs) => void;
 	/** Execute the pending tool call. Transitions: pending → executing → completed/errored. */
-	execute: (fn: (args: TArgs) => Promise<TResult> | TResult) => Promise<void>;
+	execute: (fn: (args: TArgs) => Promise<TResult> | TResult) => void;
 	/** Reset to idle state. */
 	reset: () => void;
 	/** History of all tool calls. */
@@ -136,7 +138,7 @@ export function toolCallState<TArgs = unknown, TResult = unknown>(
 		};
 	}
 
-	async function execute(fn: (args: TArgs) => Promise<TResult> | TResult): Promise<void> {
+	function execute(fn: (args: TArgs) => Promise<TResult> | TResult): void {
 		if (statusStore.get() !== "pending") return;
 		if (currentEntry === null) return;
 
@@ -147,38 +149,47 @@ export function toolCallState<TArgs = unknown, TResult = unknown>(
 		thisEntry.status = "executing";
 		const startTime = Date.now();
 
-		try {
-			const result = await fn(args);
-			const duration = Date.now() - startTime;
+		const addToHistory = () => {
+			if (currentEntry === thisEntry) {
+				currentEntry = null;
+			}
+			const entry = { ...thisEntry };
+			historyStore.update((prev) => {
+				const next = [...prev, entry];
+				return next.length > maxHistory ? next.slice(-maxHistory) : next;
+			});
+		};
 
-			resultStore.set(result);
-			durationStore.set(duration);
-			statusStore.set("completed");
+		rawSubscribe(
+			rawFromAny(fn(args)),
+			(result: TResult) => {
+				const duration = Date.now() - startTime;
 
-			thisEntry.result = result;
-			thisEntry.status = "completed";
-			thisEntry.duration = duration;
-		} catch (err) {
-			const duration = Date.now() - startTime;
+				resultStore.set(result);
+				durationStore.set(duration);
+				statusStore.set("completed");
 
-			errorStore.set(err);
-			durationStore.set(duration);
-			statusStore.set("errored");
+				thisEntry.result = result;
+				thisEntry.status = "completed";
+				thisEntry.duration = duration;
+				addToHistory();
+			},
+			{
+				onEnd: (err?: unknown) => {
+					if (err === undefined) return;
+					const duration = Date.now() - startTime;
 
-			thisEntry.error = err;
-			thisEntry.status = "errored";
-			thisEntry.duration = duration;
-		}
+					errorStore.set(err);
+					durationStore.set(duration);
+					statusStore.set("errored");
 
-		// Add to history (skip if reset() was called during execution)
-		if (currentEntry === thisEntry) {
-			currentEntry = null;
-		}
-		const entry = { ...thisEntry };
-		historyStore.update((prev) => {
-			const next = [...prev, entry];
-			return next.length > maxHistory ? next.slice(-maxHistory) : next;
-		});
+					thisEntry.error = err;
+					thisEntry.status = "errored";
+					thisEntry.duration = duration;
+					addToHistory();
+				},
+			},
+		);
 	}
 
 	function reset(): void {

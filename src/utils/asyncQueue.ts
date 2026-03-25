@@ -22,7 +22,7 @@ export interface AsyncQueueOptions {
 	name?: string;
 }
 
-export interface AsyncQueueResult<T, R> {
+export interface AsyncQueueResult<T, _R> {
 	/** Enqueue a task. Returns a callbag source that emits the result then completes. */
 	enqueue(task: T): CallbagSource;
 	/** Number of tasks waiting in queue. */
@@ -48,6 +48,7 @@ export interface AsyncQueueResult<T, R> {
 /** Direct callback — no state/subscribe overhead for one-shot completion. */
 interface QueueEntry<T> {
 	task: T;
+	cancelled: boolean;
 	resolve: (result: any) => void;
 	reject: (err: unknown) => void;
 }
@@ -122,6 +123,10 @@ export function asyncQueue<T, R>(
 		while (activeCount < concurrency && queue.length > 0) {
 			const entry = strategy === "lifo" ? queue.pop()! : queue.shift()!;
 			sizeStore.set(queue.length);
+
+			// Skip cancelled entries — consumer already unsubscribed
+			if (entry.cancelled) continue;
+
 			activeCount++;
 			runningStore.set(activeCount);
 
@@ -140,28 +145,29 @@ export function asyncQueue<T, R>(
 	function enqueue(task: T): CallbagSource {
 		return (type: number, sink?: any) => {
 			if (type !== 0) return;
-			let cancelled = false;
+
+			const entry: QueueEntry<T> = {
+				task,
+				cancelled: false,
+				resolve(result: R) {
+					if (entry.cancelled) return;
+					sink(1, result);
+					if (!entry.cancelled) sink(2);
+				},
+				reject(err: unknown) {
+					if (entry.cancelled) return;
+					sink(2, err);
+				},
+			};
+
 			sink(0, (t: number) => {
-				if (t === 2) cancelled = true;
+				if (t === 2) entry.cancelled = true;
 			});
 
 			if (disposed) {
 				sink(2, new Error("Queue is disposed"));
 				return;
 			}
-
-			const entry: QueueEntry<T> = {
-				task,
-				resolve(result: R) {
-					if (cancelled) return;
-					sink(1, result);
-					if (!cancelled) sink(2);
-				},
-				reject(err: unknown) {
-					if (cancelled) return;
-					sink(2, err);
-				},
-			};
 
 			queue.push(entry);
 			sizeStore.set(queue.length);

@@ -26,9 +26,9 @@ export interface CacheTier<V> {
 	/** Read a value. May return sync or a callbag source. undefined = miss. */
 	load(key: string): V | undefined | CallbagSource;
 	/** Write a value. Optional — tiers without save are read-only. */
-	save?(key: string, value: V): void | CallbagSource;
+	save?(key: string, value: V): undefined | CallbagSource;
 	/** Delete a value. Optional — tiers without clear are not cleaned on delete. */
-	clear?(key: string): void | CallbagSource;
+	clear?(key: string): undefined | CallbagSource;
 }
 
 export interface CascadingCacheOptions {
@@ -59,7 +59,7 @@ export interface CascadingCache<V> {
 }
 
 /** Safely subscribe to a potentially callbag result (fire-and-forget). */
-function fireAndForget(result: void | CallbagSource): void {
+function fireAndForget(result: undefined | CallbagSource): void {
 	if (typeof result === "function") {
 		rawSubscribe(result, () => {});
 	}
@@ -222,7 +222,7 @@ export function cascadingCache<V>(
 					}
 				},
 				{
-					onEnd: (err) => {
+					onEnd: (_err) => {
 						// Error or clean END with no data = miss; cascade to next tier
 						if (resolved || getGen(key) !== gen) return;
 						resolved = true;

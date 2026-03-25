@@ -81,8 +81,9 @@ export function sqliteAdapter(opts: SQLiteAdapterOptions): CheckpointAdapter {
 	const deleteStmt = db.prepare(`DELETE FROM ${table} WHERE id = ?`);
 
 	return {
-		save(id: string, value: unknown): void {
+		save(id: string, value: unknown): undefined | CallbagSource {
 			insertStmt.run(id, JSON.stringify(value));
+			return undefined;
 		},
 
 		load(id: string): unknown | undefined {
@@ -90,8 +91,9 @@ export function sqliteAdapter(opts: SQLiteAdapterOptions): CheckpointAdapter {
 			return row ? JSON.parse(row.value) : undefined;
 		},
 
-		clear(id: string): void {
+		clear(id: string): undefined | CallbagSource {
 			deleteStmt.run(id);
+			return undefined;
 		},
 	};
 }

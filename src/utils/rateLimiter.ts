@@ -222,11 +222,10 @@ export function slidingWindow(opts: SlidingWindowOptions): RateLimiter {
 					}
 					const needed = _timestamps.length + tokens - max;
 					const oldestNeeded = _timestamps[needed - 1];
-					const waitMs = oldestNeeded !== undefined ? oldestNeeded + windowMs - now() : windowMs;
-					if (waitMs <= 0) {
-						tryAcquireLoop();
-						return;
-					}
+					const rawWait = oldestNeeded !== undefined ? oldestNeeded + windowMs - now() : windowMs;
+					// Floor at 1ms to prevent synchronous recursion when clock
+					// is frozen or timestamps are exactly at the window boundary.
+					const waitMs = Math.max(1, rawWait);
 					totalWait += waitMs;
 					rawSubscribe(
 						fromTimer(Math.ceil(waitMs), signal),

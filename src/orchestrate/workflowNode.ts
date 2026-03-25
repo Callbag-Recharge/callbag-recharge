@@ -13,8 +13,9 @@ import { state } from "../core/state";
 import type { WritableStore } from "../core/types";
 import { reactiveLog } from "../data/reactiveLog";
 import type { ReactiveLog } from "../data/types";
-import { firstValueFrom } from "../extra/firstValueFrom";
-import { fromTimer } from "../extra/fromTimer";
+import { fromTimer } from "../raw/fromTimer";
+import type { CallbagSource } from "../raw/subscribe";
+import { rawSubscribe } from "../raw/subscribe";
 import type { BackoffStrategy } from "../utils/backoff";
 import { exponential } from "../utils/backoff";
 import type { CircuitBreaker, CircuitBreakerOptions, CircuitState } from "../utils/circuitBreaker";
@@ -33,15 +34,11 @@ export interface WorkflowNodeResult {
 	breakerState: WritableStore<CircuitState>;
 	/**
 	 * Simulate async work with configurable duration and failure rate.
-	 * Records success/failure in the circuit breaker and log.
-	 * Throws on failure (for task() error propagation).
+	 * Returns a callbag source that emits the result string on success.
+	 * Sends END with error on failure (for task() error propagation).
 	 * Respects AbortSignal if provided (for task cancellation).
 	 */
-	simulate(
-		durationRange: [number, number],
-		failRate: number,
-		signal?: AbortSignal,
-	): Promise<string>;
+	simulate(durationRange: [number, number], failRate: number, signal?: AbortSignal): CallbagSource;
 	/** Reset breaker state and reactive store (preserves log history). */
 	reset(): void;
 	/** Clean up log and stores. */
@@ -85,39 +82,68 @@ export function workflowNode(
 	});
 	const breakerState = state<CircuitState>("closed", { name: `${id}:breakerState` });
 
-	async function simulate(
+	function simulate(
 		durationRange: [number, number],
 		failRate: number,
 		signal?: AbortSignal,
-	): Promise<string> {
-		if (signal?.aborted) {
-			log.append("[ABORT] Cancelled before start");
-			throw new Error(`${label} aborted`);
-		}
-		const [min, max] = durationRange;
-		const duration = min + Math.random() * (max - min);
-		const start = Date.now();
-		// §1.16: no raw `new Promise` — use callbag primitives only.
-		// The task framework handles cancellation at a higher level (switchMap),
-		// so we just check abort after the timer to avoid stale breaker updates.
-		await firstValueFrom(fromTimer(duration));
-		if (signal?.aborted) {
-			const elapsed = Date.now() - start;
-			log.append(`[ABORT] Cancelled after ${Math.round(elapsed)}ms`);
-			throw new Error(`${label} aborted`);
-		}
-		if (Math.random() < failRate) {
-			breaker.recordFailure();
-			breakerState.set(breaker.state);
-			const elapsed = Date.now() - start;
-			log.append(`[ERROR] Failed after ${Math.round(elapsed)}ms`);
-			throw new Error(`${label} failed`);
-		}
-		breaker.recordSuccess();
-		breakerState.set(breaker.state);
-		const elapsed = Date.now() - start;
-		log.append(`[OK] Completed in ${Math.round(elapsed)}ms`);
-		return `${label} result`;
+	): CallbagSource {
+		return (type: number, sink?: any) => {
+			if (type !== 0) return;
+
+			if (signal?.aborted) {
+				log.append("[ABORT] Cancelled before start");
+				sink(0, (_t: number) => {});
+				sink(2, new Error(`${label} aborted`));
+				return;
+			}
+
+			const [min, max] = durationRange;
+			const duration = min + Math.random() * (max - min);
+			const start = Date.now();
+			let cancelled = false;
+
+			sink(0, (t: number) => {
+				if (t === 2) cancelled = true;
+			});
+
+			const onAbort = () => {
+				if (!cancelled) {
+					cancelled = true;
+					sub.unsubscribe();
+				}
+			};
+
+			const sub = rawSubscribe(fromTimer(duration, signal), () => {
+				if (cancelled) return;
+				// Clean up signal listener on normal completion
+				if (signal) signal.removeEventListener("abort", onAbort);
+				if (signal?.aborted) {
+					const elapsed = Date.now() - start;
+					log.append(`[ABORT] Cancelled after ${Math.round(elapsed)}ms`);
+					sink(2, new Error(`${label} aborted`));
+					return;
+				}
+				if (Math.random() < failRate) {
+					breaker.recordFailure();
+					breakerState.set(breaker.state);
+					const elapsed = Date.now() - start;
+					log.append(`[ERROR] Failed after ${Math.round(elapsed)}ms`);
+					sink(2, new Error(`${label} failed`));
+					return;
+				}
+				breaker.recordSuccess();
+				breakerState.set(breaker.state);
+				const elapsed = Date.now() - start;
+				log.append(`[OK] Completed in ${Math.round(elapsed)}ms`);
+				sink(1, `${label} result`);
+				sink(2);
+			});
+
+			// If cancelled externally, clean up
+			if (signal) {
+				signal.addEventListener("abort", onAbort, { once: true });
+			}
+		};
 	}
 
 	function reset(): void {

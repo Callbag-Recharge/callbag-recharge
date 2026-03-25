@@ -6,6 +6,7 @@
  */
 
 import { derived } from "callbag-recharge";
+import { firstValueFrom, fromTimer } from "callbag-recharge/extra";
 import { formField } from "callbag-recharge/patterns/formField";
 
 // #region display
@@ -22,13 +23,7 @@ export const emailField = formField("", {
 	validate: (v) => (!v.includes("@") ? "Must be a valid email" : undefined),
 	asyncValidate: async (v, signal) => {
 		// Simulate checking if email is taken (300ms debounce built-in)
-		await new Promise<void>((r, reject) => {
-			const t = setTimeout(r, 200);
-			signal.addEventListener("abort", () => {
-				clearTimeout(t);
-				reject(signal.reason);
-			});
-		});
+		await firstValueFrom(fromTimer(200, signal));
 		if (signal.aborted) return undefined;
 		const taken = ["admin@example.com", "test@example.com"];
 		return taken.includes(v) ? "Email already taken" : undefined;

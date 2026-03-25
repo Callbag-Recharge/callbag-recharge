@@ -32,16 +32,22 @@ Behind-the-scenes stories from building callbag-recharge — the architecture de
 | 8 | [Two-Phase Push: DIRTY First, Values Second](./08-two-phase-push-dirty-first-values-second) | 9 min |
 | 9 | [From Pull-Phase to Push-Phase Memoization](./09-from-pull-phase-to-push-phase-memoization) | 8 min |
 
-### Arc 4: Callbag-Native — Promise Elimination
+### Arc 4: Architecture v3 — The Type 3 Breakthrough
 
 | # | Post | Read time |
 |---|------|-----------|
-| 10 | [Promises Are the New Callback Hell](./10-promises-are-the-new-callback-hell) | 10 min |
+| 10 | [The Day We Read the Callbag Spec (Again)](./10-the-day-we-read-the-callbag-spec-again) | 7 min |
+| 11 | [Why Control Signals Don't Belong in the Data Stream](./11-why-control-signals-dont-belong-in-the-data-stream) | 7 min |
+| 12 | [RESOLVED: The Signal That Skips Entire Subtrees](./12-resolved-the-signal-that-skips-entire-subtrees) | 7 min |
+| 13 | [Five Primitives, Two Tiers, Zero Schedulers](./13-five-primitives-two-tiers-zero-schedulers) | 8 min |
+
+### Arc 5: Callbag-Native — Promise Elimination
+
+| # | Post | Read time |
+|---|------|-----------|
+| 14 | [Promises Are the New Callback Hell](./14-promises-are-the-new-callback-hell) | 10 min |
 
 <!--
-### Arc 5: Architecture v3 — The Type 3 Breakthrough
-Coming soon.
-
 ### Arc 6: Architecture v4 — Performance Without Compromise
 Coming soon.
 -->

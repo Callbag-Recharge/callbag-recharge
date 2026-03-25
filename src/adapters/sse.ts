@@ -15,8 +15,10 @@ import { Inspector } from "../core/inspector";
 import { state } from "../core/state";
 import { subscribe as coreSub } from "../core/subscribe";
 import type { Store } from "../core/types";
-import { firstValueFrom } from "../raw/firstValueFrom";
+import { rawFromAny } from "../raw/fromAny";
 import { fromNodeCallback } from "../raw/fromNodeCallback";
+import type { CallbagSource } from "../raw/subscribe";
+import { rawSubscribe } from "../raw/subscribe";
 
 export interface SSEOptions {
 	/** Port to listen on. Required when using `listen()`. */
@@ -43,8 +45,8 @@ export interface SSEStore {
 	 * Use this to mount SSE on an existing server.
 	 */
 	handler: (req: any, res: any) => void;
-	/** Start listening on the configured port. Returns a promise that resolves when ready. */
-	listen(): Promise<void>;
+	/** Start listening on the configured port. Returns a callbag source that emits when ready. */
+	listen(): CallbagSource;
 	/** Close the server and disconnect all clients. */
 	close(): void;
 }
@@ -216,26 +218,55 @@ export function toSSE<T>(source: Store<T>, opts?: SSEOptions): SSEStore {
 
 	let server: any = null;
 
-	async function listen(): Promise<void> {
+	function listen(): CallbagSource {
 		if (!opts?.port) {
-			throw new Error("toSSE: port is required for listen()");
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				sink(0, () => {});
+				sink(2, new Error("toSSE: port is required for listen()"));
+			};
 		}
 		if (server) {
-			throw new Error("toSSE: already listening. Call close() first.");
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				sink(0, () => {});
+				sink(2, new Error("toSSE: already listening. Call close() first."));
+			};
 		}
-		const http = await import("node:http");
-		return firstValueFrom(
-			fromNodeCallback((resolve, reject) => {
-				server = http.createServer(handler);
-				server.once("listening", () => resolve());
-				server.once("error", (err: unknown) => {
-					server = null;
-					reject(err);
-				});
-				server.listen(opts!.port, hostname);
-				return undefined;
-			}),
-		);
+		// Use rawFromAny to wrap the dynamic import, then chain to fromNodeCallback
+		return (type: number, sink?: any) => {
+			if (type !== 0) return;
+			let cancelled = false;
+			sink(0, (t: number) => {
+				if (t === 2) cancelled = true;
+			});
+			rawSubscribe(rawFromAny(import("node:http")), (http) => {
+				if (cancelled) return;
+				rawSubscribe(
+					fromNodeCallback((resolve, reject) => {
+						server = http.createServer(handler);
+						server.once("listening", () => resolve());
+						server.once("error", (err: unknown) => {
+							server = null;
+							reject(err);
+						});
+						server.listen(opts!.port, hostname);
+						return undefined;
+					}),
+					() => {
+						if (!cancelled) {
+							sink(1, undefined);
+							sink(2);
+						}
+					},
+					{
+						onEnd: (err?: unknown) => {
+							if (err !== undefined && !cancelled) sink(2, err);
+						},
+					},
+				);
+			});
+		};
 	}
 
 	function close() {
