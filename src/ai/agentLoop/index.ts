@@ -223,18 +223,24 @@ export function agentLoop<TContext, TAction>(
 		pendingStore.set([...gateQueue]);
 
 		// One-shot callbag source — resolves when approve/reject fires.
+		// Teardown guards: emit(v) synchronously triggers the next iteration's
+		// waitForApproval (which overwrites emitGate), then complete() fires
+		// this producer's teardown. Without the identity check the teardown
+		// would null the *new* gate's emitGate.
 		const gateSource = producer<TAction>(
 			({ emit, complete, error }) => {
-				emitGate = (v: TAction) => {
+				const myEmit = (v: TAction) => {
 					emit(v);
 					complete();
 				};
-				errorGate = (e: unknown) => {
+				const myError = (e: unknown) => {
 					error(e);
 				};
+				emitGate = myEmit;
+				errorGate = myError;
 				return () => {
-					emitGate = null;
-					errorGate = null;
+					if (emitGate === myEmit) emitGate = null;
+					if (errorGate === myError) errorGate = null;
 				};
 			},
 			{ _skipInspect: true },
@@ -434,15 +440,17 @@ export function agentLoop<TContext, TAction>(
 		historyStore.set([]);
 
 		if (running) {
-			// Stop the current loop and schedule restart
+			// Stop the current loop and schedule restart.
+			// Set loopDoneCallback BEFORE emitGate — the gate callback chain
+			// is synchronous and finishLoop() fires inside emitGate().
 			stopped = true;
-			if (emitGate) {
-				emitGate(gateQueue[0] ?? (undefined as unknown as TAction));
-			}
 			loopDoneCallback = () => {
 				if (gen !== generation) return;
 				startLoop(initialContext, gen);
 			};
+			if (emitGate) {
+				emitGate(gateQueue[0] ?? (undefined as unknown as TAction));
+			}
 		} else {
 			startLoop(initialContext, gen);
 		}

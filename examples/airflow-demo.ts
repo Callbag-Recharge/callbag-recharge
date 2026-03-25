@@ -17,9 +17,10 @@
 
 import { effect, state } from "callbag-recharge";
 import type { ReactiveLog } from "callbag-recharge/data";
-import { firstValueFrom, fromTimer, fromTrigger } from "callbag-recharge/extra";
+import { fromTimer, fromTrigger } from "callbag-recharge/extra";
 import type { TaskState, WorkflowNodeResult } from "callbag-recharge/orchestrate";
 import { pipeline, source, TASK_STATE, task, workflowNode } from "callbag-recharge/orchestrate";
+import { firstValueFrom } from "callbag-recharge/raw";
 import type { CircuitBreaker } from "callbag-recharge/utils/circuitBreaker";
 
 // ---------------------------------------------------------------------------
@@ -89,7 +90,7 @@ const cronDef = task(
 		n.cron.log.append("[TRIGGER] Pipeline started");
 		// Cron is a trigger node — use simulate with 0% failure for consistent
 		// breaker bookkeeping (no special-cased manual recordSuccess).
-		return n.cron.simulate([0, 0], 0, signal);
+		return firstValueFrom(n.cron.simulate([0, 0], 0, signal));
 	},
 	{ name: "cron" },
 );
@@ -97,7 +98,7 @@ const cronDef = task(
 const fetchBankDef = task(
 	["cron"],
 	async (signal, [_v]): Promise<BankSnapshot> => {
-		await n.fetchBank.simulate([800, 2000], 0.2, signal);
+		await firstValueFrom(n.fetchBank.simulate([800, 2000], 0.2, signal));
 		return {
 			accountCount: 3 + Math.floor(Math.random() * 3),
 			totalBalance: 8500 + Math.floor(Math.random() * 4000),
@@ -122,7 +123,7 @@ const fetchBankDef = task(
 const fetchCardsDef = task(
 	["cron"],
 	async (signal, [_v]): Promise<CardSnapshot> => {
-		await n.fetchCards.simulate([600, 1500], 0.15, signal);
+		await firstValueFrom(n.fetchCards.simulate([600, 1500], 0.15, signal));
 		return {
 			cardCount: 2 + Math.floor(Math.random() * 3),
 			totalOutstanding: 1200 + Math.floor(Math.random() * 2200),
@@ -152,7 +153,7 @@ const aggregateDef = task(
 		n.aggregate.log.append(
 			`[START] Merging: bank=$${bank.totalBalance}, cards=$${cards.totalOutstanding}`,
 		);
-		await n.aggregate.simulate([300, 800], 0.05, signal);
+		await firstValueFrom(n.aggregate.simulate([300, 800], 0.05, signal));
 		const netWorth = bank.totalBalance - cards.totalOutstanding;
 		const liabilities = cards.totalOutstanding;
 		const ratio = liabilities === 0 ? Number.POSITIVE_INFINITY : bank.totalBalance / liabilities;
@@ -176,7 +177,7 @@ const anomalyDef = task(
 	["aggregate"],
 	async (signal, [aggVal]): Promise<AnomalySnapshot> => {
 		const agg = aggVal as AggregateSnapshot;
-		await n.anomaly.simulate([200, 600], 0.1, signal);
+		await firstValueFrom(n.anomaly.simulate([200, 600], 0.1, signal));
 		const ratioScore = Math.min(1, agg.assetToDebtRatio / 4);
 		const netWorthPenalty = agg.netWorth < 5000 ? 0.35 : 0;
 		const score = Math.max(0, Math.min(1, 1 - ratioScore + netWorthPenalty));
@@ -195,7 +196,7 @@ const batchWriteDef = task(
 	["aggregate"],
 	async (signal, [aggVal]): Promise<BatchWriteSnapshot> => {
 		const agg = aggVal as AggregateSnapshot;
-		await n.batchWrite.simulate([400, 1000], 0.08, signal);
+		await firstValueFrom(n.batchWrite.simulate([400, 1000], 0.08, signal));
 		const rows = agg.netWorth < 10000 ? 2 : 1;
 		n.batchWrite.log.append(`[VALUE] wrote ${rows} rows`);
 		return { rows, table: "finance_snapshot" };
@@ -210,7 +211,7 @@ const alertDef = task(
 	["anomaly"],
 	async (signal, [anomalyVal]): Promise<string> => {
 		const anomaly = anomalyVal as AnomalySnapshot;
-		await n.alert.simulate([100, 300], 0.02, signal);
+		await firstValueFrom(n.alert.simulate([100, 300], 0.02, signal));
 		if (!anomaly.flagged) {
 			n.alert.log.append("[VALUE] No alert sent");
 			return "no-alert";

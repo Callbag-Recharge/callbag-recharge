@@ -8,6 +8,7 @@
 //   - chatStream      — LLM streaming chat with backpressure
 //   - agentLoop       — Observe → Plan → Act reactive agent cycle
 //   - toolCallState   — reactive state machine for tool call lifecycle
+//   - toolRegistry    — reactive tool dispatch with optional job queue backing
 //   - memoryStore     — three-tier AI/LLM memory management
 //   - hybridRoute     — confidence-based local/cloud LLM routing
 //   - fromLLM         — unified reactive source for LLM inference
@@ -91,3 +92,12 @@ export type {
 	ToolCallStatus,
 } from "./toolCallState";
 export { toolCallState } from "./toolCallState";
+export type {
+	ToolCallRequest,
+	ToolDefinition,
+	ToolRegistryOptions,
+	ToolRegistryResult,
+	ToolResult,
+	ToolSchema,
+} from "./toolRegistry";
+export { toolRegistry } from "./toolRegistry";

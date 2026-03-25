@@ -37,6 +37,7 @@ import {
 	task,
 	workflowNode,
 } from "callbag-recharge/orchestrate";
+import { firstValueFrom } from "callbag-recharge/raw";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -264,7 +265,9 @@ function buildFromParsed(
 			async (signal, vals) => {
 				const depSummary = deps.map((d, i) => `${d}=${JSON.stringify(vals[i]) ?? "?"}`).join(", ");
 				wn.log.append(`[START] ${pn.label} (${depSummary})`);
-				const result = await wn.simulate(opts.durationRange.get(), opts.failRate.get(), signal);
+				const result = await firstValueFrom(
+					wn.simulate(opts.durationRange.get(), opts.failRate.get(), signal),
+				);
 				wn.log.append(`[VALUE] → ${JSON.stringify(result)}`);
 				return result;
 			},

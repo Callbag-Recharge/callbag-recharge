@@ -154,6 +154,10 @@ const primitives = [
     <section class="code-section">
       <div class="section-inner">
         <h2 class="section-heading">See It In Action</h2>
+        <p class="code-subheader">
+          Want the full tour?
+          <a href="/callbag-recharge/demos/" class="code-subheader-link">Browse the demo overview</a>.
+        </p>
         <div class="code-grid">
           <div class="code-block">
             <div class="code-header">
@@ -726,6 +730,23 @@ chat.<span class="fn">retry</span>()           <span class="c">// retry last fai
   background: var(--cr-surface);
   border-top: 1px solid var(--cr-border-subtle);
   border-bottom: 1px solid var(--cr-border-subtle);
+}
+
+.code-subheader {
+  margin: 0 0 1.5rem;
+  text-align: center;
+  color: var(--cr-text-muted);
+  font-size: 0.95rem;
+}
+
+.code-subheader-link {
+  color: var(--cr-aqua);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.code-subheader-link:hover {
+  color: #7df0d5;
 }
 
 .code-grid {
