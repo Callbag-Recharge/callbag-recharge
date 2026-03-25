@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { pipe, state } from "../../index";
+import { rawFromPromise } from "../../raw/fromPromise";
 import { checkpoint, memoryAdapter } from "../../utils/checkpoint";
 
 // ==========================================================================
@@ -161,7 +162,7 @@ describe("checkpoint", () => {
 	});
 
 	it("buffers upstream values during async load", async () => {
-		// Create an async adapter
+		// Create an async adapter returning CallbagSource via rawFromPromise
 		const asyncAdapter: any = {
 			_store: new Map(),
 			save(id: string, value: unknown) {
@@ -169,7 +170,7 @@ describe("checkpoint", () => {
 			},
 			load(id: string) {
 				const val = this._store.get(id);
-				return new Promise((resolve) => setTimeout(() => resolve(val), 10));
+				return rawFromPromise(new Promise((resolve) => setTimeout(() => resolve(val), 10)));
 			},
 			clear(id: string) {
 				this._store.delete(id);
@@ -200,7 +201,7 @@ describe("checkpoint", () => {
 	it("handles async save rejection without crashing", () => {
 		const failAdapter: any = {
 			save() {
-				return Promise.reject(new Error("disk full"));
+				return rawFromPromise(Promise.reject(new Error("disk full")));
 			},
 			load() {
 				return undefined;

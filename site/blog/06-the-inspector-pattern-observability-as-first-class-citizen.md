@@ -86,4 +86,4 @@ Later architecture passes added type 3 control signals, output-slot dispatch, an
 
 ---
 
-*Arc 3 preview: how we unified control and data further — starting with **data flowing through the graph, not around it**.*
+*Next: Arc 3 starts with [Data Should Flow Through the Graph, Not Around It](./07-data-should-flow-through-the-graph-not-around-it).*

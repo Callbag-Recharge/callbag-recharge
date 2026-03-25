@@ -3,6 +3,7 @@ import type { ExecutionEntry } from "../../orchestrate/executionLog";
 import { executionLog } from "../../orchestrate/executionLog";
 import { sqliteLogAdapter } from "../../orchestrate/executionLogAdapters";
 import { fileLogAdapter } from "../../orchestrate/executionLogAdapters.node";
+import { firstValueFrom } from "../../raw/firstValueFrom";
 
 // ---------------------------------------------------------------------------
 // fileLogAdapter tests
@@ -23,40 +24,41 @@ describe("fileLogAdapter", () => {
 		const entry1: ExecutionEntry = { step: "a", event: "start", timestamp: 1000 };
 		const entry2: ExecutionEntry = { step: "a", event: "value", timestamp: 1001, value: 42 };
 
-		await adapter.append(entry1);
-		await adapter.append(entry2);
+		await firstValueFrom(adapter.append(entry1));
+		await firstValueFrom(adapter.append(entry2));
 
-		const loaded = await adapter.load();
+		const loaded = await firstValueFrom<ExecutionEntry[]>(adapter.load());
 		expect(loaded).toHaveLength(2);
 		expect(loaded[0]).toEqual(entry1);
 		expect(loaded[1]).toEqual(entry2);
 
 		// Clean up
-		await adapter.clear();
-		const afterClear = await adapter.load();
+		await firstValueFrom(adapter.clear());
+		const afterClear = await firstValueFrom<ExecutionEntry[]>(adapter.load());
 		expect(afterClear).toEqual([]);
 	});
 
 	it("load returns empty array when file does not exist", async () => {
 		const adapter = fileLogAdapter({ dir: `/tmp/nonexistent-${Date.now()}` });
-		const loaded = await adapter.load();
+		const loaded = await firstValueFrom<ExecutionEntry[]>(adapter.load());
 		expect(loaded).toEqual([]);
 	});
 
 	it("clear is idempotent when file does not exist", async () => {
 		const adapter = fileLogAdapter({ dir: `/tmp/nonexistent-${Date.now()}` });
-		await expect(adapter.clear()).resolves.toBeUndefined();
+		await firstValueFrom(adapter.clear());
+		// No error thrown — success
 	});
 
 	it("custom filename", async () => {
 		const dir = `/tmp/test-logs-custom-${Date.now()}`;
 		const adapter = fileLogAdapter({ dir, filename: "custom.jsonl" });
 
-		await adapter.append({ step: "x", event: "start", timestamp: 1 });
-		const loaded = await adapter.load();
+		await firstValueFrom(adapter.append({ step: "x", event: "start", timestamp: 1 }));
+		const loaded = await firstValueFrom<ExecutionEntry[]>(adapter.load());
 		expect(loaded).toHaveLength(1);
 
-		await adapter.clear();
+		await firstValueFrom(adapter.clear());
 	});
 });
 
@@ -157,12 +159,12 @@ describe("executionLog + fileLogAdapter integration", () => {
 		// Wait for serialized writes (asyncQueue ensures ordering)
 		await new Promise((r) => setTimeout(r, 100));
 
-		const loaded = await adapter.load();
+		const loaded = await firstValueFrom<ExecutionEntry[]>(adapter.load());
 		expect(loaded).toHaveLength(2);
 		expect(loaded[0].event).toBe("start");
 		expect(loaded[1].event).toBe("value");
 
 		log.destroy();
-		await adapter.clear();
+		await firstValueFrom(adapter.clear());
 	});
 });

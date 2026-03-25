@@ -11,6 +11,8 @@
 // ---------------------------------------------------------------------------
 
 import { firstValueFrom } from "../raw/firstValueFrom";
+import { rawFromPromise } from "../raw/fromPromise";
+import type { CallbagSource } from "../raw/subscribe";
 import { fromIDBRequest } from "../utils/fromIDBRequest";
 import type { ExecutionEntry, ExecutionLogPersistAdapter } from "./executionLog";
 
@@ -114,7 +116,7 @@ export interface IndexedDBLogAdapterOptions {
  * @returns `ExecutionLogPersistAdapter` — append/load/clear backed by IndexedDB.
  *
  * @remarks **Browser only:** Uses the IndexedDB API. Not available in Node.js without polyfills.
- * @remarks **Async:** All operations return Promises.
+ * @remarks **Async:** All operations return callbag sources.
  * @remarks **Auto-creates:** Database and object store are created on first use.
  *
  * @example
@@ -189,16 +191,18 @@ export function indexedDBLogAdapter(opts?: IndexedDBLogAdapterOptions): Executio
 	}
 
 	return {
-		async append(entry: ExecutionEntry): Promise<void> {
-			await withRetry("readwrite", (store) => store.add(entry));
+		append(entry: ExecutionEntry): CallbagSource {
+			return rawFromPromise(withRetry("readwrite", (store) => store.add(entry)).then(() => {}));
 		},
 
-		async load(): Promise<ExecutionEntry[]> {
-			return withRetry("readonly", (store) => store.getAll()) as Promise<ExecutionEntry[]>;
+		load(): CallbagSource {
+			return rawFromPromise(
+				withRetry("readonly", (store) => store.getAll()) as Promise<ExecutionEntry[]>,
+			);
 		},
 
-		async clear(): Promise<void> {
-			await withRetry("readwrite", (store) => store.clear());
+		clear(): CallbagSource {
+			return rawFromPromise(withRetry("readwrite", (store) => store.clear()).then(() => {}));
 		},
 	};
 }

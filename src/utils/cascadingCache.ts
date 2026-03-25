@@ -17,17 +17,18 @@
 import { teardown } from "../core/protocol";
 import { state } from "../core/state";
 import type { WritableStore } from "../core/types";
+import { type CallbagSource, rawSubscribe } from "../raw/subscribe";
 import type { EvictionPolicy } from "./eviction";
 import { lru } from "./eviction";
 
 /** A single lookup/storage tier. */
 export interface CacheTier<V> {
-	/** Read a value. May return sync or async. undefined = miss. */
-	load(key: string): V | undefined | Promise<V | undefined>;
+	/** Read a value. May return sync or a callbag source. undefined = miss. */
+	load(key: string): V | undefined | CallbagSource;
 	/** Write a value. Optional — tiers without save are read-only. */
-	save?(key: string, value: V): void | Promise<void>;
+	save?(key: string, value: V): void | CallbagSource;
 	/** Delete a value. Optional — tiers without clear are not cleaned on delete. */
-	clear?(key: string): void | Promise<void>;
+	clear?(key: string): void | CallbagSource;
 }
 
 export interface CascadingCacheOptions {
@@ -57,10 +58,10 @@ export interface CascadingCache<V> {
 	readonly size: number;
 }
 
-/** Safely handle a potentially async operation (fire-and-forget). */
-function fireAndForget(result: void | Promise<void>): void {
-	if (result instanceof Promise) {
-		result.catch(() => {});
+/** Safely subscribe to a potentially callbag result (fire-and-forget). */
+function fireAndForget(result: void | CallbagSource): void {
+	if (typeof result === "function") {
+		rawSubscribe(result, () => {});
 	}
 }
 
@@ -195,7 +196,7 @@ export function cascadingCache<V>(
 			return;
 		}
 
-		let result: V | undefined | Promise<V | undefined>;
+		let result: V | undefined | CallbagSource;
 		try {
 			result = tiers[tierIndex].load(key);
 		} catch {
@@ -204,21 +205,29 @@ export function cascadingCache<V>(
 			return;
 		}
 
-		if (result instanceof Promise) {
-			result.then(
-				(value) => {
+		if (typeof result === "function") {
+			// CallbagSource — subscribe to get the value
+			let resolved = false;
+			rawSubscribe(
+				result as CallbagSource,
+				(value: unknown) => {
 					// Stale check: if generation advanced, discard this result
-					if (getGen(key) !== gen) return;
+					if (resolved || getGen(key) !== gen) return;
+					resolved = true;
 					if (value !== undefined) {
-						store.set(value);
-						promote(key, value, tierIndex);
+						store.set(value as V);
+						promote(key, value as V, tierIndex);
 					} else {
 						cascadeFrom(key, store, tierIndex + 1, gen);
 					}
 				},
-				() => {
-					if (getGen(key) !== gen) return;
-					cascadeFrom(key, store, tierIndex + 1, gen);
+				{
+					onEnd: (err) => {
+						// Error or clean END with no data = miss; cascade to next tier
+						if (resolved || getGen(key) !== gen) return;
+						resolved = true;
+						cascadeFrom(key, store, tierIndex + 1, gen);
+					},
 				},
 			);
 		} else if (result !== undefined) {

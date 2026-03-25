@@ -11,7 +11,7 @@
 | Category | Count | Highlights |
 |----------|------:|------------|
 | Core | 11 | `producer`, `state`, `derived`, `dynamicDerived`, `operator`, `effect` + protocol, inspector, pipe, bitmask, types |
-| Raw | 4 | `rawSubscribe`, `fromTimer`, `firstValueFrom`, `fromNodeCallback` — pure callbag, zero core deps |
+| Raw | 9 | `rawSubscribe`, `rawSkip`, `fromTimer`, `firstValueFrom`, `latestAsync`, `rawFromPromise`, `rawFromAsyncIter`, `rawFromAny`, `rawRace` — pure callbag, zero core deps |
 | Extra | 69 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, `pausable`, `cached`, …), sources (`fromPromise`, `fromEvent`, `fromAny`, …), sinks (`subscribe`, `forEach`) |
 | Utils | 31 | `retry`, `withBreaker`, `withStatus`, `withConnectionStatus`, `withSchema`, `cascadingCache`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, `keyedAsync`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
@@ -28,7 +28,13 @@
 
 ## In Progress
 
-### Callbag-Native Promise Elimination
+*Nothing currently in progress.*
+
+---
+
+## What's Shipped (recent)
+
+### Callbag-Native Promise Elimination — Complete
 
 > **Goal:** Make every internal API callbag-in/callbag-out. Eliminate all internal `firstValueFrom` usage. Promise bridges exist only for end-users exiting callbag-land (like `node:fs/promises` is to `node:fs`).
 >
@@ -39,11 +45,11 @@
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
 | ~~P0~~ | ~~New raw primitives~~ | **Shipped** — `rawFromPromise`, `rawFromAsyncIter`, `rawFromAny`, `rawRace` in `raw/`. Pure callbag protocol, zero core deps. `extra/fromPromise`, `extra/fromAsyncIter`, `extra/fromAny` rewritten as thin `producer` wrappers around raw. | — |
-| P1 | Break low-level APIs | `rateLimiter.acquire()`, `asyncQueue.enqueue()`, `CheckpointAdapter`, `ExecutionLogPersistAdapter`, `webhook.listen()`, `sse.listen()` — all return callbag sources instead of Promises | M |
-| P2 | Refactor orchestrate internals | `task`, `sensor`, `loop`, `subPipeline`, `forEach`, `workflowNode`, `jobQueue` — eliminate `await firstValueFrom(...)`, use reactive continuations | L |
-| P3 | Refactor higher layers | `adapters/http`, `adapters/mcp`, `ai/fromLLM`, `ai/docIndex`, `ai/chatStream`, `utils/connectionHealth`, `utils/cancellableAction`, `utils/cancellableStream` — wrap boundary calls with `rawFromPromise`/`rawFromAsyncIter` | L |
-| P4 | Update examples | `form-builder.ts`, streaming examples — use `rawSubscribe(fromTimer(...))` instead of `new Promise`/`await firstValueFrom` | S |
-| P5 | Replacement patterns blog | Document Promise→callbag patterns for internal reference and user education | S |
+| ~~P1~~ | ~~Break low-level APIs~~ | **Shipped** — `rateLimiter.acquire()`, `asyncQueue.enqueue()` return callbag sources. `CheckpointAdapter`, `ExecutionLogPersistAdapter`, `CacheTier` return `void \| CallbagSource`. `webhook.listen()`, `sse.listen()` return callbag sources. | — |
+| ~~P2~~ | ~~Refactor orchestrate internals~~ | **Shipped** — `task`, `sensor`, `loop`, `subPipeline`, `forEach`, `jobQueue` use reactive continuations (`subscribe` + callbacks). `taskState.run()` sync (returns void), `taskState.start()` for manual lifecycle. `workflowNode` uses raw imports. | — |
+| ~~P3~~ | ~~Refactor higher layers~~ | **Shipped** — `adapters/http`, `adapters/mcp`, `ai/fromLLM`, `ai/docIndex`, `ai/chatStream`, `utils/connectionHealth`, `utils/cancellableAction`, `utils/cancellableStream` wrap boundary calls with `rawFromPromise`/`rawFromAsyncIter`/`rawFromAny`. | — |
+| ~~P4~~ | ~~Update examples~~ | **Shipped** — `form-builder.ts` uses `firstValueFrom(fromTimer(...))` instead of `new Promise`. | — |
+| ~~P5~~ | ~~Replacement patterns blog~~ | **Shipped** — Blog post #7: "Promises Are the New Callback Hell." | — |
 
 ---
 
@@ -54,8 +60,6 @@
 `markdown-editor-hero.ts` `escapeInline` converts markdown links to `<a href="$2">`. A crafted link like `[click](javascript:alert(1))` creates a live XSS vector when rendered via `v-html`. Fix: sanitize hrefs to only allow `http:`, `https:`, `mailto:` protocols.
 
 ---
-
-## What's Shipped (recent)
 
 ### Phase 5a-0: §1.14 Compliance Pass — Complete
 

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { cancellableAction } from "../../../utils/cancellableAction";
+import { tokenBucket } from "../../../utils/rateLimiter";
 
 // ---------------------------------------------------------------------------
 // cancellableAction
@@ -123,6 +124,49 @@ describe("cancellableAction", () => {
 		expect(action.data.get()).toBe(42); // preserved
 		await promise;
 		expect(action.data.get()).toBe(99);
+	});
+
+	it("waits for rateLimiter before executing", async () => {
+		let time = 0;
+		const rl = tokenBucket({ rate: 10, burst: 1, now: () => time });
+		rl.tryAcquire(); // exhaust the single token
+
+		const action = cancellableAction(
+			async (n: number) => n * 2,
+			{ rateLimiter: rl },
+		);
+
+		const promise = action.execute(5);
+		expect(action.loading.get()).toBe(true);
+
+		// Simulate time passing so token refills
+		time = 100;
+		const result = await promise;
+
+		expect(result).toBe(10);
+		expect(action.data.get()).toBe(10);
+		expect(action.loading.get()).toBe(false);
+	});
+
+	it("cancelling during rateLimiter wait aborts cleanly", async () => {
+		let time = 0;
+		const rl = tokenBucket({ rate: 1, burst: 1, now: () => time });
+		rl.tryAcquire(); // exhaust
+
+		const action = cancellableAction(
+			async (n: number) => n,
+			{ rateLimiter: rl },
+		);
+
+		const promise = action.execute(42);
+		expect(action.loading.get()).toBe(true);
+
+		// Cancel while waiting for rate limiter
+		action.cancel();
+
+		const result = await promise;
+		expect(result).toBeUndefined();
+		expect(action.loading.get()).toBe(false);
 	});
 
 	it("discards stale results from cancelled executions", async () => {

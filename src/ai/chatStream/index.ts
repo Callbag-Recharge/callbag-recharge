@@ -13,6 +13,8 @@
 
 import { state } from "../../core/state";
 import type { Store } from "../../core/types";
+import { rawFromAsyncIter } from "../../raw/fromAsyncIter";
+import { rawSubscribe } from "../../raw/subscribe";
 import type { RateLimiter } from "../../utils/rateLimiter";
 
 export interface ChatMessage {
@@ -21,8 +23,8 @@ export interface ChatMessage {
 }
 
 export type ChatStreamFactory = (
-	messages: ChatMessage[],
 	signal: AbortSignal,
+	messages: ChatMessage[],
 ) => AsyncIterable<string>;
 
 export interface ChatStreamOptions {
@@ -75,7 +77,7 @@ export interface ChatStreamResult {
  * ```ts
  * import { chatStream } from 'callbag-recharge/ai/chatStream';
  *
- * const chat = chatStream(async function* (messages, signal) {
+ * const chat = chatStream(async function* (signal, messages) {
  *   const res = await fetch('/api/chat', {
  *     method: 'POST',
  *     body: JSON.stringify({ messages }),
@@ -119,7 +121,7 @@ export function chatStream(factory: ChatStreamFactory, opts?: ChatStreamOptions)
 		streamingStore.set(false);
 	}
 
-	async function streamResponse(signal: AbortSignal): Promise<void> {
+	function streamResponse(signal: AbortSignal): void {
 		// Mark not stopped for this run
 		stopped = false;
 
@@ -127,62 +129,93 @@ export function chatStream(factory: ChatStreamFactory, opts?: ChatStreamOptions)
 		partialStore.set("");
 		errorStore.set(undefined);
 
+		function doStream(): void {
+			// Read messages snapshot for API call
+			const msgs = messagesStore.get();
+			let accumulated = "";
+
+			let iterable: AsyncIterable<string>;
+			try {
+				iterable = factory(signal, msgs);
+			} catch (err) {
+				partialStore.set("");
+				streamingStore.set(false);
+				errorStore.set(err);
+				abortController = null;
+				opts?.onError?.(err);
+				return;
+			}
+			rawSubscribe<string>(
+				rawFromAsyncIter(iterable),
+				(chunk) => {
+					if (signal.aborted) return;
+					accumulated += chunk;
+					partialStore.set(accumulated);
+				},
+				{
+					onEnd: (err) => {
+						if (signal.aborted || stopped) return;
+
+						if (err !== undefined) {
+							// If we accumulated partial content, still add it as a message
+							if (accumulated.length > 0) {
+								const partialMsg: ChatMessage = {
+									role: "assistant",
+									content: accumulated,
+								};
+								messagesStore.update((prev) => [...prev, partialMsg]);
+							}
+
+							partialStore.set("");
+							streamingStore.set(false);
+							errorStore.set(err);
+							abortController = null;
+							opts?.onError?.(err);
+						} else {
+							// Stream completed — add assistant message
+							const assistantMsg: ChatMessage = {
+								role: "assistant",
+								content: accumulated,
+							};
+							messagesStore.update((prev) => [...prev, assistantMsg]);
+							partialStore.set("");
+							streamingStore.set(false);
+							abortController = null;
+							opts?.onComplete?.(accumulated);
+						}
+					},
+				},
+			);
+		}
+
 		// Rate limiting (after abort controller is set so cancellation works)
 		if (opts?.rateLimiter) {
 			const allowed = opts.rateLimiter.tryAcquire();
 			if (!allowed) {
-				try {
-					await opts.rateLimiter.acquire(1, signal);
-				} catch {
-					if (signal.aborted) return;
-					throw new Error("Rate limiter rejected");
-				}
+				rawSubscribe(
+					opts.rateLimiter.acquire(signal, 1),
+					() => {
+						if (signal.aborted) return;
+						doStream();
+					},
+					{
+						onEnd: (err) => {
+							if (err !== undefined) {
+								if (signal.aborted) return;
+								partialStore.set("");
+								streamingStore.set(false);
+								errorStore.set(new Error("Rate limiter rejected"));
+								abortController = null;
+							}
+						},
+					},
+				);
+				return;
 			}
 			if (signal.aborted) return;
 		}
 
-		// Read messages snapshot for API call
-		const msgs = messagesStore.get();
-		let accumulated = "";
-
-		try {
-			const iterable = factory(msgs, signal);
-			for await (const chunk of iterable) {
-				if (signal.aborted) return;
-				accumulated += chunk;
-				partialStore.set(accumulated);
-			}
-
-			if (signal.aborted || stopped) return;
-
-			// Stream completed — add assistant message
-			const assistantMsg: ChatMessage = {
-				role: "assistant",
-				content: accumulated,
-			};
-			messagesStore.update((prev) => [...prev, assistantMsg]);
-			partialStore.set("");
-			streamingStore.set(false);
-			abortController = null;
-			opts?.onComplete?.(accumulated);
-		} catch (err) {
-			if (signal.aborted || stopped) return;
-
-			// If we accumulated partial content, still add it as a message
-			if (accumulated.length > 0) {
-				const partialMsg: ChatMessage = {
-					role: "assistant",
-					content: accumulated,
-				};
-				messagesStore.update((prev) => [...prev, partialMsg]);
-			}
-
-			partialStore.set("");
-			streamingStore.set(false);
-			errorStore.set(err);
-			abortController = null;
-			opts?.onError?.(err);
-		}
+		doStream();
 	}
 
 	function send(message: string): void {
@@ -205,8 +238,7 @@ export function chatStream(factory: ChatStreamFactory, opts?: ChatStreamOptions)
 		abortController = new AbortController();
 		const signal = abortController.signal;
 
-		// Fire-and-forget with .catch() to prevent unhandled rejections
-		streamResponse(signal).catch(() => {});
+		streamResponse(signal);
 	}
 
 	function stop(): void {

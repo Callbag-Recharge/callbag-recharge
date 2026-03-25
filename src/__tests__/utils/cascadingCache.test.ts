@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { Inspector } from "../../core/inspector";
+import { rawFromPromise } from "../../raw/fromPromise";
 import type { CacheTier } from "../../utils/cascadingCache";
 import { cascadingCache } from "../../utils/cascadingCache";
 
@@ -18,25 +19,30 @@ function memoryTier<V>(): CacheTier<V> & { data: Map<string, V> } {
 	};
 }
 
-/** Helper: async tier with configurable delay. */
+/** Helper: async tier with configurable delay, returning CallbagSource. */
 function asyncTier<V>(delayMs = 10): CacheTier<V> & { data: Map<string, V> } {
 	const data = new Map<string, V>();
 	return {
 		data,
-		load: (key) => new Promise((resolve) => setTimeout(() => resolve(data.get(key)), delayMs)),
+		load: (key) =>
+			rawFromPromise(new Promise((resolve) => setTimeout(() => resolve(data.get(key)), delayMs))),
 		save: (key, value) =>
-			new Promise<void>((resolve) =>
-				setTimeout(() => {
-					data.set(key, value);
-					resolve();
-				}, delayMs),
+			rawFromPromise(
+				new Promise<void>((resolve) =>
+					setTimeout(() => {
+						data.set(key, value);
+						resolve();
+					}, delayMs),
+				),
 			),
 		clear: (key) =>
-			new Promise<void>((resolve) =>
-				setTimeout(() => {
-					data.delete(key);
-					resolve();
-				}, delayMs),
+			rawFromPromise(
+				new Promise<void>((resolve) =>
+					setTimeout(() => {
+						data.delete(key);
+						resolve();
+					}, delayMs),
+				),
 			),
 	};
 }
@@ -250,7 +256,7 @@ describe("cascadingCache", () => {
 			const slow: CacheTier<string> = {
 				load: (key) => {
 					loadCount++;
-					return new Promise((r) => setTimeout(() => r(`val-${key}`), 10));
+					return rawFromPromise(new Promise((r) => setTimeout(() => r(`val-${key}`), 10)));
 				},
 			};
 
@@ -324,7 +330,7 @@ describe("cascadingCache", () => {
 
 		it("async tier load rejection — falls through to next tier", async () => {
 			const broken: CacheTier<number> = {
-				load: () => Promise.reject(new Error("fail")),
+				load: () => rawFromPromise(Promise.reject(new Error("fail"))),
 			};
 			const fallback = memoryTier<number>();
 			fallback.data.set("k", 99);
@@ -332,7 +338,7 @@ describe("cascadingCache", () => {
 			const cache = cascadingCache([broken, fallback]);
 			const store = cache.load("k");
 
-			// broken is async (Promise.reject), so cascade goes async
+			// broken is async (CallbagSource), so cascade goes async
 			await new Promise((r) => setTimeout(r, 10));
 			expect(store.get()).toBe(99);
 		});

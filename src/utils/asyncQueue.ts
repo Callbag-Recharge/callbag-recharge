@@ -6,13 +6,12 @@
 //
 // Use cases: tool call execution, file uploads, API batching, LLM requests
 //
-// Built on: state, firstValueFrom (no raw new Promise)
+// Built on: state (no raw new Promise)
 // ---------------------------------------------------------------------------
 
-import { teardown } from "../core/protocol";
 import { state } from "../core/state";
-import type { Store, WritableStore } from "../core/types";
-import { firstValueFrom } from "../extra/firstValueFrom";
+import type { Store } from "../core/types";
+import type { CallbagSource } from "../raw/subscribe";
 
 export interface AsyncQueueOptions {
 	/** Max concurrent tasks. Default: 1 */
@@ -24,8 +23,8 @@ export interface AsyncQueueOptions {
 }
 
 export interface AsyncQueueResult<T, R> {
-	/** Enqueue a task. Returns a promise that resolves when the task completes. */
-	enqueue(task: T): Promise<R>;
+	/** Enqueue a task. Returns a callbag source that emits the result then completes. */
+	enqueue(task: T): CallbagSource;
 	/** Number of tasks waiting in queue. */
 	size: Store<number>;
 	/** Number of tasks currently executing. */
@@ -40,15 +39,17 @@ export interface AsyncQueueResult<T, R> {
 	resume(): void;
 	/** Whether the queue is paused. */
 	paused: Store<boolean>;
-	/** Clear all pending tasks (rejects their promises). Does not cancel running tasks. */
+	/** Clear all pending tasks (errors their sources). Does not cancel running tasks. */
 	clear(): void;
-	/** Dispose — clears queue, rejects pending, prevents new enqueues. */
+	/** Dispose — clears queue, errors pending, prevents new enqueues. */
 	dispose(): void;
 }
 
-interface QueueEntry<T, R> {
+/** Direct callback — no state/subscribe overhead for one-shot completion. */
+interface QueueEntry<T> {
 	task: T;
-	done$: WritableStore<{ ok: true; result: R } | { ok: false; error: unknown } | null>;
+	resolve: (result: any) => void;
+	reject: (err: unknown) => void;
 }
 
 /**
@@ -62,6 +63,7 @@ interface QueueEntry<T, R> {
  * @example
  * ```ts
  * import { asyncQueue } from 'callbag-recharge/utils';
+ * import { rawSubscribe } from 'callbag-recharge/raw';
  *
  * const queue = asyncQueue(
  *   async (url: string) => {
@@ -72,15 +74,8 @@ interface QueueEntry<T, R> {
  * );
  *
  * // Enqueue tasks — at most 3 run concurrently
- * const results = await Promise.all([
- *   queue.enqueue('/api/a'),
- *   queue.enqueue('/api/b'),
- *   queue.enqueue('/api/c'),
- *   queue.enqueue('/api/d'), // waits for a slot
- * ]);
- *
- * queue.running.get(); // 0 (all done)
- * queue.completed.get(); // 4
+ * rawSubscribe(queue.enqueue('/api/a'), (result) => console.log(result));
+ * rawSubscribe(queue.enqueue('/api/b'), (result) => console.log(result));
  * ```
  *
  * @category utils
@@ -99,25 +94,25 @@ export function asyncQueue<T, R>(
 	const failedStore = state<number>(0, { name: `${name}.failed` });
 	const pausedStore = state<boolean>(false, { name: `${name}.paused` });
 
-	const queue: QueueEntry<T, R>[] = [];
+	const queue: QueueEntry<T>[] = [];
 	let activeCount = 0;
 	let disposed = false;
 
-	function onTaskDone(entry: QueueEntry<T, R>, result: R): void {
+	function onTaskDone(entry: QueueEntry<T>, result: R): void {
 		if (disposed) return;
 		activeCount--;
 		runningStore.set(activeCount);
 		completedStore.update((n) => n + 1);
-		entry.done$.set({ ok: true, result });
+		entry.resolve(result);
 		drain();
 	}
 
-	function onTaskError(entry: QueueEntry<T, R>, err: unknown): void {
+	function onTaskError(entry: QueueEntry<T>, err: unknown): void {
 		if (disposed) return;
 		activeCount--;
 		runningStore.set(activeCount);
 		failedStore.update((n) => n + 1);
-		entry.done$.set({ ok: false, error: err });
+		entry.reject(err);
 		drain();
 	}
 
@@ -142,33 +137,36 @@ export function asyncQueue<T, R>(
 		}
 	}
 
-	function enqueue(task: T): Promise<R> {
-		if (disposed) {
-			return Promise.reject(new Error("Queue is disposed"));
-		}
+	function enqueue(task: T): CallbagSource {
+		return (type: number, sink?: any) => {
+			if (type !== 0) return;
+			let cancelled = false;
+			sink(0, (t: number) => {
+				if (t === 2) cancelled = true;
+			});
 
-		const done$ = state<{ ok: true; result: R } | { ok: false; error: unknown } | null>(null, {
-			name: `${name}.task`,
-		});
+			if (disposed) {
+				sink(2, new Error("Queue is disposed"));
+				return;
+			}
 
-		queue.push({ task, done$ });
-		sizeStore.set(queue.length);
-		drain();
+			const entry: QueueEntry<T> = {
+				task,
+				resolve(result: R) {
+					if (cancelled) return;
+					sink(1, result);
+					if (!cancelled) sink(2);
+				},
+				reject(err: unknown) {
+					if (cancelled) return;
+					sink(2, err);
+				},
+			};
 
-		return firstValueFrom<{ ok: true; result: R } | { ok: false; error: unknown } | null>(
-			done$,
-			(v) => v !== null,
-		).then(
-			(v) => {
-				teardown(done$);
-				if (v!.ok) return v!.result;
-				throw v!.error;
-			},
-			(err) => {
-				teardown(done$);
-				throw err;
-			},
-		);
+			queue.push(entry);
+			sizeStore.set(queue.length);
+			drain();
+		};
 	}
 
 	function pause(): void {
@@ -184,7 +182,7 @@ export function asyncQueue<T, R>(
 		const pending = queue.splice(0, queue.length);
 		sizeStore.set(0);
 		for (const entry of pending) {
-			entry.done$.set({ ok: false, error: new Error("Queue cleared") });
+			entry.reject(new Error("Queue cleared"));
 		}
 	}
 

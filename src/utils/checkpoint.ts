@@ -14,16 +14,16 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import { state } from "../core/state";
-import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
+import { type CallbagSource, rawSubscribe } from "../raw/subscribe";
 
 export interface CheckpointAdapter {
-	/** Save a value for the given checkpoint id. May be sync or async. */
-	save(id: string, value: unknown): void | Promise<void>;
-	/** Load a previously saved value. Returns undefined if none exists. */
-	load(id: string): unknown | undefined | Promise<unknown | undefined>;
-	/** Clear a saved checkpoint. */
-	clear(id: string): void | Promise<void>;
+	/** Save a value for the given checkpoint id. May be sync or return a callbag source. */
+	save(id: string, value: unknown): void | CallbagSource;
+	/** Load a previously saved value. Returns undefined if none exists, or a callbag source. */
+	load(id: string): unknown | undefined | CallbagSource;
+	/** Clear a saved checkpoint. May be sync or return a callbag source. */
+	clear(id: string): void | CallbagSource;
 }
 
 export interface CheckpointMeta {
@@ -42,10 +42,10 @@ export interface CheckpointedStore<A> extends Store<A | undefined> {
 	clear(): void;
 }
 
-/** Safely handle a potentially async adapter operation (fire-and-forget). */
-function safeAsync(result: void | Promise<void>) {
-	if (result instanceof Promise) {
-		result.catch(() => {});
+/** Safely subscribe to a potentially callbag adapter result (fire-and-forget). */
+function safeSubscribe(result: void | CallbagSource) {
+	if (typeof result === "function") {
+		rawSubscribe(result, () => {});
 	}
 }
 
@@ -106,17 +106,19 @@ export function checkpoint<A>(
 				const buffer: A[] = [];
 				let upstreamEnded: { err: unknown } | null = null;
 
-				// Subscribe to upstream immediately — buffer during async load
-				const sub = subscribe(
-					input,
-					(v) => {
+				// Subscribe to upstream immediately — buffer during async load.
+				// Use rawSubscribe on the callbag source directly: inside a producer
+				// we only need values, not DIRTY/RESOLVED two-phase overhead.
+				const sub = rawSubscribe(
+					input.source,
+					(v: A) => {
 						if (!loadResolved) {
 							buffer.push(v);
 							return;
 						}
 						persistCount++;
 						meta.set({ recovered: meta.get().recovered, persistCount, id });
-						safeAsync(adapter.save(id, v));
+						safeSubscribe(adapter.save(id, v));
 						emit(v);
 					},
 					{
@@ -141,7 +143,7 @@ export function checkpoint<A>(
 						if (!active) break;
 						persistCount++;
 						meta.set({ recovered, persistCount, id });
-						safeAsync(adapter.save(id, v));
+						safeSubscribe(adapter.save(id, v));
 						emit(v);
 					}
 					buffer.length = 0;
@@ -156,9 +158,11 @@ export function checkpoint<A>(
 				// Recovery: try to load saved value
 				const loaded = adapter.load(id);
 
-				if (loaded instanceof Promise) {
-					loaded.then(
-						(saved) => {
+				if (typeof loaded === "function") {
+					// CallbagSource — subscribe to get the value
+					rawSubscribe(
+						loaded as CallbagSource,
+						(saved: unknown) => {
 							if (!active) return;
 							if (saved !== undefined) {
 								emit(saved as A);
@@ -167,9 +171,12 @@ export function checkpoint<A>(
 								finishLoad(false);
 							}
 						},
-						() => {
-							if (!active) return;
-							finishLoad(false);
+						{
+							onEnd: (err) => {
+								if (!active) return;
+								// Error or clean END with no data = cache miss
+								if (err !== undefined || !loadResolved) finishLoad(false);
+							},
 						},
 					);
 				} else {
@@ -198,7 +205,7 @@ export function checkpoint<A>(
 			clear: {
 				value() {
 					// Always clear directly — works whether producer is active or not
-					safeAsync(adapter.clear(id));
+					safeSubscribe(adapter.clear(id));
 				},
 				enumerable: true,
 			},

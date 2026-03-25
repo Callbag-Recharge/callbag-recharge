@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { subscribe } from "../../extra/subscribe";
 import { pipe, state } from "../../index";
+import { rawFromPromise } from "../../raw/fromPromise";
+import type { CallbagSource } from "../../raw/subscribe";
 import { checkpoint } from "../../utils/checkpoint";
 import { sqliteAdapter } from "../../utils/checkpointAdapters";
 import { fileAdapter } from "../../utils/checkpointAdapters.node";
@@ -104,14 +106,22 @@ describe("checkpoint + async adapter integration", () => {
 	it("works with checkpoint operator (async adapter)", async () => {
 		const store = new Map<string, unknown>();
 		const asyncAdapter = {
-			async save(id: string, value: unknown) {
-				store.set(id, value);
+			save(id: string, value: unknown): CallbagSource {
+				return rawFromPromise(
+					Promise.resolve().then(() => {
+						store.set(id, value);
+					}),
+				);
 			},
-			async load(id: string) {
-				return store.get(id);
+			load(id: string): CallbagSource {
+				return rawFromPromise(Promise.resolve(store.get(id)));
 			},
-			async clear(id: string) {
-				store.delete(id);
+			clear(id: string): CallbagSource {
+				return rawFromPromise(
+					Promise.resolve().then(() => {
+						store.delete(id);
+					}),
+				);
 			},
 		};
 
@@ -138,14 +148,22 @@ describe("checkpoint + async adapter integration", () => {
 	it("recovers saved value on re-subscribe", async () => {
 		const store = new Map<string, unknown>();
 		const asyncAdapter = {
-			async save(id: string, value: unknown) {
-				store.set(id, value);
+			save(id: string, value: unknown): CallbagSource {
+				return rawFromPromise(
+					Promise.resolve().then(() => {
+						store.set(id, value);
+					}),
+				);
 			},
-			async load(id: string) {
-				return store.get(id);
+			load(id: string): CallbagSource {
+				return rawFromPromise(Promise.resolve(store.get(id)));
 			},
-			async clear(id: string) {
-				store.delete(id);
+			clear(id: string): CallbagSource {
+				return rawFromPromise(
+					Promise.resolve().then(() => {
+						store.delete(id);
+					}),
+				);
 			},
 		};
 

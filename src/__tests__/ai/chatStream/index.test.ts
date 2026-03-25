@@ -6,8 +6,8 @@ import { chatStream } from "../../../ai/chatStream";
 function mockChatFactory(
 	chunks: string[],
 	delay = 0,
-): (messages: ChatMessage[], signal: AbortSignal) => AsyncIterable<string> {
-	return async function* (_messages, signal) {
+): (signal: AbortSignal, messages: ChatMessage[]) => AsyncIterable<string> {
+	return async function* (signal, _messages) {
 		for (const chunk of chunks) {
 			if (signal.aborted) return;
 			if (delay > 0) await new Promise((r) => setTimeout(r, delay));
@@ -73,7 +73,7 @@ describe("chatStream", () => {
 
 	it("auto-cancels previous stream on new send", async () => {
 		const aborted = vi.fn();
-		const chat = chatStream(async function* (_messages, signal) {
+		const chat = chatStream(async function* (signal, _messages) {
 			signal.addEventListener("abort", aborted);
 			yield "first";
 			await new Promise((r) => setTimeout(r, 500));
@@ -89,7 +89,7 @@ describe("chatStream", () => {
 
 	it("retry resends last user message", async () => {
 		let callCount = 0;
-		const chat = chatStream(async function* (_messages, _signal) {
+		const chat = chatStream(async function* (_signal, _messages) {
 			callCount++;
 			if (callCount === 1) throw new Error("fail");
 			yield "success";
@@ -124,7 +124,7 @@ describe("chatStream", () => {
 	it("includes system prompt in requests", async () => {
 		let receivedMessages: ChatMessage[] = [];
 		const chat = chatStream(
-			async function* (messages, _signal) {
+			async function* (_signal, messages) {
 				receivedMessages = messages;
 				yield "ok";
 			},

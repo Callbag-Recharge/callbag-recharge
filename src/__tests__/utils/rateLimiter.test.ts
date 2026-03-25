@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { firstValueFrom } from "../../raw/firstValueFrom";
+import { rawSubscribe } from "../../raw/subscribe";
 import { slidingWindow, tokenBucket } from "../../utils/rateLimiter";
 
 // ---------------------------------------------------------------------------
@@ -58,8 +60,8 @@ describe("tokenBucket", () => {
 		rl.tryAcquire(); // consume the one token
 
 		// acquire should wait ~100ms for 1 token at 10/s
-		const waitPromise = rl.acquire();
-		// Simulate time passing (acquire uses setTimeout internally)
+		const waitPromise = firstValueFrom<number>(rl.acquire());
+		// Simulate time passing (acquire uses fromTimer internally)
 		time = 100;
 		const waited = await waitPromise;
 		expect(waited).toBeGreaterThan(0);
@@ -67,8 +69,61 @@ describe("tokenBucket", () => {
 
 	it("acquire returns 0 when tokens available", async () => {
 		const rl = tokenBucket({ rate: 10, burst: 5 });
-		const waited = await rl.acquire();
+		const waited = await firstValueFrom<number>(rl.acquire());
 		expect(waited).toBe(0);
+	});
+
+	it("acquire with signal cancels the wait", async () => {
+		let time = 0;
+		const rl = tokenBucket({ rate: 1, burst: 1, now: () => time });
+		rl.tryAcquire(); // exhaust
+
+		const ac = new AbortController();
+		const source = rl.acquire(ac.signal);
+
+		let ended = false;
+		let endError: unknown;
+		const values: number[] = [];
+		rawSubscribe(
+			source,
+			(v: number) => values.push(v),
+			{
+				onEnd: (err) => {
+					ended = true;
+					endError = err;
+				},
+			},
+		);
+
+		// Abort before token refills
+		ac.abort(new Error("cancelled"));
+
+		expect(ended).toBe(true);
+		expect(endError).toBeInstanceOf(Error);
+		expect(values).toEqual([]);
+	});
+
+	it("acquire with already-aborted signal errors immediately", () => {
+		const rl = tokenBucket({ rate: 10, burst: 5 });
+		const ac = new AbortController();
+		ac.abort(new Error("pre-aborted"));
+
+		let endError: unknown;
+		rawSubscribe(
+			rl.acquire(ac.signal),
+			() => {},
+			{ onEnd: (err) => { endError = err; } },
+		);
+
+		expect(endError).toBeInstanceOf(Error);
+	});
+
+	it("acquire with signal and custom tokens", async () => {
+		const rl = tokenBucket({ rate: 10, burst: 5 });
+		// signal=undefined, tokens=3
+		const waited = await firstValueFrom<number>(rl.acquire(undefined, 3));
+		expect(waited).toBe(0);
+		expect(rl.available()).toBe(2);
 	});
 
 	it("reset restores full capacity", () => {
@@ -142,7 +197,7 @@ describe("slidingWindow", () => {
 
 	it("acquire returns 0 when slots available", async () => {
 		const rl = slidingWindow({ max: 5, windowMs: 1000 });
-		const waited = await rl.acquire();
+		const waited = await firstValueFrom<number>(rl.acquire());
 		expect(waited).toBe(0);
 	});
 

@@ -654,6 +654,34 @@ export default defineConfig({
 								},
 							],
 						},
+						{
+							text: "Arc 3: Architecture v2",
+							collapsed: false,
+							items: [
+								{
+									text: "7. Data Should Flow Through the Graph, Not Around It",
+									link: "/blog/07-data-should-flow-through-the-graph-not-around-it",
+								},
+								{
+									text: "8. Two-Phase Push: DIRTY First, Values Second",
+									link: "/blog/08-two-phase-push-dirty-first-values-second",
+								},
+								{
+									text: "9. From Pull-Phase to Push-Phase Memoization",
+									link: "/blog/09-from-pull-phase-to-push-phase-memoization",
+								},
+							],
+						},
+						{
+							text: "Arc 4: Callbag-Native",
+							collapsed: false,
+							items: [
+								{
+									text: "10. Promises Are the New Callback Hell",
+									link: "/blog/10-promises-are-the-new-callback-hell",
+								},
+							],
+						},
 					],
 				},
 			],

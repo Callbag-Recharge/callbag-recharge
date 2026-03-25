@@ -12,6 +12,7 @@
 
 import { state } from "../core/state";
 import type { Store } from "../core/types";
+import { firstValueFrom } from "../raw/firstValueFrom";
 import type { RateLimiter } from "./rateLimiter";
 
 export type ActionFn<TInput, TResult> = (input: TInput, signal: AbortSignal) => Promise<TResult>;
@@ -118,7 +119,7 @@ export function cancellableAction<TInput, TResult>(
 		try {
 			// Rate limiting
 			if (opts?.rateLimiter) {
-				await opts.rateLimiter.acquire();
+				await firstValueFrom(opts.rateLimiter.acquire(signal));
 				if (signal.aborted || currentId !== executionId) return undefined;
 			}
 

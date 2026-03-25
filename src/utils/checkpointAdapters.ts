@@ -11,6 +11,8 @@
 // ---------------------------------------------------------------------------
 
 import { firstValueFrom } from "../raw/firstValueFrom";
+import { rawFromPromise } from "../raw/fromPromise";
+import type { CallbagSource } from "../raw/subscribe";
 import type { CheckpointAdapter } from "./checkpoint";
 import { fromIDBRequest } from "./fromIDBRequest";
 
@@ -113,7 +115,7 @@ export interface IndexedDBAdapterOptions {
  * @returns `CheckpointAdapter` — save/load/clear backed by IndexedDB.
  *
  * @remarks **Browser only:** Uses the IndexedDB API. Not available in Node.js without polyfills.
- * @remarks **Async:** All operations return Promises.
+ * @remarks **Async:** All operations return callbag sources.
  * @remarks **Auto-creates:** Database and object store are created on first use.
  *
  * @example
@@ -190,17 +192,18 @@ export function indexedDBAdapter(opts?: IndexedDBAdapterOptions): CheckpointAdap
 	}
 
 	return {
-		async save(id: string, value: unknown): Promise<void> {
-			await withRetry("readwrite", (store) => store.put(value, id));
+		save(id: string, value: unknown): CallbagSource {
+			return rawFromPromise(withRetry("readwrite", (store) => store.put(value, id)).then(() => {}));
 		},
 
-		async load(id: string): Promise<unknown | undefined> {
-			const result = await withRetry("readonly", (store) => store.get(id));
-			return result ?? undefined;
+		load(id: string): CallbagSource {
+			return rawFromPromise(
+				withRetry("readonly", (store) => store.get(id)).then((r) => r ?? undefined),
+			);
 		},
 
-		async clear(id: string): Promise<void> {
-			await withRetry("readwrite", (store) => store.delete(id));
+		clear(id: string): CallbagSource {
+			return rawFromPromise(withRetry("readwrite", (store) => store.delete(id)).then(() => {}));
 		},
 	};
 }

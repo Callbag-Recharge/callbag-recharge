@@ -43,14 +43,17 @@ export function firstValueFrom<T>(
 		}
 
 		let settled = false;
+		// Use `let` (not `const`) so the closure is safe when the source emits
+		// synchronously inside rawSubscribe — sub would be in TDZ with const.
+		let sub: { unsubscribe(): void } | undefined;
 
-		const sub = rawSubscribe<T>(
+		sub = rawSubscribe<T>(
 			source,
 			(value) => {
 				if (!predicate || predicate(value)) {
 					settled = true;
 					cleanup();
-					sub.unsubscribe();
+					sub?.unsubscribe(); // safe if called synchronously before sub is assigned
 					resolve(value);
 				}
 			},
@@ -68,7 +71,7 @@ export function firstValueFrom<T>(
 			if (settled) return;
 			settled = true;
 			cleanup();
-			sub.unsubscribe();
+			sub?.unsubscribe();
 			reject(signal!.reason ?? new DOMException("The operation was aborted.", "AbortError"));
 		}
 

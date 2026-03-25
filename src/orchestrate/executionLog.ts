@@ -20,6 +20,7 @@ import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
 import { reactiveLog } from "../data/reactiveLog";
 import type { ReactiveLog } from "../data/types";
+import { type CallbagSource, rawSubscribe } from "../raw/subscribe";
 
 export type ExecutionEventType = "start" | "value" | "complete" | "error";
 
@@ -39,12 +40,12 @@ export interface ExecutionEntry {
 }
 
 export interface ExecutionLogPersistAdapter {
-	/** Append an entry to persistent storage. May be sync or async. */
-	append(entry: ExecutionEntry): void | Promise<void>;
-	/** Load all persisted entries. */
-	load(): ExecutionEntry[] | Promise<ExecutionEntry[]>;
-	/** Clear all persisted entries. */
-	clear(): void | Promise<void>;
+	/** Append an entry to persistent storage. May be sync or return a callbag source. */
+	append(entry: ExecutionEntry): void | CallbagSource;
+	/** Load all persisted entries. May be sync or return a callbag source. */
+	load(): ExecutionEntry[] | CallbagSource;
+	/** Clear all persisted entries. May be sync or return a callbag source. */
+	clear(): void | CallbagSource;
 }
 
 export interface ExecutionLogOptions {
@@ -151,12 +152,18 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 		if (persist) {
 			try {
 				const result = persist.append(entry);
-				if (result instanceof Promise) {
-					result
-						.then(() => {
+				if (typeof result === "function") {
+					rawSubscribe(
+						result as CallbagSource,
+						() => {
 							if (persistErrorStore.get() !== null) persistErrorStore.set(null);
-						})
-						.catch((err) => persistErrorStore.set(err));
+						},
+						{
+							onEnd: (err) => {
+								if (err !== undefined) persistErrorStore.set(err);
+							},
+						},
+					);
 				} else if (persistErrorStore.get() !== null) {
 					persistErrorStore.set(null);
 				}
@@ -264,8 +271,12 @@ export function executionLog(opts?: ExecutionLogOptions): ExecutionLogResult {
 			if (persist) {
 				try {
 					const result = persist.clear();
-					if (result instanceof Promise) {
-						result.catch((err) => persistErrorStore.set(err));
+					if (typeof result === "function") {
+						rawSubscribe(result as CallbagSource, () => {}, {
+							onEnd: (err) => {
+								if (err !== undefined) persistErrorStore.set(err);
+							},
+						});
 					}
 				} catch (err) {
 					persistErrorStore.set(err);

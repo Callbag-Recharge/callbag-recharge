@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
+import { firstValueFrom } from "../../raw/firstValueFrom";
+import { rawSubscribe } from "../../raw/subscribe";
 import { asyncQueue } from "../../utils/asyncQueue";
+
+/** Helper: subscribe to a callbag source and return a Promise of the first value. */
+function toPromise<T>(source: (type: number, payload?: any) => void): Promise<T> {
+	return firstValueFrom<T>(source);
+}
 
 describe("asyncQueue", () => {
 	// -----------------------------------------------------------------------
@@ -9,26 +16,26 @@ describe("asyncQueue", () => {
 		it("processes a single task", async () => {
 			const q = asyncQueue(async (n: number) => n * 2);
 
-			const result = await q.enqueue(5);
+			const result = await toPromise<number>(q.enqueue(5));
 			expect(result).toBe(10);
 			expect(q.completed.get()).toBe(1);
 			expect(q.failed.get()).toBe(0);
 			expect(q.running.get()).toBe(0);
 		});
 
-		it("returns task result via promise", async () => {
+		it("returns task result via callbag source", async () => {
 			const q = asyncQueue(async (s: string) => s.toUpperCase());
 
-			const result = await q.enqueue("hello");
+			const result = await toPromise<string>(q.enqueue("hello"));
 			expect(result).toBe("HELLO");
 		});
 
-		it("rejects promise on task failure", async () => {
+		it("errors on task failure", async () => {
 			const q = asyncQueue(async () => {
 				throw new Error("task failed");
 			});
 
-			await expect(q.enqueue(null)).rejects.toThrow("task failed");
+			await expect(toPromise(q.enqueue(null))).rejects.toThrow("task failed");
 			expect(q.completed.get()).toBe(0);
 			expect(q.failed.get()).toBe(1);
 		});
@@ -47,8 +54,8 @@ describe("asyncQueue", () => {
 				return label;
 			});
 
-			const p1 = q.enqueue("a");
-			const p2 = q.enqueue("b");
+			const p1 = toPromise(q.enqueue("a"));
+			const p2 = toPromise(q.enqueue("b"));
 
 			expect(q.running.get()).toBe(1);
 			expect(q.size.get()).toBe(1); // 'b' is queued
@@ -73,7 +80,7 @@ describe("asyncQueue", () => {
 				{ concurrency: 3 },
 			);
 
-			const promises = Array.from({ length: 6 }, (_, i) => q.enqueue(i));
+			const promises = Array.from({ length: 6 }, (_, i) => toPromise(q.enqueue(i)));
 			await Promise.all(promises);
 
 			expect(maxConcurrent).toBe(3);
@@ -89,9 +96,9 @@ describe("asyncQueue", () => {
 				{ concurrency: 2 },
 			);
 
-			const p1 = q.enqueue(10); // finishes first
-			const p2 = q.enqueue(50);
-			const p3 = q.enqueue(10); // starts when p1 finishes
+			const p1 = toPromise(q.enqueue(10)); // finishes first
+			const p2 = toPromise(q.enqueue(50));
+			const p3 = toPromise(q.enqueue(10)); // starts when p1 finishes
 
 			expect(q.running.get()).toBe(2);
 			expect(q.size.get()).toBe(1);
@@ -106,14 +113,14 @@ describe("asyncQueue", () => {
 
 		it("clamps concurrency below 1 to 1", async () => {
 			const q = asyncQueue(async (n: number) => n, { concurrency: 0 });
-			const result = await q.enqueue(42);
+			const result = await toPromise<number>(q.enqueue(42));
 			expect(result).toBe(42);
 			expect(q.completed.get()).toBe(1);
 		});
 
 		it("clamps negative concurrency to 1", async () => {
 			const q = asyncQueue(async (n: number) => n, { concurrency: -5 });
-			const result = await q.enqueue(7);
+			const result = await toPromise<number>(q.enqueue(7));
 			expect(result).toBe(7);
 		});
 	});
@@ -133,10 +140,10 @@ describe("asyncQueue", () => {
 			);
 
 			// First enqueue starts immediately (concurrency=1)
-			const p1 = q.enqueue(1);
+			const p1 = toPromise(q.enqueue(1));
 			// These queue up
-			const p2 = q.enqueue(2);
-			const p3 = q.enqueue(3);
+			const p2 = toPromise(q.enqueue(2));
+			const p3 = toPromise(q.enqueue(3));
 
 			await Promise.all([p1, p2, p3]);
 
@@ -157,12 +164,12 @@ describe("asyncQueue", () => {
 				return Promise.resolve(n * 2);
 			});
 
-			await expect(q.enqueue(1)).rejects.toThrow("sync boom");
+			await expect(toPromise(q.enqueue(1))).rejects.toThrow("sync boom");
 			expect(q.failed.get()).toBe(1);
 			expect(q.completed.get()).toBe(0);
 
 			// Queue should still be functional
-			const result = await q.enqueue(2);
+			const result = await toPromise<number>(q.enqueue(2));
 			expect(result).toBe(4);
 			expect(q.completed.get()).toBe(1);
 			expect(q.failed.get()).toBe(1);
@@ -180,7 +187,7 @@ describe("asyncQueue", () => {
 			q.pause();
 			expect(q.paused.get()).toBe(true);
 
-			const p = q.enqueue(1);
+			const p = toPromise<number>(q.enqueue(1));
 			expect(q.size.get()).toBe(1);
 			expect(q.running.get()).toBe(0);
 
@@ -200,7 +207,7 @@ describe("asyncQueue", () => {
 				return "done";
 			});
 
-			const p = q.enqueue(null);
+			const p = toPromise<string>(q.enqueue(null));
 			expect(q.running.get()).toBe(1);
 
 			q.pause();
@@ -216,7 +223,7 @@ describe("asyncQueue", () => {
 	// Clear
 	// -----------------------------------------------------------------------
 	describe("clear", () => {
-		it("clears pending tasks and rejects their promises", async () => {
+		it("clears pending tasks and errors their sources", async () => {
 			const q = asyncQueue(
 				async (n: number) => {
 					await new Promise((r) => setTimeout(r, 50));
@@ -225,9 +232,9 @@ describe("asyncQueue", () => {
 				{ concurrency: 1 },
 			);
 
-			const p1 = q.enqueue(1); // running
-			const p2 = q.enqueue(2); // pending
-			const p3 = q.enqueue(3); // pending
+			const p1 = toPromise<number>(q.enqueue(1)); // running
+			const p2 = toPromise(q.enqueue(2)); // pending
+			const p3 = toPromise(q.enqueue(3)); // pending
 
 			q.clear();
 
@@ -246,11 +253,11 @@ describe("asyncQueue", () => {
 	// Dispose
 	// -----------------------------------------------------------------------
 	describe("dispose", () => {
-		it("rejects new enqueues after dispose", async () => {
+		it("errors new enqueues after dispose", async () => {
 			const q = asyncQueue(async (n: number) => n);
 			q.dispose();
 
-			await expect(q.enqueue(1)).rejects.toThrow("Queue is disposed");
+			await expect(toPromise(q.enqueue(1))).rejects.toThrow("Queue is disposed");
 		});
 
 		it("clears pending tasks on dispose", async () => {
@@ -262,8 +269,8 @@ describe("asyncQueue", () => {
 				{ concurrency: 1 },
 			);
 
-			q.enqueue(1); // running
-			const p2 = q.enqueue(2); // pending
+			toPromise(q.enqueue(1)); // running
+			const p2 = toPromise(q.enqueue(2)); // pending
 
 			q.dispose();
 
@@ -278,7 +285,7 @@ describe("asyncQueue", () => {
 				});
 			});
 
-			q.enqueue(null); // starts running
+			rawSubscribe(q.enqueue(null), () => {}); // starts running
 			expect(q.running.get()).toBe(1);
 
 			q.dispose();
@@ -303,6 +310,57 @@ describe("asyncQueue", () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// Callbag cancellation
+	// -----------------------------------------------------------------------
+	describe("callbag cancellation", () => {
+		it("unsubscribing before task completes suppresses result", async () => {
+			let resolve: (v: string) => void;
+			const q = asyncQueue(async () => {
+				return new Promise<string>((r) => {
+					resolve = r;
+				});
+			});
+
+			const values: string[] = [];
+			const sub = rawSubscribe(q.enqueue(null), (v: string) => values.push(v));
+
+			// Cancel before task finishes
+			sub.unsubscribe();
+
+			// Complete the task after cancel
+			resolve!("late");
+			await new Promise((r) => setTimeout(r, 10));
+
+			// Value should NOT have been delivered
+			expect(values).toEqual([]);
+			// But the task still completed internally
+			expect(q.completed.get()).toBe(1);
+		});
+
+		it("unsubscribing does not affect other enqueued tasks", async () => {
+			const q = asyncQueue(
+				async (n: number) => {
+					await new Promise((r) => setTimeout(r, 10));
+					return n * 2;
+				},
+				{ concurrency: 2 },
+			);
+
+			const values1: number[] = [];
+			const sub1 = rawSubscribe(q.enqueue(1), (v: number) => values1.push(v));
+			const p2 = toPromise<number>(q.enqueue(2));
+
+			// Cancel first task's subscription
+			sub1.unsubscribe();
+
+			// Second task should still complete
+			const result2 = await p2;
+			expect(result2).toBe(4);
+			expect(values1).toEqual([]); // cancelled
+		});
+	});
+
+	// -----------------------------------------------------------------------
 	// Reactive stores
 	// -----------------------------------------------------------------------
 	describe("reactive stores", () => {
@@ -317,13 +375,13 @@ describe("asyncQueue", () => {
 
 			expect(q.size.get()).toBe(0);
 
-			q.enqueue(1);
+			rawSubscribe(q.enqueue(1), () => {});
 			expect(q.size.get()).toBe(0); // immediately started, not queued
 
-			q.enqueue(2);
+			rawSubscribe(q.enqueue(2), () => {});
 			expect(q.size.get()).toBe(1);
 
-			q.enqueue(3);
+			rawSubscribe(q.enqueue(3), () => {});
 			expect(q.size.get()).toBe(2);
 		});
 
@@ -336,11 +394,11 @@ describe("asyncQueue", () => {
 				{ concurrency: 2 },
 			);
 
-			q.enqueue(1);
-			q.enqueue(2);
+			rawSubscribe(q.enqueue(1), () => {});
+			rawSubscribe(q.enqueue(2), () => {});
 			expect(q.running.get()).toBe(2);
 
-			q.enqueue(3);
+			rawSubscribe(q.enqueue(3), () => {});
 			expect(q.running.get()).toBe(2); // still 2, third is queued
 		});
 
@@ -350,10 +408,10 @@ describe("asyncQueue", () => {
 				return n;
 			});
 
-			await q.enqueue(1); // success
-			await expect(q.enqueue(2)).rejects.toThrow("even");
-			await q.enqueue(3); // success
-			await expect(q.enqueue(4)).rejects.toThrow("even");
+			await toPromise(q.enqueue(1)); // success
+			await expect(toPromise(q.enqueue(2))).rejects.toThrow("even");
+			await toPromise(q.enqueue(3)); // success
+			await expect(toPromise(q.enqueue(4))).rejects.toThrow("even");
 
 			expect(q.completed.get()).toBe(2);
 			expect(q.failed.get()).toBe(2);

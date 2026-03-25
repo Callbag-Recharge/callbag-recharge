@@ -10,14 +10,15 @@
 // Pure utilities — no reactive dependencies.
 // ---------------------------------------------------------------------------
 
-import { firstValueFrom } from "../raw/firstValueFrom";
 import { fromTimer } from "../raw/fromTimer";
+import type { CallbagSource } from "../raw/subscribe";
+import { rawSubscribe } from "../raw/subscribe";
 
 export interface RateLimiter {
 	/** Non-blocking check: try to acquire a token. Returns true if allowed. */
 	tryAcquire(tokens?: number): boolean;
-	/** Blocking acquire: waits if needed, returns ms waited. Pass signal to cancel the wait. */
-	acquire(tokens?: number, signal?: AbortSignal): Promise<number>;
+	/** Acquire tokens: returns a callbag source that emits ms waited then completes. Pass signal to cancel the wait. */
+	acquire(signal?: AbortSignal, tokens?: number): CallbagSource;
 	/** Current available tokens/capacity. */
 	available(): number;
 	/** Reset to full capacity. */
@@ -62,26 +63,70 @@ export function tokenBucket(opts: TokenBucketOptions): RateLimiter {
 			return false;
 		},
 
-		async acquire(tokens = 1, signal?: AbortSignal): Promise<number> {
-			if (tokens > burst)
-				throw new RangeError(`Cannot acquire ${tokens} tokens (burst capacity is ${burst})`);
-			signal?.throwIfAborted();
-			refill();
-			if (_tokens >= tokens) {
-				_tokens -= tokens;
-				return 0;
-			}
-			let totalWait = 0;
-			// Loop: concurrent tryAcquire() calls may consume tokens during our sleep
-			while (_tokens < tokens) {
-				const deficit = tokens - _tokens;
-				const waitMs = (deficit / rate) * 1000;
-				totalWait += waitMs;
-				await sleep(waitMs, signal);
+		acquire(signal?: AbortSignal, tokens = 1): CallbagSource {
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				let done = false;
+				sink(0, (t: number) => {
+					if (t === 2) done = true;
+				});
+
+				if (tokens > burst) {
+					sink(2, new RangeError(`Cannot acquire ${tokens} tokens (burst capacity is ${burst})`));
+					return;
+				}
+				if (signal?.aborted) {
+					sink(2, signal.reason);
+					return;
+				}
+
 				refill();
-			}
-			_tokens -= tokens;
-			return totalWait;
+				if (_tokens >= tokens) {
+					_tokens -= tokens;
+					if (!done) sink(1, 0);
+					if (!done) sink(2);
+					return;
+				}
+
+				let totalWait = 0;
+				function tryAcquireLoop(): void {
+					if (done) return;
+					refill();
+					if (_tokens >= tokens) {
+						_tokens -= tokens;
+						const wasDone = done;
+						done = true;
+						if (!wasDone) {
+							sink(1, totalWait);
+							sink(2);
+						}
+						return;
+					}
+					const deficit = tokens - _tokens;
+					const waitMs = (deficit / rate) * 1000;
+					totalWait += waitMs;
+					rawSubscribe(
+						fromTimer(Math.ceil(waitMs), signal),
+						() => {
+							if (done) return;
+							if (signal?.aborted) {
+								sink(2, signal.reason);
+								return;
+							}
+							tryAcquireLoop();
+						},
+						{
+							onEnd: (err) => {
+								if (err && !done) {
+									done = true;
+									sink(2, err);
+								}
+							},
+						},
+					);
+				}
+				tryAcquireLoop();
+			};
 		},
 
 		available(): number {
@@ -134,31 +179,77 @@ export function slidingWindow(opts: SlidingWindowOptions): RateLimiter {
 			return false;
 		},
 
-		async acquire(tokens = 1, signal?: AbortSignal): Promise<number> {
-			if (tokens > max)
-				throw new RangeError(`Cannot acquire ${tokens} slots (max capacity is ${max})`);
-			signal?.throwIfAborted();
-			prune();
-			if (_timestamps.length + tokens <= max) {
-				const t = now();
-				for (let i = 0; i < tokens; i++) _timestamps.push(t);
-				return 0;
-			}
-			let totalWait = 0;
-			// Loop: concurrent tryAcquire() calls may fill slots during our sleep
-			while (_timestamps.length + tokens > max) {
-				const needed = _timestamps.length + tokens - max;
-				const oldestNeeded = _timestamps[needed - 1];
-				const waitMs = oldestNeeded !== undefined ? oldestNeeded + windowMs - now() : windowMs;
-				if (waitMs > 0) {
-					totalWait += waitMs;
-					await sleep(waitMs, signal);
+		acquire(signal?: AbortSignal, tokens = 1): CallbagSource {
+			return (type: number, sink?: any) => {
+				if (type !== 0) return;
+				let done = false;
+				sink(0, (t: number) => {
+					if (t === 2) done = true;
+				});
+
+				if (tokens > max) {
+					sink(2, new RangeError(`Cannot acquire ${tokens} slots (max capacity is ${max})`));
+					return;
 				}
+				if (signal?.aborted) {
+					sink(2, signal.reason);
+					return;
+				}
+
 				prune();
-			}
-			const t = now();
-			for (let i = 0; i < tokens; i++) _timestamps.push(t);
-			return totalWait;
+				if (_timestamps.length + tokens <= max) {
+					const t = now();
+					for (let i = 0; i < tokens; i++) _timestamps.push(t);
+					if (!done) sink(1, 0);
+					if (!done) sink(2);
+					return;
+				}
+
+				let totalWait = 0;
+				function tryAcquireLoop(): void {
+					if (done) return;
+					prune();
+					if (_timestamps.length + tokens <= max) {
+						const t = now();
+						for (let i = 0; i < tokens; i++) _timestamps.push(t);
+						const wasDone = done;
+						done = true;
+						if (!wasDone) {
+							sink(1, totalWait);
+							sink(2);
+						}
+						return;
+					}
+					const needed = _timestamps.length + tokens - max;
+					const oldestNeeded = _timestamps[needed - 1];
+					const waitMs = oldestNeeded !== undefined ? oldestNeeded + windowMs - now() : windowMs;
+					if (waitMs <= 0) {
+						tryAcquireLoop();
+						return;
+					}
+					totalWait += waitMs;
+					rawSubscribe(
+						fromTimer(Math.ceil(waitMs), signal),
+						() => {
+							if (done) return;
+							if (signal?.aborted) {
+								sink(2, signal.reason);
+								return;
+							}
+							tryAcquireLoop();
+						},
+						{
+							onEnd: (err) => {
+								if (err && !done) {
+									done = true;
+									sink(2, err);
+								}
+							},
+						},
+					);
+				}
+				tryAcquireLoop();
+			};
 		},
 
 		available(): number {
@@ -170,18 +261,4 @@ export function slidingWindow(opts: SlidingWindowOptions): RateLimiter {
 			_timestamps.length = 0;
 		},
 	};
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
-	if (signal?.aborted) {
-		return Promise.reject(signal.reason);
-	}
-	return firstValueFrom(fromTimer(Math.ceil(ms), signal)).then(() => {
-		// fromTimer emits on abort instead of rejecting — restore abort semantics
-		if (signal?.aborted) throw signal.reason;
-	});
 }

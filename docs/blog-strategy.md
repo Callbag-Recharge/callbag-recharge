@@ -15,7 +15,7 @@ Focus on the README and in-repo docs. No external site yet.
 | **llms.txt** — simple machine-readable summary in repo root | P1 | TODO |
 | **docs/** — architecture, API reference (already exist) | P1 | Done |
 | **src/archive/docs/** — recovered historical docs for blog material | P1 | Done |
-| **VitePress blog** — `/blog/` section with sidebar, Arc 1 written | P1 | Done |
+| **VitePress blog** — `/blog/` section with sidebar, Arcs 1–3 written | P1 | Done |
 
 ## Phase 2: Post-Publish (When Users Arrive)
 
@@ -75,13 +75,15 @@ Each "engineering evolution" post follows this pattern:
 
 Source material: `src/archive/docs/architecture-v1.md`; session `47f1a07f` (explicit deps); `SESSION-inspector-hooks-wiring.md` + v1/v3 Inspector sections (WeakMap, hooks, `observe()`).
 
-#### Arc 3: Architecture v2 — The Great Unification
+#### Arc 3: Architecture v2 — The Great Unification ✅ SHIPPED (March 24, 2026)
 
-| # | Title | Source Material |
-|---|-------|----------------|
-| 7 | **Data Should Flow Through the Graph, Not Around It** | `architecture-v2.md` — v1→v2 aha moment |
-| 8 | **Two-Phase Push: DIRTY First, Values Second** | Session 269923a2 — two-phase push implementation |
-| 9 | **From Pull-Phase to Push-Phase Memoization** | Session ce974b95 — memoization debate |
+| # | Title | File | Status |
+|---|-------|------|--------|
+| 7 | **Data Should Flow Through the Graph, Not Around It** | `site/blog/07-data-should-flow-through-the-graph-not-around-it.md` | Done |
+| 8 | **Two-Phase Push: DIRTY First, Values Second** | `site/blog/08-two-phase-push-dirty-first-values-second.md` | Done |
+| 9 | **From Pull-Phase to Push-Phase Memoization** | `site/blog/09-from-pull-phase-to-push-phase-memoization.md` | Done |
+
+Source material: `src/archive/docs/architecture-v2.md`; sessions 269923a2 (two-phase push), ce974b95 (memoization) for implementation context.
 
 #### Arc 4: Architecture v3 — The Type 3 Breakthrough
 

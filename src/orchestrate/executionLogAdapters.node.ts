@@ -5,6 +5,8 @@
 // encountering `node:fs/promises` when tree-shaking the barrel.
 // ---------------------------------------------------------------------------
 
+import { rawFromPromise } from "../raw/fromPromise";
+import type { CallbagSource } from "../raw/subscribe";
 import { asyncQueue } from "../utils/asyncQueue";
 import type { ExecutionEntry, ExecutionLogPersistAdapter } from "./executionLog";
 
@@ -23,7 +25,7 @@ export interface FileLogAdapterOptions {
  * @returns `ExecutionLogPersistAdapter` — append/load/clear backed by the filesystem.
  *
  * @remarks **Node.js only:** Uses `node:fs` for file operations. Not available in browser builds.
- * @remarks **Async:** All operations return Promises.
+ * @remarks **Async:** All operations return callbag sources.
  * @remarks **Format:** Each entry is one JSON line. Append-friendly — no read-modify-write.
  *
  * @example
@@ -59,30 +61,36 @@ export function fileLogAdapter(opts: FileLogAdapterOptions): ExecutionLogPersist
 	);
 
 	return {
-		append(entry: ExecutionEntry): Promise<void> {
-			return writeQueue.enqueue(entry).then(() => {});
+		append(entry: ExecutionEntry): CallbagSource {
+			return writeQueue.enqueue(entry);
 		},
 
-		async load(): Promise<ExecutionEntry[]> {
-			const fs = await import("node:fs/promises");
-			try {
-				const data = await fs.readFile(filePath(), "utf-8");
-				const lines = data.split("\n").filter((line) => line.length > 0);
-				return lines.map((line) => JSON.parse(line) as ExecutionEntry);
-			} catch (err: any) {
-				if (err?.code === "ENOENT") return [];
-				throw err;
-			}
+		load(): CallbagSource {
+			return rawFromPromise(
+				import("node:fs/promises").then(async (fs) => {
+					try {
+						const data = await fs.readFile(filePath(), "utf-8");
+						const lines = data.split("\n").filter((line) => line.length > 0);
+						return lines.map((line) => JSON.parse(line) as ExecutionEntry);
+					} catch (err: any) {
+						if (err?.code === "ENOENT") return [] as ExecutionEntry[];
+						throw err;
+					}
+				}),
+			);
 		},
 
-		async clear(): Promise<void> {
-			const fs = await import("node:fs/promises");
-			try {
-				await fs.unlink(filePath());
-			} catch (err: any) {
-				if (err?.code === "ENOENT") return;
-				throw err;
-			}
+		clear(): CallbagSource {
+			return rawFromPromise(
+				import("node:fs/promises").then(async (fs) => {
+					try {
+						await fs.unlink(filePath());
+					} catch (err: any) {
+						if (err?.code === "ENOENT") return;
+						throw err;
+					}
+				}),
+			);
 		},
 	};
 }
