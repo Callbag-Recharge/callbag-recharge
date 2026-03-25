@@ -51,6 +51,11 @@ const REGISTRY = {
 	fromTimer: "src/raw/fromTimer.ts",
 	fromNodeCallback: "src/raw/fromNodeCallback.ts",
 	latestAsync: "src/raw/latestAsync.ts",
+	rawSkip: "src/raw/skip.ts",
+	rawFromPromise: "src/raw/fromPromise.ts",
+	rawFromAsyncIter: "src/raw/fromAsyncIter.ts",
+	rawFromAny: "src/raw/fromAny.ts",
+	rawRace: "src/raw/race.ts",
 
 	// Extras — operators
 	map: "src/extra/map.ts",
@@ -159,6 +164,9 @@ const REGISTRY = {
 	fromLLM: "src/ai/fromLLM.ts",
 	docIndex: "src/ai/docIndex/index.ts",
 	embeddingIndex: "src/ai/embeddingIndex/index.ts",
+	memoryStore: "src/ai/memoryStore/index.ts",
+	ragPipeline: "src/ai/ragPipeline/index.ts",
+	conversationSummary: "src/ai/conversationSummary/index.ts",
 
 	// Orchestrate — workflow nodes
 	taskState: "src/orchestrate/taskState.ts",

@@ -126,6 +126,22 @@ export default defineConfig({
 					],
 				},
 				{
+					text: "Raw",
+					collapsed: true,
+					items: [
+						{ text: "rawSubscribe()", link: "/api/rawSubscribe" },
+						{ text: "rawSkip()", link: "/api/rawSkip" },
+						{ text: "rawFromPromise()", link: "/api/rawFromPromise" },
+						{ text: "rawFromAsyncIter()", link: "/api/rawFromAsyncIter" },
+						{ text: "rawFromAny()", link: "/api/rawFromAny" },
+						{ text: "rawRace()", link: "/api/rawRace" },
+						{ text: "firstValueFrom()", link: "/api/firstValueFrom" },
+						{ text: "latestAsync()", link: "/api/latestAsync" },
+						{ text: "fromTimer()", link: "/api/fromTimer" },
+						{ text: "fromNodeCallback()", link: "/api/fromNodeCallback" },
+					],
+				},
+				{
 					text: "Extra",
 					collapsed: true,
 					items: [
@@ -366,10 +382,9 @@ export default defineConfig({
 							text: "agentLoop()",
 							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/agentLoop",
 						},
-						{
-							text: "memoryStore()",
-							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/memoryStore",
-						},
+						{ text: "memoryStore()", link: "/api/memoryStore" },
+						{ text: "ragPipeline()", link: "/api/ragPipeline" },
+						{ text: "conversationSummary()", link: "/api/conversationSummary" },
 						{
 							text: "createStore()",
 							link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/patterns/createStore",

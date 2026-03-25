@@ -328,7 +328,7 @@ This format preserves the thinking process, not just conclusions.
 ---
 
 **Created:** March 16, 2026
-**Archive Status:** Complete through OpenClaw/Mem0 analysis update (March 23, 2026)
+**Archive Status:** Complete through callbag-native Promise elimination (March 24, 2026)
 
 ### Gemini Marketing Research (March 21) — Market Positioning & Growth Strategy
 **Topic:** Competitive landscape analysis, agentic AI trends, streaming durability gap, and developer marketing strategy for callbag-recharge
@@ -380,6 +380,26 @@ Research into 8 major pain points with browser worker APIs (no streaming, no can
 **Rejected:** Wrapping WebLLM's worker in our bridge (they already abstract it); SharedArrayBuffer as default (breaks COOP/COEP); sending DIRTY/RESOLVED across wire (doubles traffic); Comlink-style RPC (fights streaming nature).
 
 **Outcome:** Phase 5g (Worker Bridge) added to roadmap. H2 AI Chat updated with three-worker architecture. `workerBridge()`/`workerSelf()` API designed with `WorkerTransport` abstraction for all 4 transport types.
+
+### Session callbag-native-promise-elimination (March 24) — Callbag-Native Promise Elimination
+**Topic:** Full audit of 176 Promise/await usages across 53 files; plan to make every API callbag-in/callbag-out; eliminate internal `firstValueFrom` usage; break pre-1.0 APIs
+
+Comprehensive audit found that while §1.16 ("no raw `new Promise`") was mostly followed, the deeper issue was that internal APIs returned Promises or consumed Promises directly, breaking reactive continuity. Philosophy shift: the library should be callbag-in, callbag-out everywhere. Promise bridges are only for end-users exiting callbag-land.
+
+**Key insights:**
+- **`firstValueFrom` was overused internally.** It bridges callbag→Promise, but most internal consumers don't need Promises — they should stay in callbag-land.
+- **User callbacks should use `rawFromAny`.** Not limited to Promise — accepts sync values, Promises, AsyncIterables, or callbag sources for maximum flexibility.
+- **`rawFromAsyncIter(response.body)` is more direct** than manual reader loops for streaming.
+- **`raw/race` operator** replaces `Promise.race` pattern (timeout racing, poll-vs-timeout). Extra version for Store-level use.
+- **Promise output is a convenience wrapper, not the primary API.** Like `node:fs/promises` to `node:fs` — consider post-1.0 for adoption.
+
+**New raw primitives:** `fromPromise`, `fromAsyncIter`, `fromAny`, `race` — all zero core deps.
+
+**APIs broken:** `rateLimiter.acquire()`, `asyncQueue.enqueue()`, `CheckpointAdapter`, `ExecutionLogPersistAdapter`, `connectionHealth` callbacks, `webhook.listen()`, `sse.listen()` — all switch from Promise to callbag source returns.
+
+**Rejected:** Keep Promise APIs for convenience (breaks reactive continuity); only fix `new Promise` literals (misses deeper issue); add `forkJoin` immediately (wait for recurrence).
+
+**Outcome:** Architecture §1.20 (callbag-native output), CLAUDE.md replacement patterns, roadmap in-progress item. Implementation deferred to next session.
 
 ---
 

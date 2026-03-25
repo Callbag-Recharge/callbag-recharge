@@ -1,6 +1,11 @@
 export { firstValueFrom } from "./firstValueFrom";
+export { rawFromAny } from "./fromAny";
+export { rawFromAsyncIter } from "./fromAsyncIter";
 export { fromNodeCallback } from "./fromNodeCallback";
+export { rawFromPromise } from "./fromPromise";
 export { fromTimer } from "./fromTimer";
 export { latestAsync } from "./latestAsync";
+export { rawRace } from "./race";
+export { rawSkip } from "./skip";
 export type { CallbagSource } from "./subscribe";
 export { rawSubscribe } from "./subscribe";

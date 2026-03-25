@@ -49,8 +49,10 @@ export interface MemoryStoreResult<T> {
 	// --- Cross-tier operations ---
 	/** Promote a memory from session/working to long-term. */
 	promote: (nodeId: string) => boolean;
-	/** Recall top-K memories across all tiers by score. */
+	/** Recall top-K memories across all tiers by score. Touches recalled nodes (updates accessCount/accessedAt). */
 	recall: (k: number, weights?: ScoreWeights) => MemoryNode<T>[];
+	/** Read-only top-K query across all tiers by score. Does NOT touch nodes — safe inside derived computations. */
+	query: (k: number, weights?: ScoreWeights) => MemoryNode<T>[];
 	/** Recall memories by tag across all tiers. */
 	recallByTag: (tag: string) => MemoryNode<T>[];
 	/** Search across all tiers with a filter. */
@@ -78,6 +80,7 @@ export interface MemoryStoreResult<T> {
  * @remarks **Working memory:** Bounded (FIFO eviction). For active context window the agent is currently reasoning about.
  * @remarks **Long-term memory:** Bounded (decay-scored eviction). For persistent knowledge across conversations.
  * @remarks **Promotion:** `promote()` moves a memory from session/working to long-term, preserving metadata.
+ * @remarks **recall vs query:** `recall(k)` returns top-K and calls `touch()` on each (updating `accessCount`/`accessedAt`). `query(k)` returns the same ranking without touching — safe inside `derived` computations where side effects would inflate scores on every recomputation.
  *
  * @example
  * ```ts
@@ -97,9 +100,12 @@ export interface MemoryStoreResult<T> {
  *   importance: 0.9,
  * });
  *
- * // Cross-tier recall
+ * // Cross-tier recall (touches nodes — updates access scores)
  * const relevant = memory.recall(5); // top 5 across all tiers
  * const tagged = memory.recallByTag('architecture');
+ *
+ * // Read-only query (no touch — safe in derived computations)
+ * const top3 = memory.query(3);
  *
  * // New conversation
  * memory.resetSession(); // clears session, keeps working + long-term
@@ -188,6 +194,17 @@ export function memoryStore<T>(opts?: MemoryStoreOptions): MemoryStoreResult<T> 
 		return result;
 	}
 
+	function query(k: number, w?: ScoreWeights): MemoryNode<T>[] {
+		const effectiveWeights = w ?? weights;
+		const all: MemoryNode<T>[] = [
+			..._session.topK(k, effectiveWeights),
+			..._working.topK(k, effectiveWeights),
+			..._longTerm.topK(k, effectiveWeights),
+		];
+		all.sort((a, b) => b.score(effectiveWeights) - a.score(effectiveWeights));
+		return all.slice(0, k);
+	}
+
 	function recallByTag(tag: string): MemoryNode<T>[] {
 		return [..._session.byTag(tag), ..._working.byTag(tag), ..._longTerm.byTag(tag)];
 	}
@@ -226,6 +243,7 @@ export function memoryStore<T>(opts?: MemoryStoreOptions): MemoryStoreResult<T> 
 		longTerm: _longTerm.nodes,
 		promote,
 		recall,
+		query,
 		recallByTag,
 		search,
 		resetSession,

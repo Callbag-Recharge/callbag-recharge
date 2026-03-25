@@ -28,7 +28,22 @@
 
 ## In Progress
 
-(Nothing currently in progress.)
+### Callbag-Native Promise Elimination
+
+> **Goal:** Make every internal API callbag-in/callbag-out. Eliminate all internal `firstValueFrom` usage. Promise bridges exist only for end-users exiting callbag-land (like `node:fs/promises` is to `node:fs`).
+>
+> **Depends on:** Nothing (refactor of existing code).
+>
+> **Design session:** `src/archive/docs/SESSION-callbag-native-promise-elimination.md`
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| ~~P0~~ | ~~New raw primitives~~ | **Shipped** — `rawFromPromise`, `rawFromAsyncIter`, `rawFromAny`, `rawRace` in `raw/`. Pure callbag protocol, zero core deps. `extra/fromPromise`, `extra/fromAsyncIter`, `extra/fromAny` rewritten as thin `producer` wrappers around raw. | — |
+| P1 | Break low-level APIs | `rateLimiter.acquire()`, `asyncQueue.enqueue()`, `CheckpointAdapter`, `ExecutionLogPersistAdapter`, `webhook.listen()`, `sse.listen()` — all return callbag sources instead of Promises | M |
+| P2 | Refactor orchestrate internals | `task`, `sensor`, `loop`, `subPipeline`, `forEach`, `workflowNode`, `jobQueue` — eliminate `await firstValueFrom(...)`, use reactive continuations | L |
+| P3 | Refactor higher layers | `adapters/http`, `adapters/mcp`, `ai/fromLLM`, `ai/docIndex`, `ai/chatStream`, `utils/connectionHealth`, `utils/cancellableAction`, `utils/cancellableStream` — wrap boundary calls with `rawFromPromise`/`rawFromAsyncIter` | L |
+| P4 | Update examples | `form-builder.ts`, streaming examples — use `rawSubscribe(fromTimer(...))` instead of `new Promise`/`await firstValueFrom` | S |
+| P5 | Replacement patterns blog | Document Promise→callbag patterns for internal reference and user education | S |
 
 ---
 
@@ -196,8 +211,8 @@ Moved from their previous locations to `src/ai/`. `ai/index.ts` barrel exports a
 |---|-----------|------|--------|
 | ~~7.1-1~~ | ~~`docIndex`~~ | **Shipped** — FTS5 trigram search over pre-built wa-sqlite DB. `docIndex({ db })` → `{ search(), results, loaded, error, destroy() }`. Wraps wa-sqlite WASM (peer dep, dynamic import). FTS5 phrase matching with double-quote escaping. `teardown()` on destroy. | — |
 | ~~7.1-2~~ | ~~`embeddingIndex`~~ | **Shipped** — In-browser semantic search. Loads embedding model via Transformers.js (peer dep, dynamic import). Pre-computed vectors from binary file. Uses `vectorIndex` (HNSW) from `memory/`. Generation counter prevents stale async results (cancellableAction pattern). `teardown()` on destroy. | — |
-| 7.1-3 | `ragPipeline` | `ragPipeline({ docSearch, semanticSearch?, memory?, systemPrompt })` — wires retrieve→augment→generate. Reactive: re-derives context when any source updates. Merges FTS5 + embedding results, deduplicates, injects into LLM prompt with citations. Composes `docIndex` + `embeddingIndex` + `fromLLM` + `memoryStore`. | M |
-| 7.1-4 | `conversationSummary` | Auto-summarize conversation when token count exceeds threshold. Uses the loaded LLM to compress history into a rolling summary. `conversationSummary({ chat, llm, maxTokens })` → `Store<string>`. Feeds into `ragPipeline` as context. | M |
+| ~~7.1-3~~ | ~~`ragPipeline`~~ | **Shipped** — Reactive RAG: `query: Store<string>` input; `docs` and `context` are `derived` stores that re-compute whenever search results, summary, or memory change. `latestAsync` cancels stale in-flight semantic searches on rapid query changes. `firstValueFrom(rawSkip(1)(results.source), { signal })` waits for embedding result before generating; AbortSignal from `latestAsync` cleans up on superseded queries. Merges + deduplicates FTS5 + semantic results. `destroy()` tears down all subscriptions and derived stores. | — |
+| ~~7.1-4~~ | ~~`conversationSummary`~~ | **Shipped** — Rolling summarizer: monitors `chat.messages`, triggers `llm.generate()` when token count exceeds threshold after an assistant turn. Shared-LLM safe: `status === 'pending'` guard resets `summarizing` flag when RAG aborts an in-flight summary. `ConversationSummaryStore extends Store<string>` with `destroy()`. | — |
 | 7.1-5 | `systemPromptBuilder` | `systemPromptBuilder({ sections: Array<{ name, content: Store<string>, maxTokens? }> })` — reactive derived that assembles final system prompt from multiple sources. Manages token budget allocation across sections (library docs, user memories, search results, rules). | S |
 
 #### 7.1-6: Build-time doc indexing script

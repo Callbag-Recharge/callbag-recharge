@@ -32,5 +32,5 @@ export function firstValueFrom<T>(store: Store<T>, predicate?: (value: T) => boo
 		// Store may error on get() — fall through to subscribe
 	}
 
-	return rawFirstValueFrom<T>(store.source, predicate);
+	return rawFirstValueFrom<T>(store.source, predicate ? { predicate } : undefined);
 }

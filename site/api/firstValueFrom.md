@@ -13,7 +13,7 @@ use this instead of `new Promise`.
 ```ts
 function firstValueFrom<T>(
 	source: CallbagSource,
-	predicate?: (value: T) => boolean,
+	opts?: { predicate?: (value: T) => boolean; signal?: AbortSignal },
 ): Promise<T>
 ```
 
@@ -22,9 +22,15 @@ function firstValueFrom<T>(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `source` | `CallbagSource` | A raw callbag source function. |
-| `predicate` | `(value: T) =&gt; boolean` | Optional filter. If omitted, resolves with the first emission. |
+| `opts` | `{ predicate?: (value: T) =&gt; boolean; signal?: AbortSignal }` | Optional predicate filter and/or AbortSignal for cancellation. |
 
 ## Returns
 
 Promise that resolves with the matching value, or rejects if
-the source completes (END) without a match.
+the source completes (END) without a match or the signal is aborted.
+
+## Options / Behavior Details
+
+- If the source never emits and no `signal` is provided, the returned
+Promise never settles and the subscription is never cleaned up. Always pass
+`signal` when subscribing to potentially non-completing sources.

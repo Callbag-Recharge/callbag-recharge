@@ -44,6 +44,11 @@ export type {
 } from "./chatStream";
 export { chatStream } from "./chatStream";
 export type {
+	ConversationSummaryOptions,
+	ConversationSummaryStore,
+} from "./conversationSummary";
+export { conversationSummary } from "./conversationSummary";
+export type {
 	DocIndexOptions,
 	DocIndexResult,
 	SearchResult,
@@ -73,6 +78,12 @@ export type {
 export { hybridRoute } from "./hybridRoute";
 export type { MemoryStoreOptions, MemoryStoreResult } from "./memoryStore";
 export { memoryStore } from "./memoryStore";
+export type {
+	RagDoc,
+	RagPipelineOptions,
+	RagPipelineResult,
+} from "./ragPipeline";
+export { ragPipeline } from "./ragPipeline";
 export type {
 	ToolCallEntry,
 	ToolCallStateOptions,

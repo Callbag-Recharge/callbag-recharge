@@ -1,6 +1,6 @@
 # fromPromise()
 
-Emits the promise’s resolved value once then completes; rejections become stream errors (Tier 2).
+Emits the promise's resolved value once then completes; rejections become stream errors (Tier 2).
 
 ## Signature
 

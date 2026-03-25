@@ -42,7 +42,7 @@ describe("debug ordering", () => {
 			() => {
 				const err = d.error.get();
 				const loaded = d.loaded.get();
-				if (err) throw new Error("Load error: " + String(err));
+				if (err) throw new Error(`Load error: ${String(err)}`);
 				expect(loaded).toBe(true);
 			},
 			{ timeout: 2000 },
@@ -65,7 +65,7 @@ describe("debug ordering", () => {
 			() => {
 				const err = d2.error.get();
 				const loaded = d2.loaded.get();
-				if (err) throw new Error("Load error: " + String(err));
+				if (err) throw new Error(`Load error: ${String(err)}`);
 				expect(loaded).toBe(true);
 			},
 			{ timeout: 2000 },

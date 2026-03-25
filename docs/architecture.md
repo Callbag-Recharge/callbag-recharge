@@ -44,6 +44,8 @@
 
 19. **Prefer `subscribe` over `effect` for single-dep data sinks.** `effect` carries the full two-phase DIRTY/RESOLVED protocol overhead: it waits for all dirty deps to resolve before running, performs an eager first run, and expects a cleanup return value. Use `effect` when you need: (a) multi-dep diamond resolution, (b) the DIRTY/RESOLVED guarantee (run only after all deps settle), or (c) a cleanup return. Use `subscribe` when you only need to react to value changes from a single store with no diamond risk — `subscribe` is a lightweight callbag DATA sink with no protocol overhead. Example: `reactiveScored`'s per-key heap update and `collection`'s per-node tag tracking both use `subscribe` — each watches exactly one store, has no cleanup, and needs no diamond guarantee. Replacing `effect` with `subscribe` in these cases yielded a 58x speedup on the eviction hot path.
 
+20. **Callbag-native output — no internal Promise APIs.** Every internal API returns callbag sources, not Promises. System boundary calls (`fetch`, `fs.*`, `reader.read()`, IDB requests) are wrapped into callbag sources immediately via `raw/fromPromise` or `raw/fromAsyncIter`. User-provided async callbacks are wrapped with `raw/fromAny` (accepts sync, Promise, AsyncIterable, or callbag — maximum flexibility). `firstValueFrom` (`raw/`) remains the ONE bridge from callbag to Promise but is **never used internally** — it exists only for end-users who need to exit callbag-land. Think of Promise output like `node:fs/promises` — a convenience wrapper over the native API, not the primary interface. A Promise-returning convenience layer may be added post-1.0 for adoption, but the library's internal and primary APIs are callbag-native.
+
 ---
 
 ## 2. Folder & Dependency Hierarchy
@@ -56,7 +58,7 @@
 ```
 src/
 ├── core/            ← foundation: 6 primitives + protocol + inspector + pipe + types + bitmask
-├── raw/             ← pure callbag primitives (rawSubscribe, fromTimer, firstValueFrom) — no core deps, foundation layer
+├── raw/             ← pure callbag primitives (rawSubscribe, rawSkip, fromTimer, firstValueFrom, latestAsync, rawFromPromise, rawFromAsyncIter, rawFromAny, rawRace) — no core deps, foundation layer
 ├── extra/           ← operators, sources, sinks (tier 1 + tier 2)
 ├── utils/           ← resilience, async, tracking, strategies (withStatus, withBreaker, retry, backoff, …)
 ├── data/            ← reactive data structures (reactiveMap, reactiveLog, reactiveIndex, reactiveList, pubsub)
@@ -95,7 +97,7 @@ Tier 5 (ai)           ai/
 
 `data/` is a **cross-cutting layer** — importable from any tier (core excluded).
 
-`raw/` is the **foundation layer** — pure callbag protocol with zero core dependencies. Contains `rawSubscribe` (callbag sink), `fromTimer` (callbag source from setTimeout), and `firstValueFrom` (callbag → Promise bridge, the ONE place `new Promise` is allowed). `raw/` never imports from `core/` or any other folder. Importable from any tier.
+`raw/` is the **foundation layer** — pure callbag protocol with zero core dependencies. Contains `rawSubscribe` (callbag sink), `rawSkip` (callbag operator — skip N emissions), `fromTimer` (callbag source from setTimeout), `firstValueFrom` (callbag → Promise bridge with AbortSignal support, the ONE place `new Promise` is allowed), `latestAsync` (stale-result guard with per-call AbortSignal), `rawFromPromise` (Promise → callbag source), `rawFromAsyncIter` (AsyncIterable → callbag source), `rawFromAny` (universal normalizer: Promise/AsyncIterable/Iterable/plain value → callbag source), and `rawRace` (first-to-emit wins). `raw/` never imports from `core/` or any other folder. Importable from any tier. `extra/fromPromise`, `extra/fromAsyncIter`, and `extra/fromAny` are thin `producer` wrappers around their raw counterparts.
 
 ### Strict import rules (the canonical reference)
 

@@ -37,9 +37,28 @@ callbag-recharge is a reactive state management library where **every store is a
 - **Control flows through the graph, not around it** (architecture.md §1.15). Lifecycle events (reset, cancel, pause) must propagate as TYPE 3 STATE signals — never as imperative method calls that bypass the graph topology. AbortSignal bridges STATE to imperative async but is not the primary mechanism. Litmus test: if a new node needs registering in a flat list for lifecycle management, the design is wrong.
 - **Signal-first for orchestrate**: When implementing any orchestrate node (`task`, `forEach`, `sensor`, etc.), the `signal: AbortSignal` is always the first parameter to user callbacks. Values follow as array (for deps) or positional args (for fixed-arity callbacks).
 - **No raw `new Promise`** (architecture.md §1.16). Use callbag primitives (`fromTimer`, `producer`) and `firstValueFrom` (the ONE bridge in `raw/`) instead of hand-rolling Promises. `src/raw/` is the foundation layer — pure callbag protocol with zero core dependencies. Dependency hierarchy: `raw/` → `core/` → `extra/` → `utils/` → higher layers. `raw/` is importable from any folder.
-- **Push/pull via callbag, never poll** (architecture.md §1.17). Wait for conditions via reactive stores + `firstValueFrom`, not `setInterval` loops.
+- **Push/pull via callbag, never poll** (architecture.md §1.17). Wait for conditions via reactive stores + `subscribe`, not `setInterval` loops.
+- **Callbag-native output — no internal Promise APIs** (architecture.md §1.20). Every internal API returns callbag sources, not Promises. Wrap system boundary calls with `raw/fromPromise` or `raw/fromAsyncIter`. Wrap user callbacks with `raw/fromAny` (accepts sync, Promise, AsyncIterable, or callbag). `firstValueFrom` exists only for end-users exiting callbag-land — never used internally. Promise-returning convenience layer deferred post-1.0.
 - **No `queueMicrotask`/`setTimeout` for reactive coordination** (architecture.md §1.18). Use `effect` or `derived` to chain reactive updates — never `queueMicrotask`, `setTimeout`, or `Promise.resolve().then()`. Microtask scheduling breaks glitch-free guarantees. Timer usage only at true system boundaries (e.g. `fromTimer` for demo latency).
 - **Prefer `subscribe` over `effect` for single-dep data sinks** (architecture.md §1.19). Use `subscribe` when: single store dep, no diamond risk, no cleanup return, just react to value changes. Use `effect` for multi-dep diamond resolution or when DIRTY/RESOLVED guarantee is needed. `subscribe` has no DIRTY/RESOLVED overhead — measured 58x faster on the eviction hot path.
+
+## Promise → callbag replacement patterns
+
+| Promise pattern | Callbag replacement |
+|----------------|---------------------|
+| `new Promise((r) => setTimeout(r, ms))` | `fromTimer(ms)` |
+| `await somePromise` | `rawSubscribe(rawFromPromise(somePromise), cb)` |
+| `Promise.race([a, b])` | `race(rawFromPromise(a), rawFromPromise(b))` (raw/race) |
+| `Promise.all([a, b])` | Subscribe both `rawFromPromise` sources, collect, emit when all done |
+| `Promise.resolve(x).then(f)` | `rawFromAny(x)` → pipe/map |
+| `for await (x of iter)` | `rawFromAsyncIter(iter)` → `rawSubscribe` |
+| `await userCallback(args)` | `rawFromAny(userCallback(args))` → `rawSubscribe` |
+| `setInterval(fn, ms)` | `interval(ms)` (extra/) |
+| `setTimeout(fn, ms)` | `rawSubscribe(fromTimer(ms), fn)` |
+| `await fetch(url)` | `rawFromPromise(fetch(url))` → subscribe |
+| `await reader.read()` loop | `rawFromAsyncIter(response.body)` |
+
+Full design session: `src/archive/docs/SESSION-callbag-native-promise-elimination.md`
 
 ## Examples & docs (single source of truth)
 

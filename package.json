@@ -128,6 +128,26 @@
 				"default": "./dist/ai/embeddingIndex/index.cjs"
 			}
 		},
+		"./ai/ragPipeline": {
+			"import": {
+				"types": "./dist/ai/ragPipeline/index.d.ts",
+				"default": "./dist/ai/ragPipeline/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/ragPipeline/index.d.cts",
+				"default": "./dist/ai/ragPipeline/index.cjs"
+			}
+		},
+		"./ai/conversationSummary": {
+			"import": {
+				"types": "./dist/ai/conversationSummary/index.d.ts",
+				"default": "./dist/ai/conversationSummary/index.js"
+			},
+			"require": {
+				"types": "./dist/ai/conversationSummary/index.d.cts",
+				"default": "./dist/ai/conversationSummary/index.cjs"
+			}
+		},
 		"./patterns/rateLimiter": {
 			"import": {
 				"types": "./dist/patterns/rateLimiter/index.d.ts",

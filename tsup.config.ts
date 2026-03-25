@@ -87,6 +87,8 @@ export default defineConfig({
 		"src/ai/fromLLM.ts",
 		"src/ai/docIndex/index.ts",
 		"src/ai/embeddingIndex/index.ts",
+		"src/ai/ragPipeline/index.ts",
+		"src/ai/conversationSummary/index.ts",
 	],
 	external: ["@aspect-build/wa-sqlite", "@huggingface/transformers"],
 	format: ["esm", "cjs"],

@@ -1,6 +1,8 @@
 import { Inspector } from "../core/inspector";
 import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
+import { rawFromAsyncIter } from "../raw/fromAsyncIter";
+import { rawSubscribe } from "../raw/subscribe";
 
 /**
  * Pulls async values from an `AsyncIterable` or `() => AsyncIterable` (factory for retry/repeat) (Tier 2).
@@ -18,42 +20,10 @@ export function fromAsyncIter<T>(
 ): ProducerStore<T> {
 	const store = producer<T>(
 		({ emit, complete, error }) => {
-			const controller = new AbortController();
-			const signal = controller.signal;
-			let done = false;
-
-			const iterable =
-				typeof iterableOrFactory === "function" ? iterableOrFactory() : iterableOrFactory;
-
-			const iterator = iterable[Symbol.asyncIterator]();
-
-			async function pull() {
-				try {
-					while (!done && !signal.aborted) {
-						const result = await iterator.next();
-						if (done || signal.aborted) break;
-						if (result.done) {
-							complete();
-							return;
-						}
-						emit(result.value);
-					}
-				} catch (err) {
-					if (!done && !signal.aborted) {
-						error(err);
-					}
-				}
-			}
-
-			pull();
-
-			return () => {
-				done = true;
-				controller.abort();
-				// Best-effort cleanup: call iterator.return() if available.
-				// Catch rejected promise to prevent unhandled rejection.
-				Promise.resolve(iterator.return?.()).catch(() => {});
-			};
+			const sub = rawSubscribe(rawFromAsyncIter(iterableOrFactory), (value) => emit(value as T), {
+				onEnd: (err) => (err !== undefined ? error(err) : complete()),
+			});
+			return () => sub.unsubscribe();
 		},
 		{ resubscribable: true },
 	);

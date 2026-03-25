@@ -1,5 +1,7 @@
 import { producer } from "../core/producer";
 import type { ProducerStore } from "../core/types";
+import { rawFromAny } from "../raw/fromAny";
+import { rawSubscribe } from "../raw/subscribe";
 
 interface Observable<T> {
 	subscribe(observer: {
@@ -9,20 +11,8 @@ interface Observable<T> {
 	}): { unsubscribe: () => void };
 }
 
-function isPromiseLike(x: unknown): x is PromiseLike<unknown> {
-	return x != null && typeof (x as any).then === "function";
-}
-
 function isObservable<T>(x: unknown): x is Observable<T> {
 	return x != null && typeof (x as any).subscribe === "function";
-}
-
-function isAsyncIterable<T>(x: unknown): x is AsyncIterable<T> {
-	return x != null && typeof (x as any)[Symbol.asyncIterator] === "function";
-}
-
-function isIterable<T>(x: unknown): x is Iterable<T> {
-	return x != null && typeof (x as any)[Symbol.iterator] === "function";
 }
 
 /**
@@ -55,28 +45,7 @@ function isIterable<T>(x: unknown): x is Iterable<T> {
 export function fromAny<T>(
 	input: T | Promise<T> | Iterable<T> | AsyncIterable<T>,
 ): ProducerStore<T> {
-	// 1. Promise
-	if (isPromiseLike(input)) {
-		return producer<T>(({ emit, complete, error }) => {
-			let cancelled = false;
-			(input as PromiseLike<T>).then(
-				(value) => {
-					if (!cancelled) {
-						emit(value);
-						complete();
-					}
-				},
-				(reason) => {
-					if (!cancelled) error(reason);
-				},
-			);
-			return () => {
-				cancelled = true;
-			};
-		});
-	}
-
-	// 2. Observable
+	// Observable — extra-only (raw/ doesn't support Observable)
 	if (isObservable<T>(input)) {
 		return producer<T>(({ emit, complete, error }) => {
 			let cancelled = false;
@@ -98,59 +67,14 @@ export function fromAny<T>(
 		});
 	}
 
-	// 3. AsyncIterable
-	if (isAsyncIterable<T>(input)) {
-		return producer<T>(
-			({ emit, complete, error }) => {
-				const controller = new AbortController();
-				const signal = controller.signal;
-				let done = false;
-
-				const iterator = (input as AsyncIterable<T>)[Symbol.asyncIterator]();
-
-				async function pull() {
-					try {
-						while (!done && !signal.aborted) {
-							const result = await iterator.next();
-							if (done || signal.aborted) break;
-							if (result.done) {
-								complete();
-								return;
-							}
-							emit(result.value);
-						}
-					} catch (err) {
-						if (!done && !signal.aborted) error(err);
-					}
-				}
-
-				pull();
-
-				return () => {
-					done = true;
-					controller.abort();
-					Promise.resolve(iterator.return?.()).catch(() => {});
-				};
-			},
-			{ resubscribable: true },
-		);
-	}
-
-	// 4. Iterable (exclude strings — treat as plain value)
-	if (typeof input !== "string" && isIterable<T>(input)) {
-		return producer<T>(({ emit, complete }) => {
-			for (const value of input as Iterable<T>) {
-				emit(value);
-			}
-			complete();
-			return undefined;
-		});
-	}
-
-	// 5. Plain value
-	return producer<T>(({ emit, complete }) => {
-		emit(input as T);
-		complete();
-		return undefined;
-	});
+	// Everything else delegates to rawFromAny → producer wrapper
+	return producer<T>(
+		({ emit, complete, error }) => {
+			const sub = rawSubscribe(rawFromAny(input), (value) => emit(value as T), {
+				onEnd: (err) => (err !== undefined ? error(err) : complete()),
+			});
+			return () => sub.unsubscribe();
+		},
+		{ resubscribable: true },
+	);
 }

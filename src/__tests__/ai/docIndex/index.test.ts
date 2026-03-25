@@ -20,6 +20,9 @@ function mockFetchFail(status = 404): typeof globalThis.fetch {
 	return vi.fn().mockResolvedValue(new Response(null, { status, statusText: "Not Found" })) as any;
 }
 
+/** SQLite exec callback shape used by mocks */
+type SqliteExecCallback = (rows: unknown[], columns: string[]) => void;
+
 let currentDocs: ReturnType<typeof docIndex> | null = null;
 
 beforeEach(() => {
@@ -61,7 +64,7 @@ describe("docIndex", () => {
 	});
 
 	it("search() updates results store", async () => {
-		mockExec.mockImplementation((_db: number, _sql: string, callback?: Function) => {
+		mockExec.mockImplementation((_db: number, _sql: string, callback?: SqliteExecCallback) => {
 			if (callback) {
 				const columns = ["id", "title", "excerpt", "rank", "source", "tags"];
 				callback(
@@ -130,7 +133,7 @@ describe("docIndex", () => {
 	});
 
 	it("results store is reactive via subscribe", async () => {
-		mockExec.mockImplementation((_db: number, _sql: string, callback?: Function) => {
+		mockExec.mockImplementation((_db: number, _sql: string, callback?: SqliteExecCallback) => {
 			if (callback) {
 				callback(
 					["doc-1", "Title", "Excerpt", -1, "src", ""],
@@ -177,7 +180,7 @@ describe("docIndex", () => {
 	});
 
 	it("respects custom limit option", async () => {
-		mockExec.mockImplementation((_db: number, sql: string, _callback?: Function) => {
+		mockExec.mockImplementation((_db: number, sql: string, _callback?: SqliteExecCallback) => {
 			expect(sql).toContain("LIMIT 5");
 			return 0;
 		});
@@ -189,7 +192,7 @@ describe("docIndex", () => {
 	});
 
 	it("escapes double quotes in query for FTS5 phrase matching", async () => {
-		mockExec.mockImplementation((_db: number, sql: string, _callback?: Function) => {
+		mockExec.mockImplementation((_db: number, sql: string, _callback?: SqliteExecCallback) => {
 			// Query wrapped in double-quotes for FTS5 phrase matching
 			// Internal double-quotes escaped as ""
 			expect(sql).toContain('say ""hello""');
@@ -203,7 +206,7 @@ describe("docIndex", () => {
 	});
 
 	it("parses tags from comma-separated string", async () => {
-		mockExec.mockImplementation((_db: number, _sql: string, callback?: Function) => {
+		mockExec.mockImplementation((_db: number, _sql: string, callback?: SqliteExecCallback) => {
 			if (callback) {
 				callback(
 					["id", "Title", "Exc", -1, "src", "a, b, c"],
@@ -221,7 +224,7 @@ describe("docIndex", () => {
 	});
 
 	it("handles empty tags gracefully", async () => {
-		mockExec.mockImplementation((_db: number, _sql: string, callback?: Function) => {
+		mockExec.mockImplementation((_db: number, _sql: string, callback?: SqliteExecCallback) => {
 			if (callback) {
 				callback(
 					["id", "Title", "Exc", -1, "src", ""],
