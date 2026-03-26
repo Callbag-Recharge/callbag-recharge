@@ -83,10 +83,11 @@ describe("RESET signal", () => {
 		a.set(2); // emits 4
 		expect(values).toEqual([4]);
 
-		// RESET re-inits the handler — skipCount resets to 0
+		// RESET re-inits the handler — skipCount resets to 0.
+		// RESET is purely lifecycle — no re-emission from state.
 		sub.signal(RESET);
-		a.set(3); // skipped again (fresh skipCount)
-		a.set(4); // emits 8
+		a.set(3); // skipped again (fresh skipCount < 1)
+		a.set(4); // emits 8 (4*2=8)
 		expect(values).toEqual([4, 8]);
 
 		sub.unsubscribe();
@@ -105,22 +106,32 @@ describe("RESET signal", () => {
 		sub.unsubscribe();
 	});
 
-	it("effect re-runs after RESET from deps", () => {
+	it("effect cleanup runs on RESET but fn does not re-run", () => {
 		const a = state(1);
 		let runCount = 0;
+		let cleanupCount = 0;
 		const dispose = effect([a], () => {
 			runCount++;
-			return undefined;
+			return () => {
+				cleanupCount++;
+			};
 		});
 
 		expect(runCount).toBe(1); // initial run
+		expect(cleanupCount).toBe(0);
 
 		a.set(2);
 		expect(runCount).toBe(2);
+		expect(cleanupCount).toBe(1); // cleanup from first run
 
-		// Send RESET through effect's signal method
+		// RESET is purely lifecycle — cleanup runs, fn does not
 		(dispose as any).signal(RESET);
-		expect(runCount).toBe(3); // re-ran after RESET
+		expect(runCount).toBe(2); // unchanged — no re-run
+		expect(cleanupCount).toBe(2); // cleanup from second run
+
+		// User explicitly triggers re-run by pushing new data
+		a.set(42);
+		expect(runCount).toBe(3);
 
 		dispose();
 	});
@@ -288,6 +299,113 @@ describe("lifecycle signals in diamond topology", () => {
 
 		// a should be reset (initial is undefined for state(1))
 		// d's cache is cleared
+		sub.unsubscribe();
+	});
+});
+
+// ---------------------------------------------------------------------------
+// RESET correctness regressions (optimizations.md #7, #8)
+// ---------------------------------------------------------------------------
+
+describe("RESET correctness", () => {
+	it("#7: effect responds to dep changes AFTER external RESET (multi-dep)", () => {
+		const a = state(1);
+		const b = state(10);
+		let runCount = 0;
+		const dispose = effect([a, b], () => {
+			runCount++;
+			return undefined;
+		});
+
+		expect(runCount).toBe(1); // initial run
+
+		a.set(2);
+		expect(runCount).toBe(2);
+
+		// External RESET — purely lifecycle, no run
+		(dispose as any).signal(RESET);
+		expect(runCount).toBe(2); // unchanged — no auto-run
+
+		// CRITICAL: effect must still respond to changes after RESET
+		a.set(5);
+		expect(runCount).toBe(3); // was permanently deaf before sinkGens fix
+
+		b.set(20);
+		expect(runCount).toBe(4); // both deps must work
+
+		dispose();
+	});
+
+	it("#7: single-dep effect responds to changes after external RESET", () => {
+		const a = state(1);
+		let runCount = 0;
+		const dispose = effect([a], () => {
+			runCount++;
+			return undefined;
+		});
+
+		expect(runCount).toBe(1); // initial run
+
+		a.set(5);
+		expect(runCount).toBe(2);
+
+		// External RESET — no auto-run
+		(dispose as any).signal(RESET);
+		expect(runCount).toBe(2); // unchanged
+
+		// CRITICAL: effect must still respond after RESET
+		a.set(99);
+		expect(runCount).toBe(3);
+
+		a.set(42);
+		expect(runCount).toBe(4);
+
+		dispose();
+	});
+
+	it("RESET clears state value without re-emitting", () => {
+		const a = state(42);
+		const values: number[] = [];
+		const sub = subscribe(a, (v) => values.push(v));
+
+		a.set(100);
+		expect(values).toEqual([100]);
+
+		// RESET is purely lifecycle — resets _value but no emission
+		sub.signal(RESET);
+		expect(a.get()).toBe(42); // value reset
+		expect(values).toEqual([100]); // no new emission
+
+		// User re-triggers explicitly
+		a.set(42); // same as initial, but equality guard sees undefined→42 transition? No — _value is already 42 from RESET. Object.is(42, 42) → suppressed.
+		expect(values).toEqual([100]);
+
+		a.set(99); // different value → emits
+		expect(values).toEqual([100, 99]);
+
+		sub.unsubscribe();
+	});
+
+	it("derived chain works after upstream state RESET", () => {
+		const a = state(1);
+		const b = derived([a], () => a.get() * 10);
+
+		const values: number[] = [];
+		const sub = subscribe(b, (v) => values.push(v));
+
+		a.set(5);
+		expect(values).toEqual([50]);
+
+		sub.signal(RESET);
+
+		// a resets to 1, but no re-emission — derived doesn't recompute yet
+		expect(a.get()).toBe(1);
+		expect(values).toEqual([50]); // no new emission from RESET
+
+		// User pushes new data → derived recomputes
+		a.set(3);
+		expect(values).toEqual([50, 30]);
+
 		sub.unsubscribe();
 	});
 });

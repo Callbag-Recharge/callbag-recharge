@@ -22,14 +22,15 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 				let activeTalkback: ((type: number, data?: any) => void) | null = null;
 				let initialized = false;
 
-				function connectSource(source: Store<A>) {
+				function connectSource(source: Store<A>, skipEmit?: boolean) {
 					if (activeTalkback) {
 						activeTalkback(END);
 						activeTalkback = null;
 					}
 					const initial = source.get();
 					// Skip emit on first connect — producer's { initial } already has the value.
-					if (initialized && initial !== undefined) emit(initial as A);
+					// Also skip on RESET — purely lifecycle, no re-emission.
+					if (initialized && !skipEmit && initial !== undefined) emit(initial as A);
 					initialized = true;
 					source.source(START, (type: number, data: unknown) => {
 						if (type === START) activeTalkback = data as (type: number, data?: any) => void;
@@ -48,11 +49,15 @@ export function rescue<A>(fn: (error: unknown) => Store<A>): StoreOperator<A, A>
 				connectSource(input);
 
 				onSignal((s: LifecycleSignal) => {
-					if (activeTalkback) activeTalkback(STATE, s);
 					if (s === RESET) {
-						// Reset to original source
-						connectSource(input);
+						// Reconnect to original source (clear fallback state).
+						// RESET is purely lifecycle — no emission.
+						connectSource(input, true);
+						// Forward RESET to the original source after reconnect.
+						if (activeTalkback) activeTalkback(STATE, s);
+						return;
 					}
+					if (activeTalkback) activeTalkback(STATE, s);
 				});
 
 				return () => {

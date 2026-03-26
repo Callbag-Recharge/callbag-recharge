@@ -306,7 +306,7 @@ Flow **upstream** via `talkback(STATE, signal)`. PAUSE/RESUME also propagate **d
 
 | Signal | Behavior |
 |--------|----------|
-| RESET | Reset `_value` to initial, re-init operator handler (generation counter invalidates stale closures), clear derived cache, re-run effect |
+| RESET | Reset `_value` to initial (no re-emission), re-init operator handler (generation counter invalidates stale closures), clear derived cache, run effect cleanup (no auto re-run). Purely lifecycle — user re-triggers explicitly. |
 | PAUSE | Forward upstream; tier 2 extras handle locally (pause timers, polling) |
 | RESUME | Forward upstream; resume paused activity |
 | TEARDOWN | Handle cleanup, then `complete()` — cascades END downstream |

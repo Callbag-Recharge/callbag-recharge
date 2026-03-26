@@ -28,6 +28,44 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
+// Batch drain exception safety (optimizations.md #9)
+// ---------------------------------------------------------------------------
+
+describe("batch drain exception safety", () => {
+	it("#9: batch() works after a drain callback throws", () => {
+		const a = state(0);
+		const values: number[] = [];
+		const sub = subscribe(a, (v) => values.push(v));
+
+		// Create a scenario where a drain callback throws
+		const throwOnce = state(0);
+		let shouldThrow = true;
+		const throwSub = subscribe(throwOnce, (v) => {
+			if (shouldThrow && v === 999) throw new Error("drain boom");
+		});
+
+		// First batch — drain will throw
+		expect(() => {
+			batch(() => {
+				throwOnce.set(999);
+			});
+		}).toThrow("drain boom");
+
+		shouldThrow = false;
+
+		// Second batch — must still work (draining flag must have been reset)
+		batch(() => {
+			a.set(42);
+		});
+
+		expect(values).toContain(42);
+
+		sub.unsubscribe();
+		throwSub.unsubscribe();
+	});
+});
+
+// ---------------------------------------------------------------------------
 // Type 3 STATE protocol
 // ---------------------------------------------------------------------------
 

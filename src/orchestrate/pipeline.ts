@@ -808,6 +808,8 @@ export function pipeline<S extends Record<string, StepDef>>(
 			avgLatencies.clear();
 			// Signal cascades through graph — each step handles its own RESET
 			// (task() intercepts RESET and calls ts.reset(), etc.)
+			// RESET is purely lifecycle — sources don't re-emit, so no risk of
+			// step tracking subscribers firing and clobbering the cleared metas.
 			for (const sub of stepSubs) {
 				sub.signal(RESET);
 			}

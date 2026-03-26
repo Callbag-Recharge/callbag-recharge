@@ -158,6 +158,8 @@ export class ProducerImpl<T> {
 					this._dispatch(STATE, DIRTY);
 				}
 				deferEmission(() => {
+					// Skip if P_PENDING was already cleared (e.g., by RESET).
+					if (!(this._flags & P_PENDING)) return;
 					this._flags &= ~P_PENDING;
 					this._flags = (this._flags & ~_STATUS_MASK) | _S_SETTLED;
 					this._dispatch(DATA, this._value);
@@ -268,11 +270,8 @@ export class ProducerImpl<T> {
 		// Delegate to factory's onSignal handler (RESET, PAUSE, RESUME)
 		this._onLifecycleSignal?.(s);
 
-		if (s === RESET) {
-			// Emit initial value after reset so downstream graph sees the new state
-			// (triggers DIRTY+DATA cycle for graph consistency)
-			this.emit(this._initial as T);
-		}
+		// RESET is purely lifecycle — no emit. The user decides when to
+		// re-trigger by pushing new values into the graph.
 	}
 
 	source(type: number, payload?: any): void {

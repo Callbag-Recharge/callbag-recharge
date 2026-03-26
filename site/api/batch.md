@@ -36,7 +36,7 @@ sum.get(); // 30
 
 ## Options / Behavior Details
 
-- **Nesting:** Inner batches increment depth; only the outermost `finally` drains deferred emissions.
+- **Nesting:** Inner batches increment depth; only the outermost batch drains deferred emissions.
 - **Derived/effects:** Downstream nodes typically see one settled value per batch boundary.
 
 ## See Also

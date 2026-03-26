@@ -97,11 +97,11 @@ let batchDepth = 0;
 const deferredEmissions: Array<() => void> = [];
 
 // `draining` prevents re-entrant drain when a nested batch() call ends while
-// the outer drain loop is already running. Without it, the inner batch's
-// finally block would see batchDepth===0 and start a second drain, racing the
-// outer loop — potentially double-processing items or clearing the array mid-
-// iteration. With draining=true, the inner batch skips its drain; any items it
-// pushes are picked up by the outer loop (the `for` condition re-evaluates
+// the outer drain loop is already running. Without it, the inner batch would
+// see batchDepth===0 and start a second drain, racing the outer loop —
+// potentially double-processing items or clearing the array mid-iteration.
+// With draining=true, the inner batch skips its drain; any items it pushes are
+// picked up by the outer loop (the `for` condition re-evaluates
 // `deferredEmissions.length` on every iteration, so appends during drain are
 // naturally included in the same pass).
 let draining = false;
@@ -114,7 +114,7 @@ let draining = false;
  *
  * @returns The return value of `fn`.
  *
- * @remarks **Nesting:** Inner batches increment depth; only the outermost `finally` drains deferred emissions.
+ * @remarks **Nesting:** Inner batches increment depth; only the outermost batch drains deferred emissions.
  * @remarks **Derived/effects:** Downstream nodes typically see one settled value per batch boundary.
  *
  * @example
@@ -135,19 +135,35 @@ let draining = false;
  */
 export function batch<T>(fn: () => T): T {
 	batchDepth++;
+	let result: T;
+	let fnError: unknown;
+	let hasFnError = false;
 	try {
-		return fn();
-	} finally {
-		batchDepth--;
-		if (batchDepth === 0 && !draining) {
-			draining = true;
+		result = fn();
+	} catch (e) {
+		fnError = e;
+		hasFnError = true;
+	}
+	batchDepth--;
+	let drainError: unknown;
+	if (batchDepth === 0 && !draining) {
+		draining = true;
+		try {
 			for (let i = 0; i < deferredEmissions.length; i++) {
-				deferredEmissions[i]();
+				try {
+					deferredEmissions[i]();
+				} catch (e) {
+					drainError ??= e;
+				}
 			}
+		} finally {
 			deferredEmissions.length = 0;
 			draining = false;
 		}
 	}
+	if (hasFnError) throw fnError;
+	if (drainError) throw drainError;
+	return result!;
 }
 
 export function isBatching(): boolean {

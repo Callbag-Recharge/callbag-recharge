@@ -368,6 +368,14 @@ export class DerivedImpl<T> {
 	 */
 	get(): T {
 		if (this._flags & D_CONNECTED) {
+			// After RESET, D_HAS_CACHED is cleared. Pull-compute on demand
+			// so get() reflects reset dep values rather than stale cache.
+			if (!(this._flags & D_HAS_CACHED)) {
+				const result = this._fn();
+				this._cachedValue = result;
+				this._flags |= D_HAS_CACHED;
+				return result;
+			}
 			return this._cachedValue as T;
 		}
 		if (this._flags & D_COMPLETED) {

@@ -81,6 +81,10 @@ export function effect(
 	}
 
 	let generation = 0;
+	// Shared array — each dep closure reads sinkGens[depIndex] instead of a
+	// closure-local variable. On RESET, all entries are updated so no dep
+	// becomes deaf to post-RESET signals (see optimizations.md #7).
+	const sinkGens: number[] = [];
 
 	function handleLifecycleSignal(s: LifecycleSignal): void {
 		if (disposed) return;
@@ -91,9 +95,13 @@ export function effect(
 			// Clear talkbacks after TEARDOWN loop — skip separate END sends
 			// since TEARDOWN already signals terminal intent upstream
 			talkbacks.length = 0;
+			sinkGens.length = 0;
 			disposed = true;
-			if (cleanup) cleanup();
-			cleanup = undefined;
+			try {
+				if (cleanup) cleanup();
+			} finally {
+				cleanup = undefined;
+			}
 			return;
 		}
 
@@ -101,10 +109,20 @@ export function effect(
 			// Increment generation to discard pre-RESET DATA signals
 			// that may arrive from deps still in their DIRTY cycle
 			generation++;
-			// Reset dirty tracking, run cleanup + re-execute
 			dirtyDeps.reset();
 			anyDataReceived = false;
-			run();
+			// Update ALL sinkGens so every dep closure accepts post-RESET signals.
+			// Without this, only the dep that received the lifecycle signal would
+			// update — all other deps remain stale and reject future DATA.
+			for (let i = 0; i < sinkGens.length; i++) sinkGens[i] = generation;
+			// Run cleanup to tear down side effects from the last run, but do NOT
+			// call run() — RESET is purely lifecycle ("clear state"). The user
+			// decides when to re-trigger by pushing new values into the graph.
+			try {
+				if (cleanup) cleanup();
+			} finally {
+				cleanup = undefined;
+			}
 		}
 
 		// Forward all lifecycle signals upstream
@@ -118,7 +136,7 @@ export function effect(
 	for (let i = 0; i < deps.length; i++) {
 		if (disposed) break;
 		const depIndex = i;
-		let sinkGen = generation;
+		sinkGens[depIndex] = generation;
 		deps[depIndex].source(START, (type: number, data: any) => {
 			if (type === START) {
 				talkbacks.push(data);
@@ -129,12 +147,14 @@ export function effect(
 			if (type === STATE) {
 				if (isLifecycleSignal(data)) {
 					handleLifecycleSignal(data);
-					// After RESET, update sink generation to accept new signals
-					sinkGen = generation;
+					// sinkGens[depIndex] is already updated by handleLifecycleSignal
+					// for RESET (updates all entries). For other signals, update this
+					// dep's entry to stay in sync.
+					sinkGens[depIndex] = generation;
 					return;
 				}
 				// Discard pre-RESET signals from stale generation
-				if (sinkGen !== generation) return;
+				if (sinkGens[depIndex] !== generation) return;
 				if (data === DIRTY) {
 					if (dirtyDeps.empty()) anyDataReceived = false;
 					dirtyDeps.set(depIndex);
@@ -150,7 +170,7 @@ export function effect(
 			}
 			if (type === DATA) {
 				// Discard pre-RESET DATA from stale generation
-				if (sinkGen !== generation) return;
+				if (sinkGens[depIndex] !== generation) return;
 				if (dirtyDeps.test(depIndex)) {
 					dirtyDeps.clear(depIndex);
 					anyDataReceived = true;
