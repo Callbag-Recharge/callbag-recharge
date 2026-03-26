@@ -1,3 +1,10 @@
+# [0.27.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.26.0...v0.27.0) (2026-03-26)
+
+
+### Features
+
+* implement SA-2 ([450e69f](https://github.com/Callbag-Recharge/callbag-recharge/commit/450e69f50eb0894e65a8af9805ba26a63cc0503b))
+
 # [0.26.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.25.0...v0.26.0) (2026-03-26)
 
 
