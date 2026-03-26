@@ -1,3 +1,10 @@
+# [0.28.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.27.0...v0.28.0) (2026-03-26)
+
+
+### Features
+
+* fix RESET behavior ([c021f4c](https://github.com/Callbag-Recharge/callbag-recharge/commit/c021f4c14c5027decf9d6ff9e60babc8cf10eacb))
+
 # [0.27.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.26.0...v0.27.0) (2026-03-26)
 
 
