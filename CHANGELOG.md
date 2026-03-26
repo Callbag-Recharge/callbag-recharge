@@ -1,3 +1,11 @@
+# [0.26.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.25.0...v0.26.0) (2026-03-26)
+
+
+### Features
+
+* add docs index ([9dbb762](https://github.com/Callbag-Recharge/callbag-recharge/commit/9dbb7628552a95143c8a0a9052beb92ca11b1088))
+* implement 7.2 and add blog dates ([049a25b](https://github.com/Callbag-Recharge/callbag-recharge/commit/049a25b204d1be5ed3f74132da1bc52ef5ba19f0))
+
 # [0.25.0](https://github.com/Callbag-Recharge/callbag-recharge/compare/v0.24.0...v0.25.0) (2026-03-25)
 
 
