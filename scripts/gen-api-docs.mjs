@@ -162,6 +162,9 @@ const REGISTRY = {
 
 	// AI
 	fromLLM: "src/ai/fromLLM.ts",
+	toToolCallRequests: "src/ai/fromLLM.ts",
+	chatStream: "src/ai/chatStream/index.ts",
+	conversationThread: "src/ai/conversationThread/index.ts",
 	docIndex: "src/ai/docIndex/index.ts",
 	embeddingIndex: "src/ai/embeddingIndex/index.ts",
 	memoryStore: "src/ai/memoryStore/index.ts",

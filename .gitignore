@@ -154,3 +154,4 @@ Thumbs.db
 site/node_modules/
 site/.vitepress/dist/
 site/.vitepress/cache/
+site/.vitepress/.temp/

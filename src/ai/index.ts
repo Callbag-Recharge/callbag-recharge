@@ -5,17 +5,19 @@
 // H2 and user AI apps import from this layer — never from raw/, core/, extra/, utils/ directly.
 //
 // Includes:
-//   - chatStream      — LLM streaming chat with backpressure
-//   - agentLoop       — Observe → Plan → Act reactive agent cycle
-//   - toolCallState   — reactive state machine for tool call lifecycle
-//   - toolRegistry    — reactive tool dispatch with optional job queue backing
-//   - memoryStore     — three-tier AI/LLM memory management
-//   - hybridRoute     — confidence-based local/cloud LLM routing
-//   - fromLLM         — unified reactive source for LLM inference
-//   - checkpoint      — durable step boundary (re-exported from utils)
-//   - indexedDBAdapter— IndexedDB checkpoint adapter (re-exported from utils)
-//   - agentMemory     — Mem0-equivalent reactive agentic memory
-//   - tokenTracker    — token/cost tracking operator (re-exported from utils)
+//   - chatStream            — LLM streaming chat with backpressure
+//   - agentLoop             — Observe → Plan → Act reactive agent cycle
+//   - toolCallState         — reactive state machine for tool call lifecycle
+//   - toolRegistry          — reactive tool dispatch with optional job queue backing
+//   - memoryStore           — three-tier AI/LLM memory management
+//   - hybridRoute           — confidence-based local/cloud LLM routing
+//   - fromLLM               — unified reactive source for LLM inference (text + tool calls)
+//   - toToolCallRequests    — bridge fromLLM tool calls → toolRegistry format
+//   - conversationThread    — per-agent conversation isolation with shared context
+//   - checkpoint            — durable step boundary (re-exported from utils)
+//   - indexedDBAdapter      — IndexedDB checkpoint adapter (re-exported from utils)
+//   - agentMemory           — Mem0-equivalent reactive agentic memory
+//   - tokenTracker          — token/cost tracking operator (re-exported from utils)
 // ---------------------------------------------------------------------------
 
 // Re-exports from utils
@@ -61,6 +63,13 @@ export type {
 } from "./conversationSummary";
 export { conversationSummary } from "./conversationSummary";
 export type {
+	ConversationThreadOptions,
+	ConversationThreadResult,
+	Thread,
+	ThreadOptions,
+} from "./conversationThread";
+export { conversationThread } from "./conversationThread";
+export type {
 	DocIndexOptions,
 	DocIndexResult,
 	SearchResult,
@@ -78,10 +87,13 @@ export type {
 	GenerateOptions,
 	LLMMessage,
 	LLMOptions,
+	LLMRole,
 	LLMStore,
 	LLMTokenUsage,
+	LLMToolCall,
+	LLMToolDefinition,
 } from "./fromLLM";
-export { fromLLM } from "./fromLLM";
+export { fromLLM, toToolCallRequests } from "./fromLLM";
 export type {
 	HybridRouteOptions,
 	HybridRouteResult,

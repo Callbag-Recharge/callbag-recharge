@@ -1,7 +1,7 @@
 ---
 title: "The Inspector Pattern: Observability as a First-Class Citizen"
 description: "We keep stores as plain { get, set?, source } objects. Names, edges, and debug hooks live in WeakMaps — so you only pay for observability when you use it."
-date: 2026-03-24
+date: 2026-03-22
 author: David Chen
 outline: deep
 ---

@@ -132,8 +132,9 @@ legend. The point is "look what you can build", not "look at our API".
 | H1 | **Markdown Editor** | **Shipped** | Split-pane: textarea left, live Markdown preview right. Toolbar with undo/redo, heading/bold/italic/code/list formatting, word count, cursor position, auto-save dot. Feels like a real editor. |
 | H2 | **AI Docs Assistant (WebLLM)** | Backlog | Edge-first documentation assistant. Progressive: starts as instant FTS5 search (no download), upgrades to AI chat with semantic search when user opts in. Qwen3 model runs in-browser via WebGPU — no API key, no data leaves device. Remembers user's project context across sessions via reactive memory. LLM recommends high-level `ai/` primitives, presents relevant API docs and examples. Three workers: Web Worker (WebLLM inference), SharedWorker (cross-tab memory via `workerBridge` + IndexedDB), Service Worker (model weight cache). Depends on Phase 6 (memory), Phase 7 (adapters), `ai/` folder. Feels like a privacy-first Copilot for the library. |
 | H3 | **Workflow Builder** | **Shipped** | Code-first n8n. Left: editable script pane with `pipeline()` code. Right: live DAG (Vue Flow). Presets load example code. Press "Update" → code parses into a visual graph. Fire triggers, watch nodes animate through states, inspect per-node logs with circuit breaker controls. Configurable duration/failure sliders. Feels like a workflow tool. |
+| H4 | **Multi-Agent Backend** | Backlog | Minimal 2-agent system (planner + executor) wired via `jobFlow` with shared `knowledgeGraph`. Supervisor dispatches tasks, agents use `toolRegistry` for tool calls routed through `jobQueue`. Live dashboard shows agent status, job queues, memory graph. Demonstrates SA-1 through SA-5 as a backend counterpart to H2. Depends on Phase SA-5. |
 
-**Build order:** H1 (shipped) → H3 (shipped) → H2 (after Phase 7.1)
+**Build order:** H1 (shipped) → H3 (shipped) → H2 (after Phase 7.1) → H4 (after Phase SA-5)
 
 #### Code Examples (doc pages)
 
@@ -171,6 +172,19 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 ### Phase 7.1-6: agentMemory v1 — Complete
 
 `agentMemory` — Mem0-equivalent reactive agentic memory. LLM fact extraction → embedding → dedup via cosine similarity → persistence via checkpoint adapter. Scoped isolation (user/agent tags). `inner.collection` / `inner.vectorIndex` per §1.14. 44 tests across 5 files. `systemPromptBuilder` also shipped (reactive multi-section prompt assembly with per-section/total token budgets).
+
+### Phase 7.2: `fromLLM` Structured Output + AI Primitives
+
+> **Goal:** Make `fromLLM` parse OpenAI `tools`/`tool_calls` response format so `toolRegistry.execute()` works end-to-end with LLMs. Add conversation threading for multi-agent scenarios.
+>
+> **Depends on:** Phase 7.1 (ai/ folder shipped).
+>
+> **Identified in:** `src/archive/docs/SESSION-tool-registry-job-queue-multiagent.md` (Gaps #3, #4)
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| 7.2-1 | `fromLLM` structured output | Parse `tool_calls` from SSE chunks, emit structured tool call objects. Feed directly into `toolRegistry.execute()`. Support OpenAI, Anthropic, and Ollama response formats. | M |
+| 7.2-2 | Conversation threading | Per-agent conversation history with shared context. `conversationThread({ agentId, shared? })` → scoped message store with cross-agent context injection. | S-M |
 
 ---
 
@@ -249,6 +263,21 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | SA-4i | Cancellable embed | `search()`/`add()` abort doesn't cancel in-flight `embed()` call — requires `EmbedFn` signature accepting `AbortSignal` | S-M |
 | SA-4j | Per-operation status | Concurrent add + search clobbers single status store — jobQueue tracks per-operation status independently | M |
 
+#### SA-5: Multi-Agent Routing
+
+> **Goal:** Supervisor/agent pool dispatching tasks to specialized agents. The routing and supervision logic for multi-agent systems.
+>
+> **Depends on:** SA-4 (agentMemory v2), Phase 7.2 (structured output for tool dispatch).
+>
+> **Identified in:** `src/archive/docs/SESSION-tool-registry-job-queue-multiagent.md` (Gap #2)
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SA-5a | `agentPool` | Pool of `agentLoop` instances with role-based dispatch via `topic`. Supervisor assigns tasks, collects results. | M |
+| SA-5b | `supervisor` | Higher-level orchestrator: decomposes goals into subtasks, routes to pool agents, merges results. Built on `agentPool` + `jobFlow`. | L |
+| SA-5c | Shared tool registry | Multiple agents share one `toolRegistry` instance — concurrent access via jobQueue serialization. | S-M |
+| SA-5d | Agent handoff | Structured handoff protocol between agents (context transfer, task delegation, result reporting). | M |
+
 ---
 
 ### Phase 7: More Adapters
@@ -324,7 +353,7 @@ Moved from their previous locations to `src/ai/`. `ai/index.ts` barrel exports a
 
 **FTS5 query API** (what `docIndex` wraps at runtime):
 ```sql
-SELECT id, title, snippet(docs, 1, '<mark>', '</mark>', '…', 32) as excerpt,
+SELECT rowid as id, title, snippet(docs, 1, '<mark>', '</mark>', '…', 32) as excerpt,
        rank, source, tags
 FROM docs WHERE docs MATCH ? ORDER BY rank LIMIT 10
 ```
@@ -454,6 +483,17 @@ These require API keys or external services — not zero-config. Planned as opt-
 | 7.5-3 | Positioning blog posts | Top 3 from blog-strategy §Market-Positioning: "Missing Middle" (#10), "Durable Reactive Streams" (#11), "Trust Bottleneck" (#12). | M |
 | 7.5-4 | npm publish prep | Keywords (reactive, state, signals, callbag, orchestration, agentic, durable), description, package.json metadata audit. | S |
 | 7.5-5 | Community launch | HN Show, Reddit r/javascript + r/typescript + r/AI_Agents, dev.to cross-post. | S |
+
+### Backlog: Multi-Agent Infrastructure Gaps
+
+> **Identified in:** `src/archive/docs/SESSION-tool-registry-job-queue-multiagent.md` (Gaps #5, #6)
+>
+> These are prerequisites for a production multi-agent backend but not on the critical path for SA or H4 MVP.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| MA-1 | Sandbox / code execution adapter | Adapter for Docker API / E2B / subprocess execution. `fromSandbox({ image, cmd })` → callbag source with stdout/stderr/exit. | M |
+| MA-2 | Reactive file system / workspace | Reactive file watching + virtual FS. `fromFSWatch(path)` → file change events. `workspace({ root })` → reactive file tree with read/write stores. | M |
 
 ### Phase 8: Persistence + Distribution
 

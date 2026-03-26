@@ -283,6 +283,13 @@
 	background: var(--cr-aqua-dim);
 }
 
+/* ─── Blog: formatted publish date (from frontmatter `date`, Layout.vue) ─── */
+.cr-blog-published {
+	margin: 0 0 1rem;
+	font-size: 0.95rem;
+	color: var(--cr-text-muted);
+}
+
 /* ─── Home page full-width ─── */
 .VPPage .home-root {
 	width: 100vw;

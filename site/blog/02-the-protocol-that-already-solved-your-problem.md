@@ -1,7 +1,7 @@
 ---
 title: "The Protocol That Already Solved Your Problem"
 description: "Callbag's 4-type system — START, DATA, END, STATE — is a complete vocabulary for reactive programming. Here's why protocol-first design beats API sugar."
-date: 2026-03-24
+date: 2026-03-21
 author: David Chen
 outline: deep
 ---

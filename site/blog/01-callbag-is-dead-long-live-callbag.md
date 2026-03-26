@@ -1,12 +1,14 @@
 ---
 title: "Callbag Is Dead. Long Live Callbag."
 description: "Why we bet on a forgotten reactive protocol in the age of Signals — and what everyone else missed about callbag's design."
-date: 2026-03-24
+date: 2026-03-21
 author: David Chen
 outline: deep
 ---
 
 # Callbag Is Dead. Long Live Callbag.
+
+![Callbag Flow](/blog-heroes/hero-01.png)
 
 *Arc 1, Post 1 — Origins: Why Revive Callbag?*
 

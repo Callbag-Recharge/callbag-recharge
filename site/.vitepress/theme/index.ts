@@ -2,6 +2,7 @@ import type { Theme } from "vitepress";
 import DefaultTheme from "vitepress/theme";
 import { defineAsyncComponent } from "vue";
 import HomeLayout from "./components/HomeLayout.vue";
+import Layout from "./Layout.vue";
 import "./custom.css";
 
 function setupSidebarAccordion(): void {
@@ -78,6 +79,7 @@ function setupSidebarAccordion(): void {
 
 export default {
 	extends: DefaultTheme,
+	Layout,
 	enhanceApp({ app }) {
 		setupSidebarAccordion();
 		app.component("HomeLayout", HomeLayout);

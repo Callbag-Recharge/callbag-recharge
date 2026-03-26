@@ -1,7 +1,7 @@
 ---
 title: "Push Dirty, Pull Values: Our First Diamond Solution"
 description: "Before type 3 and RESOLVED, we solved the diamond problem with a simpler split: invalidate in one phase, compute in another. Here's how push-then-pull worked — and what it cost."
-date: 2026-03-24
+date: 2026-03-22
 author: David Chen
 outline: deep
 ---
@@ -27,12 +27,19 @@ This post is the story of that first solution: what we built, why it worked, and
 
 Reactive tutorials love linear chains: `count` → `doubled` → `label`. Real applications are DAGs. Shared parents are normal.
 
-```
-        A (state)
-       / \
-      B   C
-       \ /
-        D (derived)
+```mermaid
+flowchart TD
+    A(("A<br/>(state)")) --> B
+    A --> C
+    B --> D(("D<br/>(derived)"))
+    C --> D
+    
+    classDef state fill:#2d3748,stroke:#4fd1c5,stroke-width:2px,color:#fff;
+    classDef derived fill:#2d3748,stroke:#9f7aea,stroke-width:2px,color:#fff;
+    classDef default fill:#2d3748,stroke:#a0aec0,stroke-width:2px,color:#fff;
+    
+    class A state;
+    class D derived;
 ```
 
 When `A` changes, both `B` and `C` become stale. `D` must recompute **once**, using fresh reads of both `B` and `C`, after the graph has settled — not twice, and not with a half-updated view.
@@ -49,16 +56,29 @@ The v1 design (documented in our archived `architecture-v1.md`) made invalidatio
 
 The walk looks like this in the archive doc's mental model:
 
-```
-A.set(5)
-  Push: A → DIRTY → B → DIRTY → D
-        A → DIRTY → C → DIRTY → D (already dirty, skip redundant work)
-
-D.get()
-  Pull: D runs fn()
-          → B.get() → … → A.get() → returns 5 → B settles
-          → C.get() → … → A.get() → returns 5 → C settles
-        D = f(B, C)  // one consistent snapshot
+```mermaid
+sequenceDiagram
+    participant A as State A
+    participant B as Node B
+    participant C as Node C
+    participant D as Derived D
+    
+    Note over A,D: Phase 1: Push DIRTY
+    A->>B: Push DIRTY
+    A->>C: Push DIRTY
+    B->>D: Push DIRTY
+    C-->>D: Push DIRTY (Ignored, already dirty)
+    
+    Note over A,D: Phase 2: Pull Values
+    D->>B: D.get() -> pulls B
+    D->>C: D.get() -> pulls C
+    B->>A: pulls A
+    C->>A: pulls A
+    A-->>B: returns 5
+    A-->>C: returns 5
+    B-->>D: returns B(5)
+    C-->>D: returns C(5)
+    Note over D: D computes f(B, C) (One consistent snapshot)
 ```
 
 No separate "diamond resolver" module. The **pull chain is the resolver**, as long as invalidation has already marked the right nodes.

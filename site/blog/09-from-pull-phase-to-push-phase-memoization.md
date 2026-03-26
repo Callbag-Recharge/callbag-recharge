@@ -1,7 +1,7 @@
 ---
 title: "From Pull-Phase to Push-Phase Memoization"
 description: "v1 derived.get() recomputed every time; equals helped only on read.v2 caches by default and lets equals suppress downstream work during the value wave — a real DIRTY barrier."
-date: 2026-03-24
+date: 2026-03-23
 author: David Chen
 outline: deep
 ---

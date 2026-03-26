@@ -1,7 +1,7 @@
 ---
 title: "Promises Are the New Callback Hell"
 description: "How we eliminated every internal Promise from callbag-recharge and replaced them with pure callbag sources - the patterns, the pitfalls, and why it matters."
-date: 2026-03-24
+date: 2026-03-25
 author: David Chen
 outline: deep
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Data Should Flow Through the Graph, Not Around It"
 description: "Our first architecture split callbag for wiring from get() for values. v2's aha moment: unify transport — two phases on one channel — so the protocol stays honest."
-date: 2026-03-24
+date: 2026-03-23
 author: David Chen
 outline: deep
 ---

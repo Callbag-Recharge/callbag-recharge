@@ -44,6 +44,25 @@ site/
 
 ---
 
+## Visual Standards: Hero Images & Diagrams
+
+To maintain a consistent, premium developer aesthetic across the blog:
+
+### 1. Hero Images
+- **Aspect Ratio:** Generate images emphasizing a horizontal/landscape orientation. AI generators often pad their 1024x1024 outputs with solid black letterboxes on the top/bottom OR left/right. You **must** run a python script (using `PIL.ImageChops` or manual pixel scanning) to aggressively trim all pure black RGB borders first, to find the true content bounding box. After trimming the black bars, ensure the resulting image is cropped rigidly into a `16:9` ratio (e.g. `width x (width * 9 // 16)`) from the center before saving.
+- **Aesthetic:** Deep dark space navy background. Use simple, minimalist geometric nodes combined with highly intricate, glowing bidirectional arrows (neon cyan and purple) to symbolize two-way reactive handshakes. For specific concepts (like the "diamond problem"), use stylized elements (e.g., a flipping playing card), strictly maintaining the dark premium tech aesthetic. No text unless specifically designed for the concept (e.g. "DIRTY"/"RESOLVED").
+- **Location:** Save in `site/public/blog-heroes/hero-XX.png` and place directly under the `<h1>` tag in the Markdown file: `![Caption](/blog-heroes/hero-XX.png)`.
+
+### 2. Architecture Diagrams
+- **Mermaid Integration:** Use native ````mermaid` blocks (`flowchart TD` or `sequenceDiagram`) directly in Markdown.
+- **Theme:** Ensure `mermaid: { theme: 'dark' }` is configured in `.vitepress/config.ts` so diagrams are legible on the dark site background.
+- **Node Classes:** For flowcharts, use consistent `classDef` styling:
+  - `state` nodes: `fill:#2d3748,stroke:#4fd1c5,stroke-width:2px,color:#fff;`
+  - `derived` nodes: `fill:#2d3748,stroke:#9f7aea,stroke-width:2px,color:#fff;`
+  - `intermediate` nodes: `fill:#2d3748,stroke:#a0aec0,stroke-width:2px,color:#fff;`
+
+---
+
 ## Blog Content Plan: "The callbag-recharge Chronicle"
 
 ### Content Formula

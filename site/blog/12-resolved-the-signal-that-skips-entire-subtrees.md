@@ -8,6 +8,8 @@ outline: deep
 
 # RESOLVED: The Signal That Skips Entire Subtrees
 
+![RESOLVED Signal](/blog-heroes/hero-12.png)
+
 *Arc 4, Post 12 — Architecture v3: The Type 3 Breakthrough*
 
 ---

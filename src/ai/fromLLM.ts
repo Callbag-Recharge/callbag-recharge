@@ -8,10 +8,21 @@
 // No hard dependencies — uses fetch + SSE parsing. Provider-specific logic
 // is minimal (URL patterns, auth headers, response format).
 //
+// Supports structured output: tool_calls from SSE chunks are parsed and
+// accumulated into a reactive `toolCalls` store. Pass `tools` in
+// GenerateOptions to enable function calling.
+//
 // Usage:
 //   const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
 //   llm.generate([{ role: 'user', content: 'Hello' }]);
 //   effect([llm], () => console.log(llm.get()));
+//
+//   // With tool calling:
+//   llm.generate(messages, { tools: registry.definitions() });
+//   effect([llm.toolCalls], () => {
+//     const calls = llm.toolCalls.get();
+//     if (calls.length > 0) registry.execute(toToolCallRequests(calls));
+//   });
 // ---------------------------------------------------------------------------
 
 import { batch } from "../core/protocol";
@@ -22,15 +33,49 @@ import { rawFromAsyncIter } from "../raw/fromAsyncIter";
 import { rawSubscribe } from "../raw/subscribe";
 import type { WithStatusStatus } from "../utils/withStatus";
 
-export interface LLMMessage {
-	role: "user" | "assistant" | "system";
-	content: string;
+// ---------------------------------------------------------------------------
+// Message types — support both text and tool call messages
+// ---------------------------------------------------------------------------
+
+/** Role for LLM messages. */
+export type LLMRole = "user" | "assistant" | "system" | "tool";
+
+/** A tool call emitted by the LLM (from assistant message). */
+export interface LLMToolCall {
+	/** Tool call ID assigned by the LLM (for matching tool results). */
+	id: string;
+	/** Tool/function name. */
+	name: string;
+	/** Raw JSON string of arguments. Call JSON.parse() to get structured args. */
+	arguments: string;
 }
 
+/** An LLM message. Supports text content and/or tool calls. */
+export interface LLMMessage {
+	role: LLMRole;
+	/** Text content. May be empty/null for pure tool-call messages. */
+	content: string | null;
+	/** Tool calls requested by the assistant (only on role="assistant"). */
+	tool_calls?: LLMToolCall[];
+	/** Tool call ID this message responds to (only on role="tool"). */
+	tool_call_id?: string;
+}
+
+/** Token usage metadata from the LLM response. */
 export interface LLMTokenUsage {
 	promptTokens?: number;
 	completionTokens?: number;
 	totalTokens?: number;
+}
+
+/** Tool definition in OpenAI function-calling format. */
+export interface LLMToolDefinition {
+	type: "function";
+	function: {
+		name: string;
+		description: string;
+		parameters?: Record<string, unknown>;
+	};
 }
 
 export interface LLMOptions {
@@ -57,6 +102,8 @@ export interface GenerateOptions {
 	stop?: string[];
 	/** AbortSignal for cancellation. */
 	signal?: AbortSignal;
+	/** Tool definitions for function calling. Pass `registry.definitions()` from toolRegistry. */
+	tools?: LLMToolDefinition[];
 }
 
 export interface LLMStore extends Store<string> {
@@ -66,10 +113,33 @@ export interface LLMStore extends Store<string> {
 	status: Store<WithStatusStatus>;
 	/** Last error, if any (reactive). */
 	error: Store<unknown | undefined>;
+	/** Tool calls parsed from the last generation (reactive). Empty array when no tool calls. */
+	toolCalls: Store<LLMToolCall[]>;
 	/** Start a generation. Aborts any in-progress generation. */
 	generate: (messages: LLMMessage[], opts?: GenerateOptions) => void;
 	/** Abort the current generation. */
 	abort: () => void;
+}
+
+/**
+ * Convert `LLMToolCall[]` from fromLLM into `ToolCallRequest[]` for toolRegistry.
+ * Convenience bridge between the two primitives.
+ *
+ * Safe to call on partial tool calls mid-stream: malformed JSON arguments
+ * are passed through as the raw string rather than throwing.
+ */
+export function toToolCallRequests(
+	calls: LLMToolCall[],
+): Array<{ id: string; tool: string; args: unknown }> {
+	return calls.map((tc) => {
+		let args: unknown;
+		try {
+			args = JSON.parse(tc.arguments);
+		} catch {
+			args = tc.arguments;
+		}
+		return { id: tc.id, tool: tc.name, args };
+	});
 }
 
 function defaultBaseURL(provider: string): string {
@@ -103,7 +173,7 @@ function buildBody(
 ): Record<string, unknown> {
 	const body: Record<string, unknown> = {
 		model,
-		messages,
+		messages: messages.map((m) => serializeMessage(provider, m)),
 		stream: true,
 	};
 	if (genOpts?.temperature !== undefined) body.temperature = genOpts.temperature;
@@ -113,7 +183,50 @@ function buildBody(
 		else body.max_tokens = genOpts.maxTokens;
 	}
 	if (genOpts?.stop) body.stop = genOpts.stop;
+
+	// Tool definitions (OpenAI-compatible format used by all providers)
+	if (genOpts?.tools && genOpts.tools.length > 0) {
+		body.tools = genOpts.tools;
+	}
+
 	return body;
+}
+
+/** Serialize an LLMMessage for the API request body. */
+function serializeMessage(provider: string, msg: LLMMessage): Record<string, unknown> {
+	const out: Record<string, unknown> = {
+		role: msg.role,
+		// Preserve null content for tool-call-only assistant messages (OpenAI expects null, not "")
+		content: msg.content,
+	};
+
+	// Include tool_calls on assistant messages
+	if (msg.tool_calls && msg.tool_calls.length > 0) {
+		if (provider === "ollama") {
+			out.tool_calls = msg.tool_calls.map((tc) => {
+				let args: unknown;
+				try {
+					args = JSON.parse(tc.arguments);
+				} catch {
+					args = {};
+				}
+				return { function: { name: tc.name, arguments: args } };
+			});
+		} else {
+			out.tool_calls = msg.tool_calls.map((tc) => ({
+				id: tc.id,
+				type: "function",
+				function: { name: tc.name, arguments: tc.arguments },
+			}));
+		}
+	}
+
+	// Include tool_call_id on tool messages
+	if (msg.tool_call_id) {
+		out.tool_call_id = msg.tool_call_id;
+	}
+
+	return out;
 }
 
 function buildHeaders(_provider: string, apiKey?: string): Record<string, string> {
@@ -131,29 +244,34 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  *
  * @param opts - Provider configuration (provider, baseURL, apiKey, model).
  *
- * @returns `LLMStore` — `Store<string>` with `status`, `error`, `tokens` companion stores, plus `generate()` and `abort()`.
+ * @returns `LLMStore` — `Store<string>` with `status`, `error`, `tokens`, `toolCalls` companion stores, plus `generate()` and `abort()`.
  *
  * @remarks **Provider-agnostic:** Works with OpenAI, Ollama, Anthropic (via proxy), Vercel AI SDK, or any OpenAI-compatible endpoint.
  * @remarks **No hard deps:** Uses fetch + SSE line parsing. No SDK imports required.
  * @remarks **Auto-cancel:** Calling `generate()` while streaming aborts the previous generation.
+ * @remarks **Tool calling:** Pass `tools` in `GenerateOptions` to enable function calling. Parsed tool calls accumulate in the `toolCalls` store. Use `toToolCallRequests()` to convert to `ToolCallRequest[]` for `toolRegistry.execute()`.
  * @remarks **Token tracking:** `tokens` store populated on stream completion (when usage data is available).
  * @remarks **Status:** Uses WithStatusStatus enum (pending → active → completed/errored) for consistent lifecycle tracking.
  * @remarks **Persistent source:** This is a long-lived store backed by `state()`. It does not send callbag END — lifecycle is managed imperatively via `generate()`/`abort()`, not via stream completion. Do not wrap with `withStatus()` or `retry()` — use the built-in `.status` and `.error` companions instead.
  *
  * @example
  * ```ts
- * import { fromLLM } from 'callbag-recharge/ai';
+ * import { fromLLM, toToolCallRequests } from 'callbag-recharge/ai';
  * import { effect } from 'callbag-recharge';
  *
- * const llm = fromLLM({ provider: 'ollama', model: 'llama4' });
+ * const llm = fromLLM({ provider: 'openai', apiKey: 'sk-...', model: 'gpt-4o' });
  *
- * effect([llm], () => {
- *   console.log(llm.get()); // accumulating response...
- * });
- *
+ * // Text generation
  * llm.generate([{ role: 'user', content: 'What is TypeScript?' }]);
- * // llm.status.get() → "active"
- * // llm.get() → "TypeScript is..."
+ *
+ * // Tool calling
+ * llm.generate(messages, { tools: registry.definitions() });
+ * effect([llm.toolCalls], () => {
+ *   const calls = llm.toolCalls.get();
+ *   if (calls.length > 0) {
+ *     registry.execute(toToolCallRequests(calls));
+ *   }
+ * });
  * ```
  *
  * @category ai
@@ -169,8 +287,11 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 	const tokensState = state<LLMTokenUsage>({}, { name: `${name}.tokens` });
 	const statusState = state<WithStatusStatus>("pending", { name: `${name}.status` });
 	const errorState = state<unknown | undefined>(undefined, { name: `${name}.error` });
+	const toolCallsState = state<LLMToolCall[]>([], { name: `${name}.toolCalls` });
 
 	let abortController: AbortController | null = null;
+	let generationId = 0;
+	let toolCallIdCounter = 0; // monotonic counter for synthetic Ollama tool call IDs
 
 	function abort(): void {
 		if (abortController) {
@@ -180,6 +301,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 		if (statusState.get() === "active") {
 			batch(() => {
 				storeState.set("");
+				toolCallsState.set([]);
 				statusState.set("pending");
 			});
 		}
@@ -198,14 +320,26 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			storeState.set("");
 			tokensState.set({});
 			errorState.set(undefined);
+			toolCallsState.set([]);
 			statusState.set("active");
 		});
 
-		const url = buildURL(provider, baseURL);
-		const body = buildBody(provider, model, messages, genOpts);
-		const headers = buildHeaders(provider, opts.apiKey);
+		const myGenId = ++generationId;
 
-		streamResponse(url, headers, body, signal);
+		try {
+			const url = buildURL(provider, baseURL);
+			const body = buildBody(provider, model, messages, genOpts);
+			const headers = buildHeaders(provider, opts.apiKey);
+
+			streamResponse(url, headers, body, signal, myGenId);
+		} catch (err) {
+			batch(() => {
+				errorState.set(err);
+				statusState.set("errored");
+			});
+			if (generationId === myGenId) abortController = null;
+			(signal as any)._cleanup?.();
+		}
 	}
 
 	function streamResponse(
@@ -213,7 +347,12 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 		headers: Record<string, string>,
 		body: Record<string, unknown>,
 		signal: AbortSignal,
+		genId: number,
 	): void {
+		// Helper: only null out abortController if this generation is still current
+		const clearController = () => {
+			if (generationId === genId) abortController = null;
+		};
 		rawSubscribe(
 			rawFromAny(
 				fetchFn(url, {
@@ -232,7 +371,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 							errorState.set(new Error(`LLM API error ${response.status}: ${text}`));
 							statusState.set("errored");
 						});
-						abortController = null;
+						clearController();
 						(signal as any)._cleanup?.();
 					});
 					return;
@@ -240,12 +379,15 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 
 				const reader = response.body?.getReader();
 				if (!reader) {
-					if (signal.aborted) return;
+					if (signal.aborted) {
+						(signal as any)._cleanup?.();
+						return;
+					}
 					batch(() => {
 						errorState.set(new Error("No response body"));
 						statusState.set("errored");
 					});
-					abortController = null;
+					clearController();
 					(signal as any)._cleanup?.();
 					return;
 				}
@@ -254,6 +396,9 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 				const decoder = new TextDecoder();
 				let accumulated = "";
 				let buffer = "";
+				// Accumulator for incremental tool call deltas (keyed by index)
+				const toolCallAccum: Map<number, { id: string; name: string; arguments: string }> =
+					new Map();
 
 				const readerIterable: AsyncIterable<Uint8Array> = {
 					[Symbol.asyncIterator]() {
@@ -292,10 +437,32 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 
 							try {
 								const parsed = JSON.parse(data);
+
+								// Extract text content
 								const content = extractContent(provider, parsed);
 								if (content) {
 									accumulated += content;
 									storeState.set(accumulated);
+								}
+
+								// Extract tool call deltas — only update store when accumulator changed
+								if (
+									extractToolCallDeltas(
+										provider,
+										parsed,
+										toolCallAccum,
+										() => `call_${toolCallIdCounter++}`,
+									)
+								) {
+									const calls: LLMToolCall[] = [];
+									for (const [, tc] of toolCallAccum) {
+										calls.push({
+											id: tc.id,
+											name: tc.name,
+											arguments: tc.arguments,
+										});
+									}
+									toolCallsState.set(calls);
 								}
 
 								// Extract token usage (usually in the final chunk)
@@ -310,8 +477,45 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 					},
 					{
 						onEnd: (err?: unknown) => {
-							// Flush any remaining bytes from the streaming decoder
-							decoder.decode();
+							// Flush remaining buffer before finalizing
+							const remainder = decoder.decode();
+							if (remainder) buffer += remainder;
+
+							// Process any remaining buffered SSE line (#10: flush buffer on end)
+							if (buffer.trim()) {
+								const trimmed = buffer.trim();
+								if (trimmed.startsWith("data: ")) {
+									const data = trimmed.slice(6);
+									if (data !== "[DONE]") {
+										try {
+											const parsed = JSON.parse(data);
+											const content = extractContent(provider, parsed);
+											if (content) {
+												accumulated += content;
+												storeState.set(accumulated);
+											}
+											if (
+												extractToolCallDeltas(
+													provider,
+													parsed,
+													toolCallAccum,
+													() => `call_${toolCallIdCounter++}`,
+												)
+											) {
+												const calls: LLMToolCall[] = [];
+												for (const [, tc] of toolCallAccum) {
+													calls.push({ id: tc.id, name: tc.name, arguments: tc.arguments });
+												}
+												toolCallsState.set(calls);
+											}
+											const usage = extractUsage(provider, parsed);
+											if (usage) tokensState.set(usage);
+										} catch {
+											// skip
+										}
+									}
+								}
+							}
 
 							if (signal.aborted) {
 								(signal as any)._cleanup?.();
@@ -325,7 +529,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 							} else {
 								statusState.set("completed");
 							}
-							abortController = null;
+							clearController();
 							(signal as any)._cleanup?.();
 						},
 					},
@@ -342,9 +546,10 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 							errorState.set(err);
 							statusState.set("errored");
 						});
-						abortController = null;
-						(signal as any)._cleanup?.();
+						clearController();
 					}
+					// Always clean up signal listeners regardless of error/abort state
+					(signal as any)._cleanup?.();
 				},
 			},
 		);
@@ -356,6 +561,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 		tokens: tokensState,
 		status: statusState,
 		error: errorState,
+		toolCalls: toolCallsState,
 		generate,
 		abort,
 	};
@@ -367,6 +573,72 @@ function extractContent(provider: string, parsed: any): string | undefined {
 	}
 	// OpenAI / custom format
 	return parsed?.choices?.[0]?.delta?.content;
+}
+
+/**
+ * Extract tool call deltas from a parsed SSE chunk and accumulate into the map.
+ *
+ * OpenAI streams tool calls incrementally:
+ *   choices[0].delta.tool_calls: [{ index, id?, function: { name?, arguments? } }]
+ * Each chunk may contain partial data — id and name appear in the first chunk,
+ * arguments are streamed across multiple chunks.
+ *
+ * Ollama sends tool calls complete (non-streaming) in the final message:
+ *   message.tool_calls: [{ function: { name, arguments } }]
+ */
+/** Returns true if the accumulator was modified (caller should update the store). */
+function extractToolCallDeltas(
+	provider: string,
+	parsed: any,
+	accum: Map<number, { id: string; name: string; arguments: string }>,
+	nextId?: () => string,
+): boolean {
+	if (provider === "ollama") {
+		// Ollama sends complete tool calls in one chunk
+		const toolCalls = parsed?.message?.tool_calls;
+		if (!Array.isArray(toolCalls)) return false;
+		let changed = false;
+		for (let i = 0; i < toolCalls.length; i++) {
+			const tc = toolCalls[i];
+			const fn = tc?.function;
+			if (!fn) continue;
+			accum.set(i, {
+				id: nextId ? nextId() : `call_${i}`,
+				name: fn.name ?? "",
+				arguments:
+					typeof fn.arguments === "string" ? fn.arguments : JSON.stringify(fn.arguments ?? {}),
+			});
+			changed = true;
+		}
+		return changed;
+	}
+
+	// OpenAI / custom format — incremental deltas
+	const deltas = parsed?.choices?.[0]?.delta?.tool_calls;
+	if (!Array.isArray(deltas)) return false;
+
+	let changed = false;
+	for (const delta of deltas) {
+		const idx = delta.index ?? 0;
+		let entry = accum.get(idx);
+		if (!entry) {
+			entry = { id: "", name: "", arguments: "" };
+			accum.set(idx, entry);
+		}
+		if (delta.id) {
+			entry.id = delta.id;
+			changed = true;
+		}
+		if (delta.function?.name) {
+			entry.name = delta.function.name;
+			changed = true;
+		}
+		if (delta.function?.arguments) {
+			entry.arguments += delta.function.arguments;
+			changed = true;
+		}
+	}
+	return changed;
 }
 
 function extractUsage(provider: string, parsed: any): LLMTokenUsage | undefined {
@@ -396,6 +668,15 @@ function extractUsage(provider: string, parsed: any): LLMTokenUsage | undefined 
 
 function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
 	const controller = new AbortController();
+	const sig = controller.signal;
+
+	// Handle already-aborted signals
+	if (a.aborted || b.aborted) {
+		controller.abort();
+		(sig as any)._cleanup = () => {};
+		return sig;
+	}
+
 	const cleanup = () => {
 		a.removeEventListener("abort", onAbort);
 		b.removeEventListener("abort", onAbort);
@@ -407,7 +688,6 @@ function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
 	a.addEventListener("abort", onAbort, { once: true });
 	b.addEventListener("abort", onAbort, { once: true });
 	// Expose cleanup on signal for callers that complete without abort
-	const sig = controller.signal;
 	(sig as any)._cleanup = cleanup;
 	return sig;
 }

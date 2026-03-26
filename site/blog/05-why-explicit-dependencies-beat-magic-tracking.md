@@ -1,7 +1,7 @@
 ---
 title: "Why Explicit Dependencies Beat Magic Tracking"
 description: "Jotai and Signals auto-discover what you read. We wire deps up front. That looks like boilerplate — until you debug a production graph."
-date: 2026-03-24
+date: 2026-03-22
 author: David Chen
 outline: deep
 ---
