@@ -78,7 +78,7 @@ describe("agentMemory persistence", () => {
 		});
 
 		// Simulate LLM extraction
-		mem.add([{ role: "user", content: "I love TypeScript" }]);
+		const op = mem.add([{ role: "user", content: "I love TypeScript" }]);
 
 		// Complete LLM with extracted facts
 		llm._content.set(
@@ -87,7 +87,7 @@ describe("agentMemory persistence", () => {
 		llm._status.set("completed");
 
 		await vitest.waitFor(() => {
-			expect(mem!.status.get()).toBe("idle");
+			expect(op.status.get()).toBe("completed");
 		});
 
 		// Adapter should have been called

@@ -116,6 +116,114 @@ describe("jobFlow", () => {
 	});
 
 	// -----------------------------------------------------------------------
+	// Fan-out (SA-4)
+	// -----------------------------------------------------------------------
+
+	describe("fanOut edges", () => {
+		it("fans out array results into individual jobs (1:N)", async () => {
+			const sinkData: string[] = [];
+
+			const q1 = jobQueue<string, string[]>("splitter", async (_s, d) => {
+				return d.split(","); // "a,b,c" → ["a", "b", "c"]
+			});
+
+			const q2 = jobQueue<string, void>("collector", async (_s, d) => {
+				sinkData.push(d);
+			});
+
+			const flow = jobFlow({ splitter: q1, collector: q2 }, [
+				{ from: "splitter", to: "collector", fanOut: true },
+			]);
+
+			q1.add("x,y,z");
+			await vi.advanceTimersByTimeAsync(2000);
+
+			expect(sinkData).toEqual(expect.arrayContaining(["x", "y", "z"]));
+			expect(sinkData).toHaveLength(3);
+			flow.destroy();
+			q1.destroy();
+			q2.destroy();
+		});
+
+		it("fanOut with transform produces N jobs from transformed array", async () => {
+			const results: number[] = [];
+
+			const q1 = jobQueue<string, string>("source", async (_s, d) => d);
+			const q2 = jobQueue<number, void>("sink", async (_s, d) => {
+				results.push(d);
+			});
+
+			const flow = jobFlow({ source: q1, sink: q2 }, [
+				{
+					from: "source",
+					to: "sink",
+					fanOut: true,
+					transform: (s: string) => s.split("").map((c) => c.charCodeAt(0)),
+				},
+			]);
+
+			q1.add("AB");
+			await vi.advanceTimersByTimeAsync(2000);
+
+			expect(results).toEqual(expect.arrayContaining([65, 66]));
+			expect(results).toHaveLength(2);
+			flow.destroy();
+			q1.destroy();
+			q2.destroy();
+		});
+
+		it("fanOut with empty array produces no jobs", async () => {
+			const results: string[] = [];
+
+			const q1 = jobQueue<string, string[]>("src", async () => []);
+			const q2 = jobQueue<string, void>("dst", async (_s, d) => {
+				results.push(d);
+			});
+
+			const flow = jobFlow({ src: q1, dst: q2 }, [{ from: "src", to: "dst", fanOut: true }]);
+
+			q1.add("trigger");
+			await vi.advanceTimersByTimeAsync(1000);
+
+			expect(results).toEqual([]);
+			flow.destroy();
+			q1.destroy();
+			q2.destroy();
+		});
+
+		it("Mermaid diagram labels fan-out edges", () => {
+			const q1 = jobQueue<string>("a", async () => {});
+			const q2 = jobQueue<string>("b", async () => {});
+
+			const flow = jobFlow({ a: q1, b: q2 }, [{ from: "a", to: "b", fanOut: true }]);
+
+			expect(flow.toMermaid()).toContain("|fan-out|");
+			expect(flow.toD2()).toContain(": fan-out");
+			flow.destroy();
+			q1.destroy();
+			q2.destroy();
+		});
+
+		it("fanOut strict-fails when output is not an array", async () => {
+			const results: string[] = [];
+			const q1 = jobQueue<string, string>("src", async (_s, d) => d);
+			const q2 = jobQueue<string, void>("dst", async (_s, d) => {
+				results.push(d);
+			});
+
+			const flow = jobFlow({ src: q1, dst: q2 }, [{ from: "src", to: "dst", fanOut: true }]);
+			q1.add("not-an-array");
+			await vi.advanceTimersByTimeAsync(1000);
+
+			// strict fail: non-array fanOut payload is dropped and not enqueued
+			expect(results).toEqual([]);
+			flow.destroy();
+			q1.destroy();
+			q2.destroy();
+		});
+	});
+
+	// -----------------------------------------------------------------------
 	// Validation
 	// -----------------------------------------------------------------------
 

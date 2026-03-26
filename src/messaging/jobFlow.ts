@@ -52,8 +52,27 @@ export function jobFlow(
 		const destQ = queues[edge.to];
 
 		const unsub = sourceQ.on("completed", (job) => {
-			const data = edge.transform ? edge.transform(job.result) : job.result;
-			destQ.add(data);
+			try {
+				const data = edge.transform ? edge.transform(job.result) : job.result;
+				if (edge.fanOut) {
+					if (!Array.isArray(data)) {
+						throw new Error(
+							`jobFlow: edge "${edge.from}" -> "${edge.to}" requires array output when fanOut=true`,
+						);
+					}
+					for (const item of data) {
+						destQ.add(item);
+					}
+				} else {
+					destQ.add(data);
+				}
+			} catch (err) {
+				throw new Error(
+					`jobFlow: edge "${edge.from}" -> "${edge.to}" failed: ${
+						err instanceof Error ? err.message : String(err)
+					}`,
+				);
+			}
 		});
 		_unsubscribes.push(unsub);
 	}
@@ -70,7 +89,7 @@ export function jobFlow(
 		}
 
 		for (const edge of edges) {
-			const label = edge.transform ? "transform" : "";
+			const label = edge.fanOut ? "fan-out" : edge.transform ? "transform" : "";
 			const fromId = _sanitizeId(edge.from);
 			const toId = _sanitizeId(edge.to);
 			if (label) {
@@ -94,7 +113,7 @@ export function jobFlow(
 		for (const edge of edges) {
 			const fromId = _sanitizeId(edge.from);
 			const toId = _sanitizeId(edge.to);
-			const label = edge.transform ? ": transform" : "";
+			const label = edge.fanOut ? ": fan-out" : edge.transform ? ": transform" : "";
 			lines.push(`${fromId} -> ${toId}${label}`);
 		}
 

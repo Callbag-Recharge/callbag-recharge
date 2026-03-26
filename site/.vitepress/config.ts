@@ -98,6 +98,7 @@ export default withMermaid(
 				{ text: "Guide", link: "/getting-started" },
 				{ text: "API", link: "/api/state" },
 				{ text: "Recipes", link: "/recipes/" },
+				{ text: "Solutions", link: "/solutions/" },
 				{ text: "Comparisons", link: "/comparisons/" },
 				{ text: "Edge AI", link: "/edge-ai" },
 				{ text: "Demos", link: "/demos/" },
@@ -569,6 +570,18 @@ export default withMermaid(
 							{ text: "From Zustand", link: "/recipes/zustand-migration" },
 							{ text: "From Jotai", link: "/recipes/jotai-migration" },
 							{ text: "From Nanostores", link: "/recipes/nanostores-migration" },
+						],
+					},
+				],
+				"/solutions/": [
+					{
+						text: "Solutions",
+						collapsed: false,
+						items: [
+							{ text: "Overview", link: "/solutions/" },
+							{ text: "Orchestrate", link: "/solutions/orchestrate" },
+							{ text: "Messaging", link: "/solutions/messaging" },
+							{ text: "Job Queue", link: "/solutions/job-queue" },
 						],
 					},
 				],

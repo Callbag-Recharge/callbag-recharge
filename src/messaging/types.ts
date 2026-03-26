@@ -402,6 +402,11 @@ export interface JobFlowEdge<_T = any, R = any, T2 = any> {
 	to: string;
 	/** Optional transform from source result to destination job data. */
 	transform?: (result: R) => T2;
+	/**
+	 * When true, transform must return `T2[]` and each element becomes a
+	 * separate job in the destination queue (1:N fan-out).
+	 */
+	fanOut?: boolean;
 }
 
 /** Options for creating a job flow. */

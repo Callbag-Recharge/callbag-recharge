@@ -43,12 +43,27 @@ export { agentLoop } from "./agentLoop";
 export { agentMemory } from "./agentMemory";
 export type {
 	AgentMemoryOptions,
+	AgentMemoryOperationBase,
+	AgentMemoryOperationStatus,
+	AgentMemoryAddOperation,
+	AgentMemoryAddOptions,
 	AgentMemoryResult,
+	AgentMemorySearchOptions,
+	AgentMemorySearchOperation,
 	AgentMemoryScope,
 	AgentMemorySearchResult,
-	AgentMemoryStatus,
 	EmbedFn,
+	EmbedJob,
+	EmbedResult,
+	ExtractedEntity,
 	ExtractedFact,
+	ExtractedRelation,
+	ExtractionJob,
+	ExtractionResult,
+	GraphExtractionJob,
+	GraphExtractionResult,
+	MemoryEvent,
+	MemoryEventType,
 } from "./agentMemory/types";
 export type {
 	ChatMessage,
