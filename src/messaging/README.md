@@ -231,13 +231,6 @@ resetCursor(sub, 42);  // specific sequence number
 
 ## Job Processing
 
-For durable job processing built on topics, see `jobQueue` (single-queue processing with retry/DLQ) and `jobFlow` (multi-queue DAG chaining).
+For durable job processing built on topics, see [`JOB_QUEUE.md`](./JOB_QUEUE.md) — covers concurrency, progress, priority, scheduling, rate limiting, batch ops, introspection, persistence, and distributed processing.
 
-```ts
-const queue = jobQueue<Task>(taskTopic, {
-  concurrency: 5,
-  processor: async (signal, job) => {
-    await processTask(job.value, { signal });
-  },
-});
-```
+For multi-queue DAG chaining, see `jobFlow`.

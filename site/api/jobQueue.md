@@ -12,7 +12,7 @@ on completion, failure, and stall detection.
 ```ts
 function jobQueue<T, R = void>(
 	name: string,
-	processor: (signal: AbortSignal, data: T) => R | Promise<R>,
+	processor: (signal: AbortSignal, data: T, progress: (value: number) => void) => R | Promise<R>,
 	opts?: JobQueueOptions<T>,
 ): JobQueue<T, R>
 ```
@@ -22,7 +22,7 @@ function jobQueue<T, R = void>(
 | Parameter | Type | Description |
 |-----------|------|-------------|
 | `name` | `string` | Queue name (used for topic and subscription naming). |
-| `processor` | `(signal: AbortSignal, data: T) =&gt; R | Promise&lt;R&gt;` | Function called per job. Receives `(signal, data)`. Signal is aborted on stall (if configured) or destroy. |
+| `processor` | `(signal: AbortSignal, data: T, progress: (value: number) =&gt; void) =&gt; R | Promise&lt;R&gt;` | Function called per job. Receives `(signal, data, progress)`. Signal is aborted on stall (if configured) or destroy. Progress is a callback accepting 0-1 values. |
 | `opts` | `JobQueueOptions&lt;T&gt;` | Queue configuration. |
 
 ## Returns

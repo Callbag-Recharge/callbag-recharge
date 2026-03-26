@@ -558,6 +558,7 @@ export default withMermaid(
 							{ text: "Real-Time Dashboard", link: "/recipes/real-time-dashboard" },
 							{ text: "On-Device LLM Streaming", link: "/recipes/on-device-llm-streaming" },
 							{ text: "Hybrid Cloud+Edge Routing", link: "/recipes/hybrid-routing" },
+							{ text: "Job Queue", link: "/recipes/job-queue" },
 							{ text: "Tool Calls for Local LLMs", link: "/recipes/tool-calls" },
 						],
 					},

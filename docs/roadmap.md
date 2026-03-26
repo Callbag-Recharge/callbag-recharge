@@ -233,16 +233,16 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 >
 > **Depends on:** SA-2 (topic bridge for distributed jobs).
 
-| # | Deliverable | What | Effort |
-|---|-------------|------|--------|
-| SA-3a | Job progress | `job.progress(0.5)` callback in processor; `queue.progress` reactive store | S-M |
-| SA-3b | Priority ordering | Priority queue ordering in subscription pull (topic supports priority field) | S-M |
-| SA-3c | Scheduled jobs | `queue.add(data, { runAt: Date })` — delayed execution via timer | S |
-| SA-3d | Job removal + introspection | `queue.remove(jobId)`, `queue.getJob(id)` → status/attempts/result/error | S-M |
-| SA-3e | Batch add | `queue.addBatch(items[])` — atomic batch add | S |
-| SA-3f | Rate limiting | `rateLimit: { max: N, windowMs: M }` — throttle job starts | S-M |
-| SA-3g | Distributed jobs | Distributed job queue via topic bridge (SA-2d) | M |
-| SA-3h | Job state persistence | Job metadata, completion status, result persistence (not just topic persistence) | M |
+| # | Deliverable | What | Effort | |
+|---|-------------|------|--------|---|
+| SA-3a | Job progress | `processor(signal, data, progress)` callback; `queue.progress` reactive store (aggregate) | S-M | ✅ |
+| SA-3b | Priority ordering | Batch-level sort in `_tryPull()` by `msg.priority` (lower = higher). **Phase 2:** `priorityOrder` flag on subscription `pull()` for full backlog ordering | S-M | ✅ |
+| SA-3c | Scheduled jobs | `queue.add(data, { runAt: Date })` — delayed execution via `fromTimer` | S | ✅ |
+| SA-3d | Job removal + introspection | `queue.remove(seq)`, `queue.getJob(seq)` → status/attempts/result/error/progress | S-M | ✅ |
+| SA-3e | Batch add | `queue.addBatch(items[])` — atomic batch add via `batch()` | S | ✅ |
+| SA-3f | Rate limiting | `rateLimit: { max, windowMs }` — `slidingWindow` from utils/rateLimiter, callbag-native wait | S-M | ✅ |
+| SA-3g | Distributed jobs | `queue.inner.topic` exposed for topicBridge wiring | M | ✅ |
+| SA-3h | Job state persistence | `persistence: CheckpointAdapter` — persists job state, recovers finished jobs on restart | M | ✅ |
 
 #### SA-4: agentMemory v2 (Composing Products 2 & 3)
 

@@ -32,6 +32,7 @@ export type {
 } from "./transportTypes";
 // -- Types -------------------------------------------------------------------
 export type {
+	AddJobOptions,
 	ConsumerGroup,
 	JobEvent,
 	JobFlow,

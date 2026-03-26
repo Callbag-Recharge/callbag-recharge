@@ -267,7 +267,7 @@ export interface RepeatHandle {
 // ---------------------------------------------------------------------------
 
 /** Status of an individual job. */
-export type JobStatus = "waiting" | "active" | "completed" | "failed" | "stalled";
+export type JobStatus = "waiting" | "active" | "completed" | "failed" | "stalled" | "scheduled";
 
 /** Information about a job, exposed to event handlers and externally. */
 export interface JobInfo<T, R = unknown> {
@@ -285,13 +285,21 @@ export interface JobInfo<T, R = unknown> {
 	duration?: number;
 	/** Number of processing attempts. */
 	attempts: number;
+	/** Progress value 0–1 (if reported by processor). */
+	progress?: number;
 }
 
 /** Events emitted by the job queue. */
-export type JobEvent = "completed" | "failed" | "stalled";
+export type JobEvent = "completed" | "failed" | "stalled" | "progress";
 
 /** What to do when a job stalls (exceeds ackTimeout). */
 export type StallAction = "none" | "cancel" | "retry";
+
+/** Options for adding a job (extends publish options with scheduling). */
+export interface AddJobOptions extends PublishOptions {
+	/** Schedule the job for delayed execution at a specific time. */
+	runAt?: Date;
+}
 
 /** Options for creating a job queue. */
 export interface JobQueueOptions<T> {
@@ -319,6 +327,15 @@ export interface JobQueueOptions<T> {
 	deadLetterTopic?: Topic<T>;
 	/** Topic options passed to the underlying topic. */
 	topicOptions?: Omit<TopicOptions<T>, "namespace">;
+	/** Rate limiting for job starts. Uses sliding window from utils/rateLimiter. */
+	rateLimit?: {
+		/** Max job starts allowed per window. */
+		max: number;
+		/** Window duration in ms. */
+		windowMs: number;
+	};
+	/** Persistence adapter for job state (status, attempts, result, error). */
+	persistence?: CheckpointAdapter;
 }
 
 /** A job queue built on topic + subscription + task processing. */
@@ -327,7 +344,16 @@ export interface JobQueue<T, R = void> {
 	readonly name: string;
 
 	/** Add a job to the queue. Returns the sequence number. */
-	add(data: T, opts?: PublishOptions): number;
+	add(data: T, opts?: AddJobOptions): number;
+	/** Add multiple jobs atomically. Returns sequence numbers. */
+	addBatch(items: T[], opts?: AddJobOptions): number[];
+
+	// --- Introspection (SA-3d) ---
+
+	/** Get job info by sequence number. Returns undefined if not tracked. */
+	getJob(seq: number): JobInfo<T, R> | undefined;
+	/** Remove (cancel) a job by sequence number. Returns true if found and removed. */
+	remove(seq: number): boolean;
 
 	// --- Companion stores (5e-7) ---
 
@@ -339,6 +365,8 @@ export interface JobQueue<T, R = void> {
 	readonly failed: Store<number>;
 	/** Reactive count of delayed/waiting jobs (backlog). */
 	readonly waiting: Store<number>;
+	/** Reactive aggregate progress across active jobs (0–1). */
+	readonly progress: Store<number>;
 
 	// --- Events (5e-7) ---
 
@@ -355,6 +383,11 @@ export interface JobQueue<T, R = void> {
 	readonly isPaused: boolean;
 	/** Destroy the queue and all internal resources. */
 	destroy(): void;
+
+	// --- Distributed (SA-3g) ---
+
+	/** The underlying topic, exposed for bridging via topicBridge. */
+	readonly inner: { topic: Topic<T> };
 }
 
 // ---------------------------------------------------------------------------

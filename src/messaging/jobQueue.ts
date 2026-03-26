@@ -1,13 +1,17 @@
 // ---------------------------------------------------------------------------
-// jobQueue — job processing built on topic + subscription (Phase 5e-6 + 5e-7)
+// jobQueue — job processing built on topic + subscription (SA-3)
 // ---------------------------------------------------------------------------
 // Wraps a topic (work queue) + subscription (shared consumer) + per-job task
 // processing. Each message becomes a job with status tracking. Includes event
-// subscriptions and stall detection (5e-7).
+// subscriptions, stall detection, progress reporting, priority ordering,
+// scheduled jobs, batch add, introspection, rate limiting, persistence,
+// and distributed job support via topicBridge.
 //
 // Usage:
-//   const q = jobQueue<string, number>("emails", async (signal, data) => {
+//   const q = jobQueue<string, number>("emails", async (signal, data, progress) => {
+//     progress(0.5);
 //     await sendEmail(data);
+//     progress(1);
 //     return 1;
 //   }, { concurrency: 5 });
 //   q.add("user@example.com");
@@ -23,17 +27,27 @@ import { rawFromAny } from "../raw/fromAny";
 import { fromTimer } from "../raw/fromTimer";
 import { rawSubscribe } from "../raw/subscribe";
 import { exponential } from "../utils/backoff";
+import type { RateLimiter } from "../utils/rateLimiter";
+import { slidingWindow } from "../utils/rateLimiter";
 import { subscription } from "./subscription";
 import { topic } from "./topic";
 import type {
+	AddJobOptions,
 	JobEvent,
 	JobInfo,
 	JobQueue,
 	JobQueueOptions,
 	JobStatus,
-	PublishOptions,
 	Topic,
+	TopicMessage,
 } from "./types";
+
+// ---------------------------------------------------------------------------
+// Constants
+// ---------------------------------------------------------------------------
+
+/** Maximum number of finished jobs retained for introspection (Fix B). */
+const MAX_FINISHED_JOBS = 10_000;
 
 // ---------------------------------------------------------------------------
 // Internal job record
@@ -47,9 +61,56 @@ interface JobRecord<T, R> {
 	error?: unknown;
 	duration?: number;
 	attempts: number;
+	progress: number;
 	startTime?: number;
+	/** Scheduled execution time (ms since epoch). */
+	runAt?: number;
 	/** Per-job abort controller, child of the queue-level controller. */
 	abort: AbortController;
+	/** Set to true when removed via remove() — guards against double-decrement (Fix 2). */
+	removed?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Persistence key helpers
+// ---------------------------------------------------------------------------
+
+function _jobKey(queueName: string, seq: number): string {
+	return `jobQueue:${queueName}:job:${seq}`;
+}
+
+function _indexKey(queueName: string): string {
+	return `jobQueue:${queueName}:index`;
+}
+
+/** Dummy AbortController for recovered finished jobs (Fix F). */
+const _dummyAbort = new AbortController();
+
+/**
+ * Synchronously resolve a value that may be a callbag source or plain value.
+ * Only supports sync adapters (memoryAdapter, etc.). Async adapters will
+ * trigger a console.warn and return undefined (Fix H).
+ */
+function _syncResolve<T>(val: T | undefined): T | undefined {
+	if (typeof val === "function") {
+		let result: T | undefined;
+		let gotValue = false;
+		(val as any)(0, (t: number, d: any) => {
+			if (t === 1) {
+				result = d;
+				gotValue = true;
+			}
+		});
+		if (!gotValue) {
+			console.warn(
+				"jobQueue persistence: async checkpoint adapters are not supported. " +
+					"Use a sync adapter (e.g., memoryAdapter).",
+			);
+			return undefined;
+		}
+		return result;
+	}
+	return val as T | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,7 +126,7 @@ interface JobRecord<T, R> {
  * on completion, failure, and stall detection.
  *
  * @param name - Queue name (used for topic and subscription naming).
- * @param processor - Function called per job. Receives `(signal, data)`. Signal is aborted on stall (if configured) or destroy.
+ * @param processor - Function called per job. Receives `(signal, data, progress)`. Signal is aborted on stall (if configured) or destroy. Progress is a callback accepting 0-1 values.
  * @param opts - Queue configuration.
  *
  * @returns `JobQueue<T, R>` — queue with add, event subscription, companion stores, and lifecycle.
@@ -74,15 +135,27 @@ interface JobRecord<T, R> {
  */
 export function jobQueue<T, R = void>(
 	name: string,
-	processor: (signal: AbortSignal, data: T) => R | Promise<R>,
+	processor: (signal: AbortSignal, data: T, progress: (value: number) => void) => R | Promise<R>,
 	opts?: JobQueueOptions<T>,
 ): JobQueue<T, R> {
 	const concurrency = opts?.concurrency ?? 1;
 	const ackTimeoutMs = opts?.ackTimeout ?? 30_000;
 	const stallIntervalMs = opts?.stallInterval ?? 5_000;
 	const stalledJobAction = opts?.stalledJobAction ?? "none";
+	// Fix 4: maxRetries means N retries on top of the initial attempt.
+	// Total attempts = 1 (initial) + maxRetries.
 	const maxRetries = opts?.retry?.maxRetries ?? 3;
 	const backoffStrategy = opts?.retry?.backoff ?? exponential();
+	const _persistence = opts?.persistence;
+
+	// --- Rate limiter (SA-3f) ---
+	let _rateLimiter: RateLimiter | undefined;
+	if (opts?.rateLimit) {
+		_rateLimiter = slidingWindow({
+			max: opts.rateLimit.max,
+			windowMs: opts.rateLimit.windowMs,
+		});
+	}
 
 	// --- Internal state ---
 	// _pausedStore is a reactive store so retry-path code can await unpause
@@ -92,12 +165,21 @@ export function jobQueue<T, R = void>(
 	let _processing = 0; // current active job count
 	const _queueAbort = new AbortController();
 	const _jobs = new Map<number, JobRecord<T, R>>();
+	// Track completed/failed jobs for introspection (SA-3d)
+	const _finishedJobs = new Map<number, JobRecord<T, R>>();
+	// FIFO eviction order for _finishedJobs (Fix B)
+	const _finishedOrder: number[] = [];
+	// Rate-limited jobs waiting for a token (SA-3f)
+	const _rateLimitQueue: JobRecord<T, R>[] = [];
+	// Deferred jobs waiting for concurrency slot (Fix 1)
+	const _deferredQueue: JobRecord<T, R>[] = [];
 
 	// --- Event listeners ---
 	const _listeners: Record<JobEvent, Set<(job: JobInfo<T, R>) => void>> = {
 		completed: new Set(),
 		failed: new Set(),
 		stalled: new Set(),
+		progress: new Set(),
 	};
 
 	// --- Companion stores (5e-7) ---
@@ -105,6 +187,7 @@ export function jobQueue<T, R = void>(
 	const _completedStore = state<number>(0, { name: `${name}:completed` });
 	const _failedStore = state<number>(0, { name: `${name}:failed` });
 	const _waitingStore = state<number>(0, { name: `${name}:waiting` });
+	const _progressStore = state<number>(0, { name: `${name}:progress` });
 
 	// --- Underlying topic + subscription ---
 	const _topic: Topic<T> = topic<T>(`${name}:jobs`, opts?.topicOptions);
@@ -133,6 +216,7 @@ export function jobQueue<T, R = void>(
 			error: rec.error,
 			duration: rec.duration,
 			attempts: rec.attempts,
+			progress: rec.progress,
 		};
 	}
 
@@ -152,17 +236,146 @@ export function jobQueue<T, R = void>(
 		_waitingStore.set(Math.max(0, _sub.backlog.get()));
 	}
 
+	/** Recalculate aggregate progress across active jobs. */
+	function _updateProgress(): void {
+		if (_destroyed) return;
+		let total = 0;
+		let count = 0;
+		for (const rec of _jobs.values()) {
+			if (rec.status === "active") {
+				total += rec.progress;
+				count++;
+			}
+		}
+		_progressStore.set(count > 0 ? total / count : 0);
+	}
+
+	/** Persist a job record (SA-3h). Does NOT rebuild the index — call _persistIndex() separately. */
+	function _persistJob(rec: JobRecord<T, R>): void {
+		if (!_persistence) return;
+		const data = {
+			seq: rec.seq,
+			data: rec.data,
+			status: rec.status,
+			result: rec.result,
+			error: rec.error,
+			duration: rec.duration,
+			attempts: rec.attempts,
+			progress: rec.progress,
+			runAt: rec.runAt,
+		};
+		_persistence.save(_jobKey(name, rec.seq), data);
+	}
+
+	/** Rebuild and persist the index (Fix C: only called on add/remove, not progress). */
+	function _persistIndex(): void {
+		if (!_persistence) return;
+		const allSeqs = new Set<number>();
+		for (const s of _jobs.keys()) allSeqs.add(s);
+		for (const s of _finishedJobs.keys()) allSeqs.add(s);
+		_persistence.save(_indexKey(name), Array.from(allSeqs));
+	}
+
+	/** Remove persisted job and update the index (Fix E). */
+	function _unpersistJob(seq: number): void {
+		if (!_persistence) return;
+		_persistence.clear(_jobKey(name, seq));
+		_persistIndex();
+	}
+
+	/** Add a record to _finishedJobs with FIFO eviction (Fix B). */
+	function _addFinished(rec: JobRecord<T, R>): void {
+		_finishedJobs.set(rec.seq, rec);
+		_finishedOrder.push(rec.seq);
+		while (_finishedJobs.size > MAX_FINISHED_JOBS) {
+			const oldest = _finishedOrder.shift();
+			if (oldest !== undefined) {
+				_finishedJobs.delete(oldest);
+				// Also remove from persistence
+				if (_persistence) _persistence.clear(_jobKey(name, oldest));
+			}
+		}
+	}
+
+	// --- Deferred queue drain (Fix 1) ---
+	// When a job finishes and a slot opens, drain deferred (scheduled/rate-limited) jobs first.
+	function _drainDeferred(): void {
+		while (_deferredQueue.length > 0 && _processing < concurrency) {
+			const rec = _deferredQueue.shift()!;
+			if (rec.removed || _destroyed) continue;
+			// Check pause (Fix G)
+			if (_pausedStore.get()) {
+				_deferredQueue.unshift(rec);
+				return;
+			}
+			_processJob(rec);
+		}
+	}
+
 	// --- Job processing (recursive continuation, no async/await) ---
 
 	function _processJob(rec: JobRecord<T, R>): void {
-		if (_destroyed) {
+		if (_destroyed || rec.removed) {
 			_finishJob(rec);
 			return;
 		}
 
+		// Fix 1: Concurrency check — defer if at capacity
+		if (_processing >= concurrency) {
+			_deferredQueue.push(rec);
+			return;
+		}
+
+		// Rate limiting (SA-3f): check before starting
+		if (_rateLimiter && !_rateLimiter.tryAcquire()) {
+			// Queue for later — wait for a token via callbag acquire()
+			_rateLimitQueue.push(rec);
+			rawSubscribe(
+				_rateLimiter.acquire(rec.abort.signal),
+				() => {
+					// Token acquired — remove from wait queue and process
+					const idx = _rateLimitQueue.indexOf(rec);
+					if (idx >= 0) _rateLimitQueue.splice(idx, 1);
+					if (_destroyed || rec.removed) {
+						_finishJob(rec);
+						return;
+					}
+					// Fix 1: Re-check concurrency after wait
+					if (_processing >= concurrency) {
+						_deferredQueue.push(rec);
+						return;
+					}
+					// Fix G: Check pause
+					if (_pausedStore.get()) {
+						_deferredQueue.push(rec);
+						return;
+					}
+					_startJob(rec);
+				},
+				{
+					onEnd: (err?: unknown) => {
+						if (err !== undefined) {
+							// Aborted while waiting for rate limit token
+							const idx = _rateLimitQueue.indexOf(rec);
+							if (idx >= 0) _rateLimitQueue.splice(idx, 1);
+							_finishJob(rec);
+						}
+					},
+				},
+			);
+			return;
+		}
+
+		_startJob(rec);
+	}
+
+	function _startJob(rec: JobRecord<T, R>): void {
+		if (rec.removed) return; // Fix 2: guard
+
 		rec.status = "active";
 		rec.startTime = Date.now();
 		rec.attempts++;
+		rec.progress = 0;
 		_processing++;
 
 		batch(() => {
@@ -170,9 +383,23 @@ export function jobQueue<T, R = void>(
 			_updateWaiting();
 		});
 
+		_persistJob(rec);
+
+		// Progress callback (SA-3a)
+		const progressFn = (value: number): void => {
+			if (_destroyed || rec.removed) return;
+			rec.progress = Math.max(0, Math.min(1, value));
+			_updateProgress();
+			_emit("progress", rec);
+			// Fix C: Only persist job data, not the index
+			_persistJob(rec);
+		};
+
 		rawSubscribe(
-			rawFromAny(processor(rec.abort.signal, rec.data)),
+			rawFromAny(processor(rec.abort.signal, rec.data, progressFn)),
 			(result: R) => {
+				// Fix 2: Guard against removed jobs
+				if (rec.removed) return;
 				if (_destroyed) {
 					_finishJob(rec);
 					return;
@@ -180,6 +407,7 @@ export function jobQueue<T, R = void>(
 
 				rec.status = "completed";
 				rec.result = result;
+				rec.progress = 1;
 				rec.duration = Date.now() - rec.startTime!;
 				_processing--;
 
@@ -189,14 +417,21 @@ export function jobQueue<T, R = void>(
 					_activeStore.update((v) => Math.max(0, v - 1));
 					_completedStore.update((v) => v + 1);
 					_updateWaiting();
+					_updateProgress();
 				});
 
+				// Move to finished for introspection
+				_addFinished(rec);
+				_persistJob(rec);
+				_persistIndex();
 				_emit("completed", rec);
 				_finishJob(rec);
 			},
 			{
 				onEnd: (err?: unknown) => {
 					if (err === undefined) return; // success — handled in DATA callback
+					// Fix 2: Guard against removed jobs
+					if (rec.removed) return;
 					if (_destroyed) {
 						_finishJob(rec);
 						return;
@@ -207,9 +442,11 @@ export function jobQueue<T, R = void>(
 
 					batch(() => {
 						_activeStore.update((v) => Math.max(0, v - 1));
+						_updateProgress();
 					});
 
-					if (rec.attempts < maxRetries) {
+					// Fix 4: maxRetries means N retries, total attempts = 1 + maxRetries
+					if (rec.attempts <= maxRetries) {
 						const delay = backoffStrategy(rec.attempts - 1, err, undefined);
 						if (delay === null) {
 							_failJob(rec, err);
@@ -218,12 +455,13 @@ export function jobQueue<T, R = void>(
 						}
 
 						const retryAfterDelay = () => {
+							if (rec.removed) return; // Fix 2
 							// Wait for unpause if paused (push-based via _pausedStore, no polling)
 							if (_pausedStore.get()) {
 								const unsub = subscribe(_pausedStore, (v) => {
 									if (v) return; // still paused
 									unsub.unsubscribe();
-									if (_destroyed) {
+									if (_destroyed || rec.removed) {
 										_finishJob(rec);
 										return;
 									}
@@ -272,7 +510,10 @@ export function jobQueue<T, R = void>(
 
 	function _finishJob(rec: JobRecord<T, R>): void {
 		_jobs.delete(rec.seq);
-		if (!_destroyed) _tryPull();
+		if (!_destroyed) {
+			_drainDeferred();
+			_tryPull();
+		}
 	}
 
 	function _failJob(rec: JobRecord<T, R>, err: unknown): void {
@@ -285,7 +526,13 @@ export function jobQueue<T, R = void>(
 		batch(() => {
 			_failedStore.update((v) => v + 1);
 			_updateWaiting();
+			_updateProgress();
 		});
+
+		// Move to finished for introspection
+		_addFinished(rec);
+		_persistJob(rec);
+		_persistIndex();
 
 		// Route to DLQ if configured
 		if (opts?.deadLetterTopic) {
@@ -318,15 +565,63 @@ export function jobQueue<T, R = void>(
 
 		_updateWaiting();
 
+		// SA-3b: Sort by priority (lower number = higher priority)
+		if (messages.length > 1) {
+			messages.sort((a: TopicMessage<T>, b: TopicMessage<T>) => {
+				const pa = a.priority ?? Number.MAX_SAFE_INTEGER;
+				const pb = b.priority ?? Number.MAX_SAFE_INTEGER;
+				return pa - pb;
+			});
+		}
+
 		for (const msg of messages) {
 			const rec: JobRecord<T, R> = {
 				seq: msg.seq,
 				data: msg.value,
 				status: "waiting",
 				attempts: 0,
+				progress: 0,
 				abort: _createJobAbort(),
 			};
 			_jobs.set(msg.seq, rec);
+
+			// SA-3c: Check for scheduled execution via header
+			const runAtHeader = msg.headers?.["x-run-at"];
+			if (runAtHeader) {
+				const runAtMs = Number(runAtHeader);
+				const delay = runAtMs - Date.now();
+				if (delay > 0) {
+					rec.status = "scheduled";
+					rec.runAt = runAtMs;
+					_persistJob(rec);
+					_persistIndex();
+					rawSubscribe(
+						fromTimer(delay, rec.abort.signal),
+						() => {
+							if (_destroyed || rec.removed) {
+								_finishJob(rec);
+								return;
+							}
+							// Fix G: Check pause
+							if (_pausedStore.get()) {
+								_deferredQueue.push(rec);
+								return;
+							}
+							// Fix 1: Concurrency check via _processJob
+							_processJob(rec);
+						},
+						{
+							onEnd: (err?: unknown) => {
+								if (err !== undefined) {
+									_finishJob(rec);
+								}
+							},
+						},
+					);
+					continue;
+				}
+			}
+
 			_processJob(rec);
 		}
 	}
@@ -348,7 +643,11 @@ export function jobQueue<T, R = void>(
 		const now = Date.now();
 		for (const rec of _jobs.values()) {
 			if (rec.status === "active" && rec.startTime && now - rec.startTime > ackTimeoutMs) {
-				rec.status = "stalled";
+				// Fix 3: For "none", keep status as "active" so stall events re-fire
+				// as a heartbeat. Only change status for "cancel"/"retry".
+				if (stalledJobAction === "cancel" || stalledJobAction === "retry") {
+					rec.status = "stalled";
+				}
 				_emit("stalled", rec);
 
 				// Apply stall recovery action
@@ -357,15 +656,43 @@ export function jobQueue<T, R = void>(
 					rec.abort.abort();
 					// The abort will cause the processor Promise to reject (if it
 					// checks signal), which flows through the normal catch path.
-					// "retry" works because the catch path retries if attempts < maxRetries.
-					// "cancel" works because we set attempts to maxRetries so catch falls through to _failJob.
+					// "retry" works because the catch path retries if attempts <= maxRetries.
+					// "cancel" works because we set attempts past maxRetries so catch falls through to _failJob.
 					if (stalledJobAction === "cancel") {
-						rec.attempts = maxRetries; // ensure no retry
+						rec.attempts = maxRetries + 1; // ensure no retry (Fix 4: aligned)
 					}
 				}
 			}
 		}
 	});
+
+	// --- Persistence recovery (SA-3h) ---
+	if (_persistence) {
+		const indexRaw = _syncResolve(_persistence.load(_indexKey(name)));
+		if (Array.isArray(indexRaw)) {
+			for (const seq of indexRaw as number[]) {
+				const jobData = _syncResolve(_persistence.load(_jobKey(name, seq))) as any;
+				if (!jobData) continue;
+				// Only recover non-terminal jobs
+				if (jobData.status === "completed" || jobData.status === "failed") {
+					// Store in finished for introspection (Fix F: use dummy abort)
+					const finishedRec: JobRecord<T, R> = {
+						seq: jobData.seq,
+						data: jobData.data,
+						status: jobData.status,
+						result: jobData.result,
+						error: jobData.error,
+						duration: jobData.duration,
+						attempts: jobData.attempts,
+						progress: jobData.progress ?? 0,
+						abort: _dummyAbort,
+					};
+					_addFinished(finishedRec);
+				}
+				// Active/waiting/scheduled jobs will be re-pulled from the topic
+			}
+		}
+	}
 
 	// Initial pull
 	_updateWaiting();
@@ -378,12 +705,78 @@ export function jobQueue<T, R = void>(
 			return name;
 		},
 
-		add(data: T, publishOpts?: PublishOptions): number {
-			const seq = _topic.publish(data, publishOpts);
+		// Fix A: Removed queueMicrotask — _depthSub already triggers _tryPull reactively
+		add(data: T, addOpts?: AddJobOptions): number {
+			// SA-3c: Scheduled jobs via runAt
+			const headers = { ...addOpts?.headers };
+			if (addOpts?.runAt) {
+				headers["x-run-at"] = String(addOpts.runAt.getTime());
+			}
+			const seq = _topic.publish(data, { ...addOpts, headers });
 			_updateWaiting();
-			// Trigger pull on next tick so the message is available
-			queueMicrotask(() => _tryPull());
 			return seq;
+		},
+
+		// SA-3e: Batch add (Fix A: no queueMicrotask)
+		addBatch(items: T[], addOpts?: AddJobOptions): number[] {
+			const seqs: number[] = [];
+			batch(() => {
+				for (const item of items) {
+					const headers = { ...addOpts?.headers };
+					if (addOpts?.runAt) {
+						headers["x-run-at"] = String(addOpts.runAt.getTime());
+					}
+					seqs.push(_topic.publish(item, { ...addOpts, headers }));
+				}
+			});
+			_updateWaiting();
+			return seqs;
+		},
+
+		// SA-3d: Introspection
+		getJob(seq: number): JobInfo<T, R> | undefined {
+			const rec = _jobs.get(seq) ?? _finishedJobs.get(seq);
+			return rec ? _toJobInfo(rec) : undefined;
+		},
+
+		remove(seq: number): boolean {
+			const rec = _jobs.get(seq);
+			if (!rec) return false;
+
+			const wasActive = rec.status === "active";
+
+			// Fix 2: Mark as removed to guard in-flight callbacks
+			rec.removed = true;
+
+			// Abort the job
+			rec.abort.abort();
+			rec.status = "failed";
+			rec.error = new Error("Job removed");
+			_sub.ack(rec.seq);
+
+			if (wasActive) {
+				_processing--;
+				batch(() => {
+					_activeStore.update((v) => Math.max(0, v - 1));
+					_updateProgress();
+				});
+			}
+
+			// Fix D: Update failed store, waiting, and emit event
+			batch(() => {
+				_failedStore.update((v) => v + 1);
+				_updateWaiting();
+			});
+			_emit("failed", rec);
+
+			_jobs.delete(seq);
+			_unpersistJob(seq);
+
+			// Remove from rate limit queue if queued
+			const rlIdx = _rateLimitQueue.indexOf(rec);
+			if (rlIdx >= 0) _rateLimitQueue.splice(rlIdx, 1);
+
+			return true;
 		},
 
 		// Companion stores
@@ -391,6 +784,7 @@ export function jobQueue<T, R = void>(
 		completed: _completedStore as Store<number>,
 		failed: _failedStore as Store<number>,
 		waiting: _waitingStore as Store<number>,
+		progress: _progressStore as Store<number>,
 
 		// Events
 		on(event: JobEvent, fn: (job: JobInfo<T, R>) => void): () => void {
@@ -411,11 +805,17 @@ export function jobQueue<T, R = void>(
 			if (!_pausedStore.get()) return;
 			_pausedStore.set(false); // triggers firstValueFrom waiters
 			_sub.resume();
+			_drainDeferred();
 			_tryPull();
 		},
 
 		get isPaused() {
 			return _pausedStore.get();
+		},
+
+		// SA-3g: Expose internal topic for bridging
+		get inner() {
+			return { topic: _topic };
 		},
 
 		destroy(): void {
@@ -429,6 +829,10 @@ export function jobQueue<T, R = void>(
 			_sub.destroy();
 			_topic.destroy();
 			_jobs.clear();
+			_finishedJobs.clear();
+			_finishedOrder.length = 0;
+			_rateLimitQueue.length = 0;
+			_deferredQueue.length = 0;
 
 			batch(() => {
 				teardown(_pausedStore);
@@ -436,6 +840,7 @@ export function jobQueue<T, R = void>(
 				teardown(_completedStore);
 				teardown(_failedStore);
 				teardown(_waitingStore);
+				teardown(_progressStore);
 			});
 		},
 	};
