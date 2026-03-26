@@ -429,65 +429,43 @@ Replaced `effect([store], fn)` with `subscribe(store, fn)` (core callbag sink) i
 - `reactiveScored` evict+reinsert: **15K → 880K ops/sec (58.6x faster)**. Gap vs `scored()` flipped from 17.3x slower to **3.75x faster**.
 - Collection x50 + byTag gap: **42.4x → 25.6x** (remaining gap dominated by per-node store creation).
 
+### 27. Cleanup orphaned heap entries on store END
+
+In `reactiveScored`, per-key `subscribe()` calls watch score stores for heap updates. If a score store completes (sends END), the subscribe callback stops firing but the heap entry and `_entries`/`_disposes` maps would retain the key — creating a zombie entry that is never evicted or cleaned up.
+
+**Fix:** Pass an `onEnd` handler to `subscribe` that calls `_removeAt()` to clean up the heap entry and map references when the score store completes:
+
+```ts
+const sub = subscribe(
+    store,
+    (value) => { /* existing heap sift logic */ },
+    {
+        onEnd: () => {
+            const entry = _entries.get(key);
+            if (!entry) return;
+            _removeAt(entry.index);
+            _entries.delete(key);
+            _disposes.delete(key);
+        },
+    },
+);
+```
+
+Defensive — no current code path causes `node.meta` to END independently. Relevant when future orchestration features (e.g., node disposal, hot-swap) start completing individual node stores. The guard `if (!entry) return` handles the case where the key was already manually deleted before the store completed.
+
 ---
 
 ## Potential optimizations
 
 These are not yet implemented but represent concrete opportunities for improvement.
 
-### 1. Atomic batch drain
-
-**Status:** Not implemented. **Impact:** Medium (correctness). **Priority:** Medium — only affects orchestration code that sends RESET inside `batch()`.
-
-During `batch()` drain, `batchDepth === 0` and `isBatching()` returns false. Any `set()` triggered by a drain callback fires synchronously (DIRTY + DATA immediately) rather than being deferred. This can cause derived stores to evaluate mid-drain with partially-settled state.
-
-**Scenario:** `pipeline.reset()` previously wrapped its RESET signals in `batch()`. RESET causes producers to re-emit initial values (deferred). During drain, those re-emissions trigger subscribe callbacks that call `meta.set()` — which fires synchronously since `batchDepth === 0`. This caused the status derived to evaluate with intermediate state.
-
-**Current workaround:** Pipeline now derives status from `taskState.status` (not stream-level meta counts), so RESET re-emissions don't affect status. The batch drain issue is bypassed, not fixed.
-
-**Proposed fix:** Increment `batchDepth` during drain so that emissions triggered by drain callbacks are deferred to the same drain pass:
-
-```ts
-// In batch() finally block:
-draining = true;
-batchDepth++;  // ← keep batching during drain
-for (let i = 0; i < deferredEmissions.length; i++) {
-    deferredEmissions[i]();
-}
-batchDepth--;
-deferredEmissions.length = 0;
-draining = false;
-```
-
-This would make drain fully atomic — all side-effect emissions are appended to `deferredEmissions` and processed in the same loop. Requires thorough testing since it changes fundamental batch drain semantics.
-
-### 2. Compile-time Inspector removal
+### 1. Compile-time Inspector removal
 
 **Status:** Not implemented. **Impact:** Low-medium (bundle size + micro-optimization). **Priority:** Low — not worth pursuing while the library is still in active development.
 
 A Babel/SWC plugin or separate entry point (`callbag-recharge/slim`) that removes all Inspector calls at build time, saving ~1 KB from the bundle and guaranteeing zero per-store overhead without runtime flag checks.
 
-### 3. Cleanup orphaned heap entries on store END
-
-**Status:** Not implemented. **Impact:** Low (correctness edge case). **Priority:** Low — `node.meta` stores don't complete independently of collection lifecycle in current usage.
-
-In `reactiveScored`, per-key `subscribe()` calls watch score stores for heap updates. If a score store completes (sends END), the subscribe callback stops firing but the heap entry and `_entries`/`_disposes` maps retain the key — creating a zombie entry that is never evicted or cleaned up.
-
-**Proposed fix:** Pass an `onEnd` handler to `subscribe` (or listen for the unsubscribe signal) that calls `remove(key)` to clean up the heap entry and map references:
-
-```ts
-const sub = subscribe(store, (value) => {
-    // ... existing heap sift logic
-});
-// Also handle store completion:
-sub.signal().addEventListener("abort", () => {
-    remove(key);
-});
-```
-
-This is defensive — no current code path causes `node.meta` to END independently. Only relevant if future orchestration features (e.g., node disposal, hot-swap) start completing individual node stores.
-
-### 4. vectorIndex: max-heap for searchLayer results
+### 2. vectorIndex: max-heap for searchLayer results
 
 **Status:** Not implemented. **Impact:** Medium (performance). **Priority:** Medium — matters at `efConstruction=200+` or high-M values.
 
@@ -495,7 +473,7 @@ This is defensive — no current code path causes `node.meta` to END independent
 
 **Proposed fix:** Add a max-heap (inverted comparator) for the results set. Maintain `worstDist` at the root. Replace the linear scan with `heapPeek` and use `heapReplaceTop` for the swap-and-sift operation.
 
-### 5. vectorIndex: compact soft-deleted nodes
+### 3. vectorIndex: compact soft-deleted nodes
 
 **Status:** Not implemented. **Impact:** Medium (memory). **Priority:** Low — only matters for long-lived indices with high churn (e.g., sliding-window agent memory).
 
@@ -503,7 +481,7 @@ This is defensive — no current code path causes `node.meta` to END independent
 
 **Proposed fix:** Either (a) null out `vector` and clear `neighbors` on delete to free the heavy fields while keeping the tombstone lightweight, or (b) implement periodic compaction that rebuilds the index, reindexing `idToIdx`. Option (a) is simpler but doesn't shrink the `nodes` array; option (b) gives full reclamation but requires a rebuild pass.
 
-### 6. agentMemory: scope tag collision mitigation
+### 4. agentMemory: scope tag collision mitigation
 
 **Status:** Not implemented. **Impact:** Low (correctness edge case). **Priority:** Low — only matters if LLM-extracted tags happen to match the `scope:` prefix.
 
@@ -513,7 +491,7 @@ This is defensive — no current code path causes `node.meta` to END independent
 
 **Proposed fix:** Use a longer, reserved prefix that the LLM would never generate: `__scope:v1:user:alice` or a UUID-based namespace `__ns:7f3a:user:alice`. Strip any tags matching the reserved prefix pattern from LLM-extracted facts before storage. Cost: one string check per extracted tag on the `add()` path.
 
-### 7. Effect RESET: shared `sinkGens` array
+### 5. Effect RESET: shared `sinkGens` array
 
 Moved `sinkGen` from per-dep closure locals to a shared `sinkGens: number[]` array. On RESET, all entries are updated so no dep closure becomes deaf to post-RESET signals. Previously, external RESET (`dispose.signal(RESET)`) updated no dep's `sinkGen`, and RESET via one dep only updated that dep's `sinkGen` — all other deps became permanently deaf.
 
@@ -523,13 +501,13 @@ The RESET handler calls `cleanup()` to tear down side effects from the last run,
 
 **Hot-path impact:** `sinkGens[depIndex]` (array index lookup) vs `sinkGen` (local variable). ~1-2ns overhead per signal — negligible vs the closure call cost.
 
-### 8. Producer RESET: purely lifecycle, no re-emission
+### 6. Producer RESET: purely lifecycle, no re-emission
 
 Producer/state `_handleLifecycleSignal(RESET)` resets `_value` to `_initial` and calls the `onSignal` handler, but does **not** call `emit()`. Previously, the RESET handler called `this.emit(this._initial)` — but this was suppressed by the equality guard (since `_value` was just set to `_initial`), so it was a no-op anyway. The Python port added `_force=true` to bypass equality, but the cleaner design is to not emit at all.
 
 **Rationale:** RESET means "clear transient state, prepare for re-trigger" — not "clear and restart." The user decides when to restart by explicitly pushing new data (e.g., `state.set()`) or triggering from outside. This aligns with the effect-side fix (#7) where RESET does not call `run()`. Neither push nor pull auto-fires on RESET.
 
-### 9. Batch drain resilience
+### 7. Batch drain resilience
 
 Per-emission `try/catch` in the batch drain loop ensures one throwing callback doesn't orphan remaining deferred emissions. The first error is captured and re-thrown after all emissions are processed. The drain loop itself is wrapped in `try/finally` so `draining` is always reset to `false` and `deferredEmissions` is always cleared. Previously, one throw permanently broke all future `batch()` usage — `draining` stayed `true`, causing all subsequent batch drains to be skipped.
 

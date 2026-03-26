@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { producer } from "../../core/producer";
 import { state } from "../../core/state";
 import { reactiveScored } from "../../utils/reactiveEviction";
 
@@ -167,6 +168,44 @@ describe("reactiveScored", () => {
 		// Push key 3 to score -1 — should become new min
 		stores[3].set(-1);
 		expect(p.evict()).toEqual([3]);
+	});
+
+	// ---- store END cleanup (optimizations.md #3) ----
+
+	it("store END removes entry from heap automatically", () => {
+		let completeA: (() => void) | undefined;
+		const storeA = producer<number>(({ emit, complete }) => {
+			emit(10);
+			completeA = complete;
+		});
+		const storeB = state(20);
+		const p = reactiveScored<string>((k) => (k === "a" ? storeA : storeB));
+		p.insert("a");
+		p.insert("b");
+		expect(p.size()).toBe(2);
+
+		// Complete storeA — should auto-remove "a" from heap
+		completeA!();
+		expect(p.size()).toBe(1);
+		expect(p.evict()).toEqual(["b"]);
+	});
+
+	it("store END after manual delete does not double-remove", () => {
+		let completeA: (() => void) | undefined;
+		const storeA = producer<number>(({ emit, complete }) => {
+			emit(5);
+			completeA = complete;
+		});
+		const p = reactiveScored<string>((_k) => storeA);
+		p.insert("a");
+
+		// Manually delete first
+		p.delete("a");
+		expect(p.size()).toBe(0);
+
+		// Now complete — onEnd fires but entry is already gone, should be a no-op
+		completeA!();
+		expect(p.size()).toBe(0);
 	});
 
 	it("evicts in correct order after reactive score reordering", () => {

@@ -117,14 +117,28 @@ export function reactiveScored<K, S = number>(
 			// Subscribe: when store emits, compute score and sift to new position.
 			// Uses subscribe (callbag sink) instead of effect — no DIRTY/RESOLVED
 			// overhead, no eager first run, no cleanup return handling.
-			const sub = subscribe(store, (value) => {
-				const e = _entries.get(key);
-				if (!e) return;
-				const prev = e.score;
-				e.score = scoreOf(value);
-				if (e.score < prev) _siftUp(e.index);
-				else if (e.score > prev) _siftDown(e.index);
-			});
+			const sub = subscribe(
+				store,
+				(value) => {
+					const e = _entries.get(key);
+					if (!e) return;
+					const prev = e.score;
+					e.score = scoreOf(value);
+					if (e.score < prev) _siftUp(e.index);
+					else if (e.score > prev) _siftDown(e.index);
+				},
+				{
+					// If the score store completes (END), clean up the heap entry
+					// to prevent zombie entries that are never evicted.
+					onEnd: () => {
+						const entry = _entries.get(key);
+						if (!entry) return;
+						_removeAt(entry.index);
+						_entries.delete(key);
+						_disposes.delete(key);
+					},
+				},
+			);
 			_disposes.set(key, () => sub.unsubscribe());
 		},
 
