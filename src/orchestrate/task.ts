@@ -27,6 +27,7 @@ import { subscribe } from "../extra/subscribe";
 import { switchMap } from "../extra/switchMap";
 import { fromTimer } from "../raw/fromTimer";
 import { rawSubscribe } from "../raw/subscribe";
+import { resolveBackoffPreset } from "../utils/backoff";
 import type { RetryOptions } from "../utils/retry";
 import type { StepDef } from "./pipeline";
 import { taskState } from "./taskState";
@@ -152,7 +153,9 @@ export function task<T>(
 	const retryCount =
 		retryOpt === undefined ? 0 : typeof retryOpt === "number" ? retryOpt : (retryOpt.count ?? 3);
 	const retryDelay =
-		retryOpt !== undefined && typeof retryOpt !== "number" ? retryOpt.delay : undefined;
+		retryOpt !== undefined && typeof retryOpt !== "number"
+			? (retryOpt.delay ?? (retryOpt.backoff ? resolveBackoffPreset(retryOpt.backoff) : undefined))
+			: undefined;
 	const retryWhile =
 		retryOpt !== undefined && typeof retryOpt !== "number" ? retryOpt.while : undefined;
 

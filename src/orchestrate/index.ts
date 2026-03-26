@@ -62,9 +62,11 @@ export { onFailure } from "./onFailure";
 export type {
 	PipelineInner,
 	PipelineResult,
+	PipelineSnapshot,
 	PipelineStatus,
 	StepDef,
 	StepMeta,
+	StepSnapshot,
 } from "./pipeline";
 export { pipeline, source, step } from "./pipeline";
 export type {
@@ -78,6 +80,8 @@ export type { SensorOpts, SensorStepDef } from "./sensor";
 export { sensor } from "./sensor";
 export type { SubPipelineDef, SubPipelineOpts, SubPipelineStepDef } from "./subPipeline";
 export { subPipeline } from "./subPipeline";
+export type { SwitchStepDef } from "./switchStep";
+export { switchStep } from "./switchStep";
 export type { TaskOpts, TaskStepDef } from "./task";
 export { task } from "./task";
 export { taskState } from "./taskState";

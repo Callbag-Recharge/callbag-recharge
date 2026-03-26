@@ -416,6 +416,17 @@ Implemented `toolRegistry` — reactive tool dispatch with dual execution modes 
 
 **Session 2 (March 25):** Extended to four standalone products architecture. agentMemory (Mem0-equivalent) composes jobQueue (extraction + embedding) and topic (multi-agent coordination). Distribution via topic bridge with transport adapters. Orchestration/messaging/jobQueue each polished as standalone products. Implementation order: orchestration → messaging → jobQueue → agentMemory.
 
+### Session surface-declarative-ui-descriptors (March 25) — Surface: Declarative UI Descriptors
+**Topic:** Lightweight spontaneous UI for presenting orchestrate/messaging/jobQueue/LLM results — researched A2UI (Google), AG-UI (CopilotKit), Vercel streamUI, and the broader generative UI trend
+
+**Key insight:** Don't lock into any external protocol (A2UI v0.8, AG-UI too young). Instead, `surface()` is "just another `derived()` store" that maps state → declarative JSON descriptors. `autoSurface()` uses Inspector metadata to auto-generate sensible defaults for known types (pipeline→progress, jobQueue→metric+log, chatStream→chat). Own the descriptor shape; add `toA2UI()`/`toAgUI()` adapters when specs stabilize.
+
+**Inspector vs Surface — no overlap:** Inspector is devtools (protocol internals, DIRTY/RESOLVED, graph edges). Surface is product UI (domain semantics — step names, progress, results). Inspector metadata *feeds into* `autoSurface()` but they serve completely different audiences.
+
+**Rejected:** Lock into A2UI (spec immature, overkill for JS devs); lock into AG-UI (callbag IS the transport); heavy visual builder (against composable primitives philosophy); surface as new primitive type (derived + convention is simpler); renderers in core package (framework-specific, belongs in compat/).
+
+**Outcome:** Phase SU (Surface Layer) added to roadmap. 7 descriptor types (progress, table, log, form, metric, chat, diagram). `surface()` + `autoSurface()` + `dashboard()` API. Framework renderers in compat/ (~200 lines each). Protocol adapters deferred until A2UI/AG-UI stabilize.
+
 ---
 
 ## Archived Documents (formerly in docs/)

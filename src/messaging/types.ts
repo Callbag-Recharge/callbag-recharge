@@ -70,6 +70,8 @@ export interface TopicOptions<T> {
 		/** Dedup window in ms. Default: 60_000. */
 		windowMs?: number;
 	};
+	/** Time-to-live for messages in ms. Expired messages are removed on each publish. Call `expireMessages()` for explicit cleanup. 0 = no expiry (default). */
+	ttl?: number;
 }
 
 export interface PublishOptions {
@@ -118,6 +120,8 @@ export interface Topic<T> extends NodeV0 {
 
 	/** Peek at the oldest message without consuming. */
 	peek(): TopicMessage<T> | undefined;
+	/** Eagerly remove all messages older than TTL. Returns number of expired messages. No-op if TTL is 0. */
+	expireMessages(): number;
 	/** Pause publishing (messages are dropped while paused). Dispatches PAUSE signal through companion stores. */
 	pause(): void;
 	/** Resume publishing. Dispatches RESUME signal through companion stores. */
@@ -215,6 +219,8 @@ export interface TopicSubscription<T> {
 	readonly backlog: Store<number>;
 	/** Reactive count of pulled-but-unacked messages. */
 	readonly pending: Store<number>;
+	/** Reactive time-based consumer lag in ms (time since oldest unread message was published, 0 if caught up). */
+	readonly lag: Store<number>;
 
 	// --- Lifecycle ---
 

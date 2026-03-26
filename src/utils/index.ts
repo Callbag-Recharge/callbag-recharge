@@ -9,13 +9,14 @@ export { asyncQueue } from "./asyncQueue";
 export type { AutoSaveOptions, AutoSaveResult } from "./autoSave";
 export { autoSave } from "./autoSave";
 // Backoff strategies
-export type { BackoffStrategy, ExponentialOptions, JitterMode } from "./backoff";
+export type { BackoffPreset, BackoffStrategy, ExponentialOptions, JitterMode } from "./backoff";
 export {
 	constant,
 	decorrelatedJitter,
 	exponential,
 	fibonacci,
 	linear,
+	resolveBackoffPreset,
 	withMaxAttempts,
 } from "./backoff";
 // Batch writer

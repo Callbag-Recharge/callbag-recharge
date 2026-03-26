@@ -15,7 +15,7 @@
 | Extra | 69 | Operators (`map`, `filter`, `switchMap`, `exhaustMap`, `pausable`, `cached`, …), sources (`fromPromise`, `fromEvent`, `fromAny`, …), sinks (`subscribe`, `forEach`) |
 | Utils | 31 | `retry`, `withBreaker`, `withStatus`, `withConnectionStatus`, `withSchema`, `cascadingCache`, `checkpoint` + 3 adapters (file/SQLite/IndexedDB), `track`, `dag`, `backoff`, `circuitBreaker`, `rateLimiter`, `tokenTracker`, `priorityQueue`, `namespace`, `transaction`, `tieredStorage`, `keyedAsync`, … |
 | Data | 6 | `reactiveMap`, `reactiveLog`, `reactiveIndex`, `reactiveList`, `pubsub`, `compaction` |
-| Messaging | 5 | `topic`, `subscription`, `repeatPublish`, `jobQueue`, `jobFlow` — Pulsar-inspired topic/subscription + job queues |
+| Messaging | 10 | `topic`, `subscription`, `repeatPublish`, `jobQueue`, `jobFlow`, `topicBridge`, `wsMessageTransport`, `h2MessageTransport`, `admin` (listTopics/inspectSubscription/resetCursor), `transportTypes` — Pulsar-inspired topic/subscription + job queues + distributed bridge |
 | Memory | 5 | `collection`, `lightCollection`, `decay`, `node`, `vectorIndex` (HNSW) |
 | Orchestrate | 17 | `pipeline`, `task`, `branch`, `approval`, `gate`, `taskState`, `executionLog`, `join`, `toMermaid`, `toD2`, `pipelineRunner`, `sensor`, `loop`, `forEach`, `onFailure`, `wait`, `subPipeline` |
 | Patterns | 10 | `createStore`, `textEditor`, `formField`, `undoRedo`, `pagination`, `commandBus`, `focusManager`, `selection`, `textBuffer`, `rateLimiter` |
@@ -205,27 +205,27 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 |---|-------------|------|--------|
 | SA-1a | Pipeline timeout | Global pipeline-level timeout (currently only task-level) | S |
 | SA-1b | N-way switch step | `switch(dep, cases)` — branch() is binary; need N outcomes | S-M |
-| SA-1c | Per-step metrics | Reactive latency/throughput/error-rate stores per step | S |
-| SA-1d | Pipeline pause/resume | Pause all active tasks, resume from same point | S-M |
-| SA-1e | Admin introspection | `pipeline.inspect()` → snapshot of all step statuses, pending approvals, active tasks | S |
+| ~~SA-1c~~ | ~~Per-step metrics~~ | **Shipped** — `StepMeta` extended with `errorCount`, `errorRate`, `startedAt`, `lastEmitAt`, `lastLatency`, `avgLatency`, `throughput`. `inspect()` surfaces all metrics. | S |
+| ~~SA-1d~~ | ~~Pipeline pause/resume~~ | **Shipped** — `pause()`/`resume()` on `PipelineResult`, `paused` reactive store, `"paused"` in `PipelineStatus`. PAUSE/RESUME TYPE 3 STATE signals propagate through graph (§1.15). Timeout disarms on pause, re-arms on resume. | S-M |
+| SA-1e | Admin introspection | `pipeline.inspect()` → snapshot of all step statuses, pending approvals, active tasks. Follow-up: include external tasks (`opts.tasks`) and switch case sub-steps in snapshot. | S |
 | SA-1f | Backoff presets | Integrate `utils/backoff` strategies into task retry (currently raw delay callback) | S |
 
-#### SA-2: Messaging Bus Distribution
+#### SA-2: Messaging Bus Distribution ✅
 
 > **Goal:** Add distribution to messaging (topic bridge + transport adapters).
 >
 > **Depends on:** SA-1 (orchestration polish for pipelineRunner).
 
-| # | Deliverable | What | Effort |
-|---|-------------|------|--------|
-| SA-2a | Message transport interface | Messaging-native transport abstraction (separate from memory/'s transports — carries `TopicMessage<T>` not `SessionEvent<T>`) | S |
-| SA-2b | `wsMessageTransport` | WebSocket transport adapter for topic bridge (browser + Node) | M |
-| SA-2c | `h2MessageTransport` | HTTP/2 bidirectional stream transport (Node only) | M |
-| SA-2d | `topicBridge` | Bidirectional local↔remote topic sync with echo-dedup via message ID | M |
-| SA-2e | Message filtering | Server-side filter on subscription (by key, header, content predicate) | S |
-| SA-2f | Consumer lag + TTL | Time-based consumer lag metric; per-topic TTL auto-expiry | S |
-| SA-2g | Admin API | `listTopics()`, `inspectSubscription(name)`, `resetCursor(name)` | S-M |
-| SA-2h | Backpressure signaling | Producer gets reactive store signal when consumers can't keep up | S |
+| # | Deliverable | What | Effort | Status |
+|---|-------------|------|--------|--------|
+| SA-2a | Message transport interface | `MessageTransport` + `TransportEnvelope` types in `transportTypes.ts` | S | ✅ |
+| SA-2b | `wsMessageTransport` | WebSocket transport with auto-reconnect, exponential backoff, configurable send buffer | M | ✅ |
+| SA-2c | `h2MessageTransport` | HTTP/2 bidirectional stream transport (Node only), NDJSON framing, configurable send buffer | M | ✅ |
+| SA-2d | `topicBridge` | Bidirectional local↔remote topic sync with echo-dedup via originId, catch-up on batched publishes | M | ✅ |
+| SA-2e | Message filtering | Bridge-level filter by key, header match, content predicate (`MessageFilter<T>`) | S | ✅ |
+| SA-2f | Consumer lag + TTL | `lag` derived store on subscription; `ttl` option + `expireMessages()` on topic (publish-time expiry via `trimHead`) | S | ✅ |
+| SA-2g | Admin API | `listTopics()`, `inspectSubscription()`, `resetCursor()` in `admin.ts` | S-M | ✅ |
+| SA-2h | Backpressure signaling | Reactive `state<boolean>` stores per topic on bridge, updated via backpressure envelopes | S | ✅ |
 
 #### SA-3: Job Queue Standalone
 
@@ -277,6 +277,31 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | SA-5b | `supervisor` | Higher-level orchestrator: decomposes goals into subtasks, routes to pool agents, merges results. Built on `agentPool` + `jobFlow`. | L |
 | SA-5c | Shared tool registry | Multiple agents share one `toolRegistry` instance — concurrent access via jobQueue serialization. | S-M |
 | SA-5d | Agent handoff | Structured handoff protocol between agents (context transfer, task delegation, result reporting). | M |
+
+---
+
+### Phase SU: Surface Layer — Declarative UI Descriptors
+
+> **Goal:** Lightweight spontaneous UI so users can see orchestrate/messaging/jobQueue/LLM
+> results without learning callbag internals or manually wiring UI. `surface()` is a `derived()`
+> that maps store state → declarative JSON descriptors. Framework renderers consume descriptors.
+> Protocol adapters (`toA2UI()`, `toAgUI()`) deferred until specs stabilize.
+>
+> **Depends on:** SA-1 (orchestrate polish), SA-3 (jobQueue). Enhances Phase 7.5 (pre-launch).
+>
+> **Design session:** `src/archive/docs/SESSION-surface-declarative-ui-descriptors.md`
+>
+> **Research context:** A2UI (Google, Dec 2025), AG-UI (CopilotKit), Vercel streamUI, Thesys/Crayon.
+> Decision: don't lock in — own the descriptor shape, add protocol adapters later.
+
+| # | Deliverable | What | Effort |
+|---|-------------|------|--------|
+| SU-1 | `surface()` core | `surface(store, mapper)` → `Store<SurfaceDescriptor>`. 7 descriptor types: progress, table, log, form, metric, chat, diagram. Type definitions. ~20 lines of core logic (literally a `derived` with type convention). | S |
+| SU-2 | `autoSurface()` | Auto-generate descriptors from known store types using Inspector metadata. Pipeline → progress, jobQueue → metric+log, chatStream → chat, topic → log, collection → table. | S-M |
+| SU-3 | `dashboard()` | Compose multiple `Store<SurfaceDescriptor>` into a grid/stack/tabs layout descriptor. | S |
+| SU-4 | React renderer | `<Surface store={ui} />` — switch over descriptor type, ~200 lines. Override any type via `components` prop. | M |
+| SU-5 | Vue renderer | `<Surface :store="ui" />` — integrates into docs site for live demos. | M |
+| SU-6 | Protocol adapters | `toA2UI(descriptor)`, `toAgUI(descriptor)` — when external specs stabilize. | S |
 
 ---
 

@@ -112,7 +112,7 @@ export interface LogEntry<V> {
 	value: V;
 }
 
-export type LogEventType = "append" | "clear";
+export type LogEventType = "append" | "trim" | "clear";
 
 export interface LogEvent<V> {
 	type: LogEventType;
@@ -161,6 +161,8 @@ export interface ReactiveLog<V> extends NodeV0 {
 
 	// --- Lifecycle ---
 
+	/** Remove up to `count` entries from the head (oldest first). Returns the number actually removed. */
+	trimHead(count: number): number;
 	/** Remove all entries. */
 	clear(): void;
 	/** Tear down all stores. */

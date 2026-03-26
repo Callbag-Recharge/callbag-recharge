@@ -105,6 +105,28 @@ export function topic<T>(name: string, opts?: TopicOptions<T>): Topic<T> {
 		}
 	}
 
+	// --- TTL ---
+	const _ttl = opts?.ttl ?? 0;
+
+	/** Remove expired messages from the head of the log. Returns count removed. */
+	function _expireMessages(): number {
+		if (_ttl <= 0 || _log.length === 0) return 0;
+		const cutoff = Date.now() - _ttl;
+		let expired = 0;
+		const entries = _log.toArray();
+		for (const entry of entries) {
+			if (entry.value.timestamp < cutoff) {
+				expired++;
+			} else {
+				break; // entries are ordered by time
+			}
+		}
+		if (expired > 0) {
+			_log.trimHead(expired);
+		}
+		return expired;
+	}
+
 	// --- State ---
 	let _paused = false;
 	let _destroyed = false;
@@ -160,6 +182,9 @@ export function topic<T>(name: string, opts?: TopicOptions<T>): Topic<T> {
 	// --- Publish ---
 	function publish(value: T, publishOpts?: PublishOptions): number {
 		if (_destroyed || _paused) return -1;
+
+		// TTL expiry: clean up expired messages on publish (side-effect-free reads)
+		if (_ttl > 0) _expireMessages();
 
 		// Schema validation (throws on invalid)
 		if (_schema) {
@@ -262,6 +287,10 @@ export function topic<T>(name: string, opts?: TopicOptions<T>): Topic<T> {
 			if (_log.length === 0) return undefined;
 			const entry = _log.get(_log.headSeq);
 			return entry ? toMessage(entry) : undefined;
+		},
+
+		expireMessages() {
+			return _expireMessages();
 		},
 
 		pause() {

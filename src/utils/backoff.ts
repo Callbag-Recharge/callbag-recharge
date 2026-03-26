@@ -125,3 +125,35 @@ function applyJitter(delay: number, mode: JitterMode): number {
 function randomBetween(min: number, max: number): number {
 	return min + Math.random() * (max - min);
 }
+
+// ---------------------------------------------------------------------------
+// resolveBackoffPreset — resolve a named preset to a BackoffStrategy
+// ---------------------------------------------------------------------------
+
+/** Named backoff preset. Resolved to a BackoffStrategy by `resolveBackoffPreset`. */
+export type BackoffPreset =
+	| "constant"
+	| "linear"
+	| "exponential"
+	| "fibonacci"
+	| "decorrelatedJitter";
+
+/** Resolve a named backoff preset to a BackoffStrategy with default options. */
+export function resolveBackoffPreset(name: BackoffPreset): BackoffStrategy {
+	switch (name) {
+		case "constant":
+			return constant(1000);
+		case "linear":
+			return linear(1000);
+		case "exponential":
+			return exponential();
+		case "fibonacci":
+			return fibonacci();
+		case "decorrelatedJitter":
+			return decorrelatedJitter();
+		default:
+			throw new Error(
+				`Unknown backoff preset: "${name}". Use one of: constant, linear, exponential, fibonacci, decorrelatedJitter`,
+			);
+	}
+}

@@ -3,7 +3,9 @@ import { producer } from "../core/producer";
 import { END, START } from "../core/protocol";
 import { state } from "../core/state";
 import type { Store, StoreOperator } from "../core/types";
-import type { BackoffStrategy } from "./backoff";
+import { fromTimer } from "../raw/fromTimer";
+import { rawSubscribe } from "../raw/subscribe";
+import { type BackoffPreset, type BackoffStrategy, resolveBackoffPreset } from "./backoff";
 
 /** Delay strategy: returns ms to wait, or null to stop. */
 export type DelayStrategy = (attempt: number, error?: unknown, prevDelay?: number) => number | null;
@@ -13,6 +15,12 @@ export interface RetryOptions {
 	count?: number;
 	/** Backoff strategy — returns ms to wait, or null to stop. */
 	delay?: BackoffStrategy;
+	/**
+	 * Named backoff preset. Shorthand for `delay` — uses default options.
+	 * One of: "constant", "linear", "exponential", "fibonacci", "decorrelatedJitter".
+	 * Ignored if `delay` is also provided.
+	 */
+	backoff?: BackoffPreset;
 	/** Predicate — retry only if this returns true for the error. */
 	while?: (error: unknown) => boolean;
 }
@@ -45,8 +53,10 @@ export interface RetryMeta {
 export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 	const opts: RetryOptions = typeof config === "number" ? { count: config } : config;
 
-	const maxRetries = opts.count ?? (opts.delay ? Infinity : 0);
-	const delayFn = opts.delay ?? null;
+	const resolvedDelay =
+		opts.delay ?? (opts.backoff ? resolveBackoffPreset(opts.backoff) : undefined);
+	const maxRetries = opts.count ?? (resolvedDelay ? Infinity : 0);
+	const delayFn = resolvedDelay ?? null;
 	const whileFn = opts.while ?? null;
 
 	return (input: Store<A>) => {
@@ -69,7 +79,7 @@ export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 				let lastDelay: number | undefined;
 				let inputTalkback: ((type: number) => void) | null = null;
 				let initialized = false;
-				let timer: ReturnType<typeof setTimeout> | null = null;
+				let timerAc: AbortController | null = null;
 				let stopped = false;
 
 				function connectInput() {
@@ -123,15 +133,16 @@ export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 												lastError: data,
 												pending: true,
 											});
-											timer = setTimeout(() => {
-												timer = null;
+											timerAc = new AbortController();
+											rawSubscribe(fromTimer(delayMs, timerAc.signal), () => {
+												timerAc = null;
 												updateMeta({
 													attempt,
 													lastError: data,
 													pending: false,
 												});
 												connectInput();
-											}, delayMs);
+											});
 										}
 									}
 								} else {
@@ -149,9 +160,9 @@ export function retry<A>(config: number | RetryOptions): StoreOperator<A, A> {
 
 				return () => {
 					stopped = true;
-					if (timer !== null) {
-						clearTimeout(timer);
-						timer = null;
+					if (timerAc) {
+						timerAc.abort();
+						timerAc = null;
 					}
 					if (inputTalkback) inputTalkback(END);
 				};

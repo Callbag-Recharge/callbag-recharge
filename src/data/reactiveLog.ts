@@ -212,6 +212,25 @@ export function reactiveLog<V>(opts?: ReactiveLogOptions): ReactiveLog<V> {
 			return _seq;
 		},
 
+		trimHead(count: number): number {
+			const currentLength = bounded ? _count : _entries.length;
+			if (currentLength === 0 || count <= 0) return 0;
+			const toRemove = Math.min(count, currentLength);
+
+			batch(() => {
+				if (bounded) {
+					_head = (_head + toRemove) % maxSize;
+					_count -= toRemove;
+				} else {
+					_entries.splice(0, toRemove);
+				}
+				_headSeq += toRemove;
+				_version.update((v) => v + 1);
+				_events.set({ type: "trim" });
+			});
+			return toRemove;
+		},
+
 		clear(): void {
 			const currentLength = bounded ? _count : _entries.length;
 			if (currentLength === 0) return;

@@ -134,6 +134,7 @@ const REGISTRY = {
 	cascadingCache: "src/utils/cascadingCache.ts",
 	keyedAsync: "src/utils/keyedAsync.ts",
 	retry: "src/utils/retry.ts",
+	resolveBackoffPreset: "src/utils/backoff.ts",
 	tieredStorage: "src/utils/tieredStorage.ts",
 	track: "src/utils/track.ts",
 	checkpoint: "src/utils/checkpoint.ts",
@@ -177,6 +178,7 @@ const REGISTRY = {
 	source: "src/orchestrate/pipeline.ts",
 	task: "src/orchestrate/task.ts",
 	branch: "src/orchestrate/branch.ts",
+	switchStep: "src/orchestrate/switchStep.ts",
 	approval: "src/orchestrate/approval.ts",
 	gate: "src/orchestrate/gate.ts",
 	executionLog: "src/orchestrate/executionLog.ts",
@@ -211,6 +213,12 @@ const REGISTRY = {
 	repeatPublish: "src/messaging/repeatPublish.ts",
 	jobQueue: "src/messaging/jobQueue.ts",
 	jobFlow: "src/messaging/jobFlow.ts",
+	topicBridge: "src/messaging/topicBridge.ts",
+	wsMessageTransport: "src/messaging/wsTransport.ts",
+	h2MessageTransport: "src/messaging/h2Transport.ts",
+	listTopics: "src/messaging/admin.ts",
+	inspectSubscription: "src/messaging/admin.ts",
+	resetCursor: "src/messaging/admin.ts",
 
 	// Patterns
 	textBuffer: "src/patterns/textBuffer/index.ts",

@@ -513,6 +513,135 @@ This is defensive — no current code path causes `node.meta` to END independent
 
 **Proposed fix:** Use a longer, reserved prefix that the LLM would never generate: `__scope:v1:user:alice` or a UUID-based namespace `__ns:7f3a:user:alice`. Strip any tags matching the reserved prefix pattern from LLM-extracted facts before storage. Cost: one string check per extracted tag on the `add()` path.
 
+### 7. Effect RESET: per-dep `sinkGen` causes permanent deafness
+
+**Status:** Not implemented. **Impact:** High (correctness). **Priority:** High — effect becomes unresponsive after any RESET signal.
+
+**Bug:** After RESET, the effect calls `run()` once, then becomes permanently deaf to all dep changes. Root cause: each dep closure captures a local `sinkGen` variable. RESET increments the global `generation`, but no dep closure's `sinkGen` is updated:
+
+- **External RESET** (`dispose.signal(RESET)`): calls `handleLifecycleSignal` directly — no dep closure sees it, no `sinkGen` updated.
+- **RESET via dep A**: only A's closure updates `sinkGen` (line 133). All other deps' closures remain stale.
+
+After RESET, upstream states re-emit (DIRTY→DATA), but every dep closure checks `sinkGen !== generation` → stale → **rejects**. The explicit `run()` in the RESET handler is a band-aid — gives one execution with pre-reset values, then the effect never responds again.
+
+**Trace:**
+```
+dispose.signal(RESET)
+  → handleLifecycleSignal(RESET)
+    → generation++ (now 1, all sinkGen still 0)
+    → run()                          ← executes with PRE-reset dep values
+    → for tb of talkbacks: tb(STATE, RESET)
+      → State A resets, emits DIRTY→DATA
+        → A's closure: sinkGen(0) !== generation(1) → REJECTED
+      → State B resets, emits DIRTY→DATA
+        → B's closure: sinkGen(0) !== generation(1) → REJECTED
+  ← effect is now permanently deaf
+```
+
+**Fix (implemented in Python port):** Move `sinkGen` from per-closure locals to a shared array (`sinkGens: number[]`) on the effect state. On RESET, update all entries. Remove the stale `run()` call — upstream re-emissions trigger the effect naturally via normal DIRTY→DATA flow.
+
+```ts
+// Before (per-closure local — only updated when THAT dep receives lifecycle):
+let sinkGen = generation;
+// ...
+if (isLifecycleSignal(data)) {
+    handleLifecycleSignal(data);
+    sinkGen = generation; // only THIS dep updated
+    return;
+}
+
+// After (shared array — all updated on RESET):
+const sinkGens: number[] = [];
+// In _connectDep:
+sinkGens.push(generation);
+// ...
+if (sinkGens[depIndex] !== generation) return;
+// ...
+if (isLifecycleSignal(data)) {
+    handleLifecycleSignal(data);
+    sinkGens[depIndex] = generation;
+    return;
+}
+
+// In handleLifecycleSignal(RESET):
+generation++;
+dirtyDeps.reset();
+anyDataReceived = false;
+// Update ALL sinkGens so dep closures accept post-RESET signals
+for (let i = 0; i < sinkGens.length; i++) sinkGens[i] = generation;
+// Do NOT call run() — upstream re-emission handles it
+for (const tb of talkbacks) tb(STATE, s);
+```
+
+**Hot-path impact:** `sinkGens[depIndex]` (array index lookup) vs `sinkGen` (local variable). ~1-2ns overhead per signal — negligible vs the closure call cost.
+
+**Python reference:** `src/recharge/core/effect.py` — `_EffectState.sink_gens` list, updated in `handle_lifecycle_signal` for RESET.
+
+### 8. Producer RESET: equality guard suppresses re-emission
+
+**Status:** Not implemented. **Impact:** High (correctness). **Priority:** High — required companion fix for #7 (effect RESET).
+
+**Bug:** `_handleLifecycleSignal(RESET)` sets `this._value = this._initial`, then calls `this.emit(this._initial)`. Since `emit()` checks equality (`Object.is(oldValue, newValue)`), and `_value` was just set to `_initial`, the equality guard returns `true` and **suppresses the emission**. Downstream nodes never receive DIRTY→DATA after RESET.
+
+This was hidden by the effect `run()` band-aid (#7) — the effect executed via direct `run()` call, not via upstream re-emission. With #7 fixed (removing `run()`), this suppression breaks the RESET flow entirely.
+
+**Fix (implemented in Python port):** Add a `_force` parameter to `emit()` that bypasses the equality guard. Use it in the RESET handler:
+
+```ts
+// In emit():
+emit(value: T, _force = false): void {
+    if (this._completed) return;
+    if (!_force && this._eqFn && this._eqFn(this._value, value)) return;
+    // ... rest unchanged
+}
+
+// In _handleLifecycleSignal:
+if (s === RESET) {
+    this._value = this._initial;
+    this._pending = false;
+}
+if (this._onLifecycleHandler) this._onLifecycleHandler(s);
+if (s === RESET) {
+    this.emit(this._initial, true);  // force — bypass equality
+}
+```
+
+**Why not inline DIRTY+DATA dispatch:** Inlining the dispatch logic bypasses `emit()`'s batching, auto_dirty, and output-null checks. Using `emit(_force=true)` keeps RESET flowing through the same code path as normal emissions — respecting graph topology per architecture.md §15 ("Control flows through the graph, not around it").
+
+**Python reference:** `src/recharge/core/producer.py` — `emit(value, *, _force=False)`, called with `_force=True` in `_handle_lifecycle_signal` for RESET.
+
+### 9. Batch drain exception leaves `draining` stuck forever
+
+**Status:** Not implemented. **Impact:** High (correctness). **Priority:** High — one throw permanently breaks all future `batch()` usage.
+
+**Bug:** If any deferred emission callback throws during batch drain, `draining` is never reset to `false`. All future `batch()` exits check `!draining` → skip drain → silently discard all deferred emissions forever.
+
+```ts
+// Current code (effect.ts-style / protocol.ts):
+draining = true;
+for (let i = 0; i < deferredEmissions.length; i++) {
+    deferredEmissions[i]();  // ← if this throws...
+}
+deferredEmissions.length = 0;  // ← never reached
+draining = false;              // ← never reached, stuck true forever
+```
+
+**Fix (implemented in Python port):** Wrap the drain loop in try/finally:
+
+```ts
+draining = true;
+try {
+    for (let i = 0; i < deferredEmissions.length; i++) {
+        deferredEmissions[i]();
+    }
+} finally {
+    deferredEmissions.length = 0;
+    draining = false;
+}
+```
+
+**Python reference:** `src/recharge/core/protocol.py` — `batch()` context manager with try/finally around drain.
+
 ---
 
 <details>
@@ -607,6 +736,10 @@ Note: The previous STANDALONE overhead concern (derived eagerly connecting to de
 | Cleanup orphaned heap entries on END | Potential (low priority) | Prevents zombie entries if score stores complete | Future node disposal/hot-swap |
 | vectorIndex max-heap for results | Potential (medium) | ~10x faster insertion at high ef | Large indices, efConstruction≥200 |
 | vectorIndex compact soft-deleted nodes | Potential (low priority) | Reclaim memory from deleted vectors | Long-lived indices with high churn |
+| Lazy pipeline pause wrapper | Potential (low priority) | Avoid 1 `state` + 1 `derived` + 1 `subscribe` per pipeline when pause is unused | Pipelines that never call `pause()` |
+| Effect RESET: shared `sinkGens` array | Potential (high) | Effect permanently deaf after RESET — correctness bug | All effects using RESET |
+| Producer RESET: `emit(_force=true)` | Potential (high) | Equality guard suppresses re-emission on RESET | All producers/states using RESET |
+| Batch drain try/finally | Potential (high) | One throw permanently breaks all future `batch()` | All batch usage |
 
 | ~~`validationPipeline` composition~~ | Not implementing | Already well-composed; remaining procedural code is inherently imperative | — |
 | ~~Inline `Object.is` in state.set()~~ | Not implementing | V8 IC monomorphizes `_eqFn` call; measured gap within noise | — |

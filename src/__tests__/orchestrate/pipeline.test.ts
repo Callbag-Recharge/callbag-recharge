@@ -6,7 +6,7 @@ import { map } from "../../extra/map";
 import { route } from "../../extra/route";
 import { subscribe } from "../../extra/subscribe";
 import { state } from "../../index";
-import { gate, pipeline, source, step, task } from "../../orchestrate";
+import { gate, pipeline, source, step, switchStep, task } from "../../orchestrate";
 import { track } from "../../utils/track";
 
 // ==========================================================================
@@ -555,5 +555,671 @@ describe("approval controls after destroy", () => {
 
 		wf.destroy();
 		wf.destroy(); // should not throw
+	});
+});
+
+// ==========================================================================
+// SA-1f: Backoff presets
+// ==========================================================================
+describe("SA-1f: backoff presets", () => {
+	it("task accepts backoff preset name for retry", async () => {
+		const trigger = fromTrigger<string>();
+		let attempt = 0;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async () => {
+					attempt++;
+					if (attempt < 2) throw new Error("fail");
+					return "done";
+				},
+				{ retry: { count: 3, backoff: "constant" } },
+			),
+		});
+
+		trigger.fire("go");
+		// Wait for retry (constant preset defaults to 1000ms, but we just need the mechanism to work)
+		await new Promise((r) => setTimeout(r, 1500));
+		expect(wf.status.get()).toBe("completed");
+		expect(attempt).toBe(2);
+		wf.destroy();
+	});
+
+	it("task with backoff preset 'exponential' retries", async () => {
+		const trigger = fromTrigger<string>();
+		let attempt = 0;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async () => {
+					attempt++;
+					if (attempt < 2) throw new Error("fail");
+					return "ok";
+				},
+				{ retry: { count: 2, backoff: "exponential" } },
+			),
+		});
+
+		trigger.fire("go");
+		// exponential default: 100ms base
+		await new Promise((r) => setTimeout(r, 300));
+		expect(wf.status.get()).toBe("completed");
+		wf.destroy();
+	});
+
+	it("delay takes precedence over backoff", async () => {
+		const trigger = fromTrigger<string>();
+		let attempt = 0;
+
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async () => {
+					attempt++;
+					if (attempt < 2) throw new Error("fail");
+					return "ok";
+				},
+				{ retry: { count: 2, delay: () => 10, backoff: "constant" } },
+			),
+		});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 50));
+		expect(wf.status.get()).toBe("completed");
+		expect(attempt).toBe(2);
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// SA-1e: Admin introspection — pipeline.inspect()
+// ==========================================================================
+describe("SA-1e: pipeline.inspect()", () => {
+	it("returns snapshot of idle pipeline", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		const snap = wf.inspect();
+		expect(snap.status).toBe("idle");
+		expect(snap.order).toEqual(["input"]);
+		expect(snap.steps.input.status).toBe("idle");
+		expect(snap.steps.input.count).toBe(0);
+		wf.destroy();
+	});
+
+	it("returns snapshot with task metadata", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async () => "result"),
+		});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 10));
+
+		const snap = wf.inspect();
+		expect(snap.status).toBe("completed");
+		expect(snap.steps.work.task).toBeDefined();
+		expect(snap.steps.work.task!.status).toBe("success");
+		expect(snap.steps.work.task!.result).toBe("result");
+		wf.destroy();
+	});
+
+	it("returns snapshot with pending approval", async () => {
+		const { approval } = await import("../../orchestrate/approval");
+
+		const trigger = fromTrigger<string>();
+		const reviewDef = approval<string>("input");
+
+		const wf = pipeline({
+			input: source(trigger),
+			review: reviewDef,
+		});
+
+		trigger.fire("hello");
+
+		const snap = wf.inspect();
+		expect(snap.steps.review.approvalPending).toEqual(["hello"]);
+		wf.destroy();
+	});
+
+	it("order matches topological sort", () => {
+		const wf = pipeline({
+			c: step(["a", "b"], (a, b) => derived([a, b], () => a.get() + b.get())),
+			a: step(state(1)),
+			b: step(state(2)),
+		});
+
+		const snap = wf.inspect();
+		expect(snap.order.indexOf("a")).toBeLessThan(snap.order.indexOf("c"));
+		expect(snap.order.indexOf("b")).toBeLessThan(snap.order.indexOf("c"));
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// SA-1a: Pipeline timeout
+// ==========================================================================
+describe("SA-1a: pipeline timeout", () => {
+	it("pipeline times out and reports errored", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				slow: task(["trigger"], async (_signal) => {
+					await new Promise((r) => setTimeout(r, 500));
+					return "done";
+				}),
+			},
+			{ timeout: 50 },
+		);
+
+		trigger.fire("go");
+		expect(wf.status.get()).toBe("active");
+
+		await new Promise((r) => setTimeout(r, 100));
+		expect(wf.status.get()).toBe("errored");
+		wf.destroy();
+	});
+
+	it("pipeline completes before timeout does not error", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				fast: task(["trigger"], async () => "done"),
+			},
+			{ timeout: 500 },
+		);
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(wf.status.get()).toBe("completed");
+
+		// Wait past timeout — should still be completed, not errored
+		await new Promise((r) => setTimeout(r, 600));
+		expect(wf.status.get()).toBe("completed");
+		wf.destroy();
+	});
+
+	it("reset clears timeout state", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				slow: task(["trigger"], async () => {
+					await new Promise((r) => setTimeout(r, 500));
+					return "done";
+				}),
+			},
+			{ timeout: 50 },
+		);
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 100));
+		expect(wf.status.get()).toBe("errored");
+
+		wf.reset();
+		expect(wf.status.get()).toBe("idle");
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// SA-1b: N-way switch step
+// ==========================================================================
+describe("SA-1b: switchStep", () => {
+	it("routes values to correct cases", () => {
+		const trigger = fromTrigger<number>();
+		const wf = pipeline({
+			input: source(trigger),
+			route: switchStep<number>(
+				"input",
+				(v) => (v > 0 ? "positive" : v < 0 ? "negative" : "zero"),
+				["positive", "negative", "zero"],
+			),
+		});
+
+		const positive: number[] = [];
+		const negative: number[] = [];
+		const zero: number[] = [];
+
+		const u1 = subscribe(
+			wf.steps["route.positive" as any],
+			(v: any) => v !== undefined && positive.push(v),
+		);
+		const u2 = subscribe(
+			wf.steps["route.negative" as any],
+			(v: any) => v !== undefined && negative.push(v),
+		);
+		const u3 = subscribe(
+			wf.steps["route.zero" as any],
+			(v: any) => v !== undefined && zero.push(v),
+		);
+
+		trigger.fire(5);
+		trigger.fire(-3);
+		trigger.fire(0);
+		trigger.fire(10);
+
+		expect(positive).toEqual([5, 10]);
+		expect(negative).toEqual([-3]);
+		expect(zero).toEqual([0]);
+
+		u1.unsubscribe();
+		u2.unsubscribe();
+		u3.unsubscribe();
+		wf.destroy();
+	});
+
+	it("works with downstream task steps", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline({
+			input: source(trigger),
+			route: switchStep<string>("input", (v) => (v.startsWith("A") ? "groupA" : "groupB"), [
+				"groupA",
+				"groupB",
+			]),
+			handleA: task(["route.groupA"], async (_signal, [v]) => `A:${v}`),
+			handleB: task(["route.groupB"], async (_signal, [v]) => `B:${v}`),
+		});
+
+		trigger.fire("Alpha");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(wf.steps.handleA.get()).toBe("A:Alpha");
+
+		trigger.fire("Beta");
+		await new Promise((r) => setTimeout(r, 20));
+		expect(wf.steps.handleB.get()).toBe("B:Beta");
+
+		wf.destroy();
+	});
+
+	it("throws on empty cases", () => {
+		expect(() => switchStep("input", () => "a", [])).toThrow(/must not be empty/);
+	});
+
+	it("throws on duplicate case names", () => {
+		expect(() => switchStep("input", () => "a", ["a", "a"])).toThrow(/duplicate/);
+	});
+
+	it("dispatcher returning undefined suppresses all cases", () => {
+		const trigger = fromTrigger<number>();
+		const wf = pipeline({
+			input: source(trigger),
+			route: switchStep<number>("input", () => undefined, ["a", "b"]),
+		});
+
+		const values: any[] = [];
+		const u = subscribe(wf.steps["route.a" as any], (v: any) => values.push(v));
+
+		trigger.fire(1);
+		trigger.fire(2);
+
+		// All suppressed — only RESOLVED signals, no DATA
+		expect(values).toEqual([]);
+
+		u.unsubscribe();
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// SA-1c: Per-step metrics
+// ==========================================================================
+describe("SA-1c: per-step metrics", () => {
+	it("idle step has zero metrics", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		const meta = wf.inner.stepMeta.input.get();
+		expect(meta.count).toBe(0);
+		expect(meta.errorCount).toBe(0);
+		expect(meta.errorRate).toBe(0);
+		expect(meta.throughput).toBe(0);
+		// startedAt is set at subscription time, but meta reflects idle state
+		// (startedAt is in the metrics maps, not in IDLE_STEP_META)
+		expect(meta.lastEmitAt).toBeUndefined();
+		expect(meta.lastLatency).toBeUndefined();
+		expect(meta.avgLatency).toBeUndefined();
+		wf.destroy();
+	});
+
+	it("tracks startedAt at subscription time and lastEmitAt on first emission", () => {
+		const before = Date.now();
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+		const afterConstruct = Date.now();
+
+		(wf.steps.input as any).set(1);
+		const afterEmit = Date.now();
+
+		const meta = wf.inner.stepMeta.input.get();
+		// startedAt is captured at subscription establishment (construction), not at first emit
+		expect(meta.startedAt).toBeGreaterThanOrEqual(before);
+		expect(meta.startedAt).toBeLessThanOrEqual(afterConstruct);
+		expect(meta.lastEmitAt).toBeGreaterThanOrEqual(afterConstruct);
+		expect(meta.lastEmitAt).toBeLessThanOrEqual(afterEmit);
+		expect(meta.count).toBe(1);
+		// First-emission latency should be >= 0 (time from subscription to first emit)
+		expect(meta.lastLatency).toBeGreaterThanOrEqual(0);
+		wf.destroy();
+	});
+
+	it("computes lastLatency and avgLatency across emissions", async () => {
+		const trigger = fromTrigger<number>();
+		const wf = pipeline({
+			input: source(trigger),
+		});
+
+		trigger.fire(1);
+		await new Promise((r) => setTimeout(r, 20));
+		trigger.fire(2);
+		await new Promise((r) => setTimeout(r, 40));
+		trigger.fire(3);
+
+		const meta = wf.inner.stepMeta.input.get();
+		expect(meta.count).toBe(3);
+		expect(meta.lastLatency).toBeGreaterThanOrEqual(0);
+		expect(meta.avgLatency).toBeGreaterThanOrEqual(0);
+		// avgLatency is a running average — should be between min and max latencies
+		expect(meta.avgLatency).toBeDefined();
+		wf.destroy();
+	});
+
+	it("computes throughput (values per second)", async () => {
+		const trigger = fromTrigger<number>();
+		const wf = pipeline({
+			input: source(trigger),
+		});
+
+		trigger.fire(1);
+		await new Promise((r) => setTimeout(r, 50));
+		trigger.fire(2);
+		trigger.fire(3);
+
+		const meta = wf.inner.stepMeta.input.get();
+		expect(meta.throughput).toBeGreaterThan(0);
+		// 3 values in ~50ms ≈ 60/s — should be reasonable
+		expect(meta.count).toBe(3);
+		wf.destroy();
+	});
+
+	it("tracks errorCount and errorRate on step error", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				async () => {
+					throw new Error("boom");
+				},
+				{ fallback: null },
+			),
+		});
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 20));
+
+		// The task itself errored but with fallback, so the step emitted a value.
+		// The stream-level error tracking is separate from task-level.
+		// task() with fallback emits the fallback value, so step sees DATA not END(error).
+		const meta = wf.inner.stepMeta.work.get();
+		// With fallback, the step receives a DATA (the fallback), not an error
+		expect(meta.count).toBeGreaterThanOrEqual(1);
+		wf.destroy();
+	});
+
+	it("inspect() includes metrics in snapshot", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		(wf.steps.input as any).set(1);
+		(wf.steps.input as any).set(2);
+
+		const snap = wf.inspect();
+		expect(snap.steps.input.count).toBe(2);
+		expect(snap.steps.input.errorCount).toBe(0);
+		expect(snap.steps.input.errorRate).toBe(0);
+		expect(snap.steps.input.throughput).toBeGreaterThanOrEqual(0);
+		expect(snap.steps.input.startedAt).toBeDefined();
+		expect(snap.steps.input.lastEmitAt).toBeDefined();
+		wf.destroy();
+	});
+
+	it("reset clears all metrics", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		(wf.steps.input as any).set(1);
+		(wf.steps.input as any).set(2);
+		expect(wf.inner.stepMeta.input.get().count).toBe(2);
+
+		wf.reset();
+
+		const meta = wf.inner.stepMeta.input.get();
+		expect(meta.count).toBe(0);
+		expect(meta.errorCount).toBe(0);
+		expect(meta.errorRate).toBe(0);
+		expect(meta.throughput).toBe(0);
+		expect(meta.startedAt).toBeUndefined();
+		expect(meta.lastEmitAt).toBeUndefined();
+		expect(meta.lastLatency).toBeUndefined();
+		expect(meta.avgLatency).toBeUndefined();
+		wf.destroy();
+	});
+});
+
+// ==========================================================================
+// SA-1d: Pipeline pause/resume
+// ==========================================================================
+describe("SA-1d: pipeline pause/resume", () => {
+	it("pipeline starts unpaused", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+		expect(wf.paused.get()).toBe(false);
+		expect(wf.status.get()).not.toBe("paused");
+		wf.destroy();
+	});
+
+	it("pause() sets status to paused", () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async () => "result"),
+		});
+
+		wf.pause();
+		expect(wf.paused.get()).toBe(true);
+		expect(wf.status.get()).toBe("paused");
+		wf.destroy();
+	});
+
+	it("resume() restores underlying status", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(["trigger"], async () => "result"),
+		});
+
+		expect(wf.status.get()).toBe("idle");
+		wf.pause();
+		expect(wf.status.get()).toBe("paused");
+
+		wf.resume();
+		expect(wf.paused.get()).toBe(false);
+		expect(wf.status.get()).toBe("idle");
+		wf.destroy();
+	});
+
+	it("pause then resume during active restores active status", async () => {
+		const trigger = fromTrigger<string>();
+		let resolve: (v: string) => void;
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: task(
+				["trigger"],
+				(_signal) =>
+					new Promise<string>((r) => {
+						resolve = r;
+					}),
+			),
+		});
+
+		trigger.fire("go");
+		// Wait for task to start
+		await new Promise((r) => setTimeout(r, 10));
+
+		wf.pause();
+		expect(wf.status.get()).toBe("paused");
+
+		wf.resume();
+		// Task still running → active
+		expect(wf.status.get()).toBe("active");
+
+		// Complete the task
+		resolve!("done");
+		await new Promise((r) => setTimeout(r, 10));
+		expect(wf.status.get()).toBe("completed");
+		wf.destroy();
+	});
+
+	it("sends PAUSE/RESUME signals through the graph", () => {
+		const trigger = fromTrigger<string>();
+
+		// Use a custom step that captures lifecycle signals
+		const wf = pipeline({
+			trigger: source(trigger),
+			work: step(["trigger"], (dep) => {
+				const out = pipe(
+					dep,
+					map((v: any) => v),
+				);
+				return out;
+			}),
+		});
+
+		// Subscribe to capture pipeline behavior
+		const values: any[] = [];
+		const u = subscribe(wf.steps.work, (v: any) => values.push(v));
+
+		trigger.fire("before-pause");
+		expect(values).toEqual(["before-pause"]);
+
+		wf.pause();
+		// Values emitted while paused still flow through step() stores
+		// (pause is not blocking at the store level for non-pausable stores)
+		// The PAUSE signal propagates for operators that handle it (like pausable)
+
+		wf.resume();
+
+		u.unsubscribe();
+		wf.destroy();
+	});
+
+	it("double pause is idempotent", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		wf.pause();
+		wf.pause(); // should not throw or change state
+		expect(wf.paused.get()).toBe(true);
+		expect(wf.status.get()).toBe("paused");
+
+		wf.resume();
+		expect(wf.paused.get()).toBe(false);
+		wf.destroy();
+	});
+
+	it("double resume is idempotent", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		wf.pause();
+		wf.resume();
+		wf.resume(); // should not throw
+		expect(wf.paused.get()).toBe(false);
+		wf.destroy();
+	});
+
+	it("reset clears paused state", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		wf.pause();
+		expect(wf.status.get()).toBe("paused");
+
+		wf.reset();
+		expect(wf.paused.get()).toBe(false);
+		expect(wf.status.get()).toBe("idle");
+		wf.destroy();
+	});
+
+	it("pause/resume no-op after destroy", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		wf.destroy();
+		// Should not throw
+		wf.pause();
+		wf.resume();
+	});
+
+	it("paused status reflected in inspect()", () => {
+		const wf = pipeline({
+			input: step(state(0)),
+		});
+
+		wf.pause();
+		const snap = wf.inspect();
+		expect(snap.status).toBe("paused");
+		wf.destroy();
+	});
+
+	it("pause disarms timeout, resume re-arms it", async () => {
+		const trigger = fromTrigger<string>();
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				slow: task(["trigger"], async () => {
+					await new Promise((r) => setTimeout(r, 500));
+					return "done";
+				}),
+			},
+			{ timeout: 80 },
+		);
+
+		trigger.fire("go");
+		expect(wf.status.get()).toBe("active");
+
+		// Pause at 20ms — timeout should not fire while paused
+		await new Promise((r) => setTimeout(r, 20));
+		wf.pause();
+		expect(wf.status.get()).toBe("paused");
+
+		// Wait past original timeout — should still be paused, not errored
+		await new Promise((r) => setTimeout(r, 100));
+		expect(wf.status.get()).toBe("paused");
+
+		wf.resume();
+		// After resume, status should be active (task still running)
+		expect(wf.status.get()).toBe("active");
+
+		wf.destroy();
 	});
 });

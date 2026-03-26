@@ -17,10 +17,12 @@
 import { derived } from "../core/derived";
 import { Inspector } from "../core/inspector";
 import type { Subscription } from "../core/protocol";
-import { RESET, TEARDOWN } from "../core/protocol";
+import { PAUSE, RESET, RESUME, TEARDOWN } from "../core/protocol";
 import { state } from "../core/state";
 import { subscribe } from "../core/subscribe";
 import type { Store } from "../core/types";
+import { fromTimer } from "../raw/fromTimer";
+import { rawSubscribe } from "../raw/subscribe";
 import { ON_FAILURE_ROLE } from "./onFailure";
 import type { TaskState } from "./types";
 import { TASK_STATE } from "./types";
@@ -29,7 +31,7 @@ import { TASK_STATE } from "./types";
 // Types
 // ---------------------------------------------------------------------------
 
-export type PipelineStatus = "idle" | "active" | "completed" | "errored";
+export type PipelineStatus = "idle" | "active" | "completed" | "errored" | "paused";
 
 export interface StepDef<T = any> {
 	/** Creates the step's store. Receives deps as args (in declared order). */
@@ -47,6 +49,58 @@ export interface StepMeta {
 	count: number;
 	/** Last error (if errored). */
 	error?: unknown;
+	/** Number of errors encountered by this step. */
+	errorCount: number;
+	/** Error rate: errorCount / (count + errorCount). 0 when no emissions or errors. */
+	errorRate: number;
+	/** Timestamp (ms since epoch) of first emission. */
+	startedAt?: number;
+	/** Timestamp (ms since epoch) of last emission. */
+	lastEmitAt?: number;
+	/** Latency of last emission in ms (time since previous emission, or since startedAt for first). */
+	lastLatency?: number;
+	/** Running average latency across all emissions (ms). */
+	avgLatency?: number;
+	/** Throughput: values per second since startedAt. 0 before first emission. */
+	throughput: number;
+}
+
+/** Per-step snapshot returned by `pipeline.inspect()`. */
+export interface StepSnapshot {
+	/** Stream-level step status. */
+	status: PipelineStatus;
+	/** Number of values emitted by this step. */
+	count: number;
+	/** Last error (if errored). */
+	error?: unknown;
+	/** Number of errors encountered by this step. */
+	errorCount: number;
+	/** Error rate: errorCount / (count + errorCount). */
+	errorRate: number;
+	/** Timestamp (ms since epoch) of first emission. */
+	startedAt?: number;
+	/** Timestamp (ms since epoch) of last emission. */
+	lastEmitAt?: number;
+	/** Latency of last emission in ms. */
+	lastLatency?: number;
+	/** Running average latency across all emissions (ms). */
+	avgLatency?: number;
+	/** Throughput: values per second since startedAt. */
+	throughput: number;
+	/** Task metadata (only present for task() steps). */
+	task?: import("./types").TaskMeta;
+	/** Pending approval values (only present for approval() steps). */
+	approvalPending?: unknown[];
+}
+
+/** Full pipeline snapshot returned by `pipeline.inspect()`. */
+export interface PipelineSnapshot<S extends Record<string, StepDef> = Record<string, StepDef>> {
+	/** Overall pipeline status. */
+	status: PipelineStatus;
+	/** Per-step snapshots keyed by step name. */
+	steps: { [K in keyof S]: StepSnapshot };
+	/** Topologically sorted step names. */
+	order: string[];
 }
 
 /** Expert-level internals — stream lifecycle details. */
@@ -62,17 +116,43 @@ export interface PipelineInner<S extends Record<string, StepDef>> {
 export interface PipelineResult<S extends Record<string, StepDef>> {
 	/** Access individual step stores by name. */
 	steps: { [K in keyof S]: Store<any> };
-	/** Overall pipeline status: idle → active → completed/errored. Derived from task() steps automatically. */
+	/** Overall pipeline status: idle → active → completed/errored/paused. Derived from task() steps automatically. */
 	status: Store<PipelineStatus>;
+	/** Reactive pause state — true when pipeline is paused. */
+	paused: Store<boolean>;
+	/**
+	 * Pause the pipeline. Sends PAUSE TYPE 3 STATE signal through the graph (§1.15).
+	 * Steps containing `pausable()` operators will gate DATA flow.
+	 *
+	 * **In-flight tasks are NOT aborted** — pause prevents new work from starting
+	 * but does not cancel currently executing async callbacks. Use `reset()` to
+	 * abort in-flight work. This is the canonical pause mechanism for pipelines;
+	 * do not combine with imperative `pausable().pause()` on individual steps.
+	 */
+	pause(): void;
+	/**
+	 * Resume the pipeline after pause. Sends RESUME TYPE 3 STATE signal through
+	 * the graph. Gated values are released and pipeline timeout (if configured)
+	 * re-arms when the underlying status is still active.
+	 */
+	resume(): void;
 	/** Reset all steps and tasks to idle. Call before re-triggering. */
 	reset(opts?: { resetExternalTasks?: boolean }): void;
 	/** Dispose all internal subscriptions. */
 	destroy(): void;
+	/** Snapshot of all step statuses, task metadata, and pending approvals. */
+	inspect(): PipelineSnapshot<S>;
 	/** Expert-level stream internals. Most users don't need this. */
 	inner: PipelineInner<S>;
 }
 
-const IDLE_STEP_META: StepMeta = Object.freeze({ status: "idle", count: 0 });
+const IDLE_STEP_META: StepMeta = Object.freeze({
+	status: "idle",
+	count: 0,
+	errorCount: 0,
+	errorRate: 0,
+	throughput: 0,
+});
 
 /**
  * @internal
@@ -166,8 +246,11 @@ export function source<T>(store: Store<T>, opts?: { name?: string }): StepDef<T>
  * @returns `PipelineResult<S>` — step stores, status, reset/destroy, and inner callbag details.
  *
  * @returnsTable steps | Record | Access step stores by name.
- * status | Store\<PipelineStatus\> | Pipeline status: idle → active → completed/errored.
- * reset(opts?) | (opts?: \{ resetExternalTasks?: boolean \}) => void | Reset all steps and tasks to idle. External tasks reset by default; pass `{ resetExternalTasks: false }` to skip.
+ * status | Store\<PipelineStatus\> | Pipeline status: idle → active → completed/errored/paused.
+ * paused | Store\<boolean\> | Reactive pause state — true when pipeline is paused.
+ * pause() | () => void | Pause the pipeline via PAUSE TYPE 3 STATE signal (§1.15). In-flight tasks continue; new work is gated.
+ * resume() | () => void | Resume after pause. Re-arms timeout if underlying status is active.
+ * reset(opts?) | (opts?: \{ resetExternalTasks?: boolean \}) => void | Reset all steps and tasks to idle. Also clears paused state.
  * destroy() | () => void | Dispose subscriptions and destroy auto-detected task states.
  * inner | PipelineInner | Expert-level stream internals (streamStatus, stepMeta, order).
  *
@@ -178,6 +261,8 @@ export function source<T>(store: Store<T>, opts?: { name?: string }): StepDef<T>
  * @remarks **opts.tasks:** Pass additional `TaskState` stores so `status` reflects work outside `task()`-wrapped steps (e.g. UI demos that run `taskState` manually). Duplicates are deduped with auto-detected task states. Note: `destroy()` does NOT destroy externally provided `opts.tasks` — the caller owns their lifecycle.
  * @remarks **Destroy ownership:** `destroy()` tears down subscriptions, destroys auto-detected `task()` states, and invalidates approval controls. Externally provided `opts.tasks` are left alive since the caller owns them.
  * @remarks **Branch support:** Use `branch()` steps with compound deps like `"validate.fail"` for conditional routing.
+ * @remarks **Pause/resume:** `pause()` sends PAUSE TYPE 3 STATE signal through the graph (§1.15). Steps with `pausable()` operators gate DATA. In-flight async tasks continue — pause prevents new work, not cancellation. Use `reset()` to abort. `resume()` sends RESUME, re-arms timeout if active. Do not combine with imperative `pausable().pause()` on individual steps.
+ * @remarks **Per-step metrics:** `inner.stepMeta` includes reactive `StepMeta` with `errorCount`, `errorRate`, `startedAt`, `lastEmitAt`, `lastLatency`, `avgLatency`, `throughput`. Metrics reset on `reset()` and `destroy()`.
  *
  * @example
  * ```ts
@@ -199,7 +284,7 @@ export function source<T>(store: Store<T>, opts?: { name?: string }): StepDef<T>
  */
 export function pipeline<S extends Record<string, StepDef>>(
 	steps: S,
-	opts?: { name?: string; tasks?: Record<string, TaskState<any>> },
+	opts?: { name?: string; tasks?: Record<string, TaskState<any>>; timeout?: number },
 ): PipelineResult<S> {
 	const baseName = opts?.name ?? "pipeline";
 	const stepNames = Object.keys(steps);
@@ -253,6 +338,10 @@ export function pipeline<S extends Record<string, StepDef>>(
 	const storeMap = new Map<string, Store<any>>();
 	const metaMap = new Map<string, Store<StepMeta>>();
 	const counts = new Map<string, number>();
+	const errorCounts = new Map<string, number>();
+	const startedAts = new Map<string, number>();
+	const lastEmitAts = new Map<string, number>();
+	const avgLatencies = new Map<string, number>();
 	const unsubs: Subscription[] = [];
 	const stepSubs: Subscription[] = [];
 
@@ -294,6 +383,14 @@ export function pipeline<S extends Record<string, StepDef>>(
 				storeMap.set(`${name}.fail`, failStore);
 			}
 
+			// Auto-register switch case stores (e.g., "route" → "route.positive", "route.negative")
+			if ((def as any)._caseStores && depStores.length === 1) {
+				const caseStores = (def as any)._caseStores as Map<string, (depStore: any) => Store<any>>;
+				for (const [caseName, caseFactory] of caseStores) {
+					storeMap.set(`${name}.${caseName}`, caseFactory(depStores[0]));
+				}
+			}
+
 			// Create meta store for this step
 			const meta = state<StepMeta>(
 				{ ...IDLE_STEP_META },
@@ -301,23 +398,75 @@ export function pipeline<S extends Record<string, StepDef>>(
 			);
 			metaMap.set(name, meta);
 
-			// Track step values — count stored in map so reset() can zero it
+			// Track step values — metrics stored in maps so reset() can zero them
 			counts.set(name, 0);
+			errorCounts.set(name, 0);
+			// Capture subscription start time so first-emission latency is meaningful
+			// (measures time-to-first-emit, not always-0).
+			startedAts.set(name, Date.now());
 			const stepKey = name;
 			const unsub = subscribe(
 				store,
 				() => {
 					const c = (counts.get(stepKey) ?? 0) + 1;
 					counts.set(stepKey, c);
-					meta.set({ status: "active", count: c });
+					const now = Date.now();
+					const startedAt = startedAts.get(stepKey)!;
+					const prevEmitAt = lastEmitAts.get(stepKey);
+					const lastLatency = prevEmitAt !== undefined ? now - prevEmitAt : now - startedAt;
+					lastEmitAts.set(stepKey, now);
+					// Running average latency
+					const prevAvg = avgLatencies.get(stepKey);
+					const avgLatency =
+						prevAvg !== undefined ? prevAvg + (lastLatency - prevAvg) / c : lastLatency;
+					avgLatencies.set(stepKey, avgLatency);
+					const elapsed = (now - startedAt) / 1000;
+					const ec = errorCounts.get(stepKey) ?? 0;
+					meta.set({
+						status: "active",
+						count: c,
+						errorCount: ec,
+						errorRate: ec / (c + ec),
+						startedAt,
+						lastEmitAt: now,
+						lastLatency,
+						avgLatency,
+						throughput: elapsed > 0 ? c / elapsed : 0,
+					});
 				},
 				{
 					onEnd: (err) => {
 						const c = counts.get(stepKey) ?? 0;
+						const ec = errorCounts.get(stepKey) ?? 0;
+						const startedAt = startedAts.get(stepKey);
+						const lastEmitAt = lastEmitAts.get(stepKey);
+						const avgLatency = avgLatencies.get(stepKey);
+						const elapsed = startedAt !== undefined ? (Date.now() - startedAt) / 1000 : 0;
 						if (err !== undefined) {
-							meta.set({ status: "errored", count: c, error: err });
+							const newEc = ec + 1;
+							errorCounts.set(stepKey, newEc);
+							meta.set({
+								status: "errored",
+								count: c,
+								error: err,
+								errorCount: newEc,
+								errorRate: newEc / (c + newEc),
+								startedAt,
+								lastEmitAt,
+								avgLatency,
+								throughput: elapsed > 0 ? c / elapsed : 0,
+							});
 						} else {
-							meta.set({ status: "completed", count: c });
+							meta.set({
+								status: "completed",
+								count: c,
+								errorCount: ec,
+								errorRate: ec / (c + ec) || 0,
+								startedAt,
+								lastEmitAt,
+								avgLatency,
+								throughput: elapsed > 0 ? c / elapsed : 0,
+							});
 						}
 					},
 				},
@@ -527,6 +676,68 @@ export function pipeline<S extends Record<string, StepDef>>(
 		status = streamStatus;
 	}
 
+	// --- Pipeline-level timeout ---
+	// Timer arms when status transitions to "active" (not at construction).
+	// Re-arms on reset(). Cancelled on completion/error/destroy.
+	const _timedOut = state(false, { name: `${baseName}:timedOut` });
+	let _timeoutAc: AbortController | null = null;
+	const _timeoutMs = opts?.timeout !== undefined && opts.timeout > 0 ? opts.timeout : 0;
+
+	function _armTimeout() {
+		// Cancel any existing timer
+		_timeoutAc?.abort();
+		_timeoutAc = new AbortController();
+		rawSubscribe(fromTimer(_timeoutMs, _timeoutAc.signal), () => {
+			_timedOut.set(true);
+		});
+	}
+
+	function _disarmTimeout() {
+		_timeoutAc?.abort();
+		_timeoutAc = null;
+	}
+
+	if (_timeoutMs > 0) {
+		// Watch status transitions to arm/disarm the timer
+		let _prevStatus: PipelineStatus = status.get();
+		const timeoutWatchUnsub = subscribe(status, (s) => {
+			if (s === "active" && _prevStatus !== "active") {
+				// Arm on idle→active (or any →active transition)
+				_armTimeout();
+			} else if (s === "completed" || s === "errored") {
+				_disarmTimeout();
+			}
+			_prevStatus = s;
+		});
+		unsubs.push(timeoutWatchUnsub);
+
+		// Wrap status to reflect timeout
+		const baseStatus = status;
+		status = derived([baseStatus, _timedOut], () => {
+			if (_timedOut.get()) return "errored" as PipelineStatus;
+			return baseStatus.get();
+		});
+		const wrappedStatusUnsub = subscribe(status, () => {});
+		unsubs.push(wrappedStatusUnsub);
+		Inspector.register(status, { kind: "pipeline-status", name: `${baseName}:status:timeout` });
+	}
+
+	// --- Pipeline pause/resume ---
+	const _pausedStore = state(false, { name: `${baseName}:paused` });
+	let _isPaused = false;
+
+	// Wrap status to reflect paused state — short-circuit before task aggregation.
+	// `_prePauseStatus` is captured so resume() can read the underlying status
+	// without going through the pause wrapper (which re-derives synchronously).
+	const _prePauseStatus = status;
+	status = derived([_prePauseStatus, _pausedStore], () => {
+		if (_pausedStore.get()) return "paused" as PipelineStatus;
+		return _prePauseStatus.get();
+	});
+	const pausedStatusUnsub = subscribe(status, () => {});
+	unsubs.push(pausedStatusUnsub);
+	Inspector.register(status, { kind: "pipeline-status", name: `${baseName}:status:paused` });
+
 	// --- Build result ---
 	const stepsResult = {} as { [K in keyof S]: Store<any> };
 	const stepMetaResult = {} as { [K in keyof S]: Store<StepMeta> };
@@ -548,15 +759,53 @@ export function pipeline<S extends Record<string, StepDef>>(
 	return {
 		steps: stepsResult,
 		status,
+		paused: _pausedStore as Store<boolean>,
+		pause() {
+			if (_destroyed || _isPaused) return;
+			_isPaused = true;
+			_pausedStore.set(true);
+			// Disarm timeout while paused — time shouldn't count against the pipeline
+			if (_timeoutMs > 0) _disarmTimeout();
+			// Send PAUSE signal through the graph
+			for (const sub of stepSubs) {
+				sub.signal(PAUSE);
+			}
+		},
+		resume() {
+			if (_destroyed || !_isPaused) return;
+			_isPaused = false;
+			_pausedStore.set(false);
+			// Re-arm timeout if underlying status is active (tasks still running).
+			// Read _prePauseStatus (the unwrapped store) to avoid the pause-wrapper
+			// derived which already reflects the _pausedStore.set(false) above.
+			if (_timeoutMs > 0 && _prePauseStatus.get() === "active") {
+				_armTimeout();
+			}
+			// Send RESUME signal through the graph
+			for (const sub of stepSubs) {
+				sub.signal(RESUME);
+			}
+		},
 		reset(resetOpts?: { resetExternalTasks?: boolean }) {
 			if (_destroyed) return;
+			// Reset timeout state — disarm timer, clear flag (re-arms on next idle→active)
+			_disarmTimeout();
+			_timedOut.set(false);
+			// Unpause if paused
+			if (_isPaused) {
+				_isPaused = false;
+				_pausedStore.set(false);
+			}
 			// Reset step metas (stream-level tracking in inner)
 			for (const meta of allMetas) {
 				(meta as any).set({ ...IDLE_STEP_META });
 			}
-			for (const key of counts.keys()) {
-				counts.set(key, 0);
-			}
+			// Clear all metric maps — all paths use `?? 0` / `?? undefined` fallbacks
+			counts.clear();
+			errorCounts.clear();
+			startedAts.clear();
+			lastEmitAts.clear();
+			avgLatencies.clear();
 			// Signal cascades through graph — each step handles its own RESET
 			// (task() intercepts RESET and calls ts.reset(), etc.)
 			for (const sub of stepSubs) {
@@ -572,6 +821,8 @@ export function pipeline<S extends Record<string, StepDef>>(
 		destroy() {
 			if (_destroyed) return;
 			_destroyed = true;
+			// Cancel pipeline timeout timer
+			_disarmTimeout();
 			// TEARDOWN cascades through graph — each step handles its own teardown
 			// (task() intercepts TEARDOWN and calls ts.destroy(), etc.)
 			for (const sub of stepSubs) {
@@ -583,11 +834,52 @@ export function pipeline<S extends Record<string, StepDef>>(
 			for (const unsub of unsubs) unsub.unsubscribe();
 			unsubs.length = 0;
 			stepSubs.length = 0;
+			// Release metric map references for GC
+			counts.clear();
+			errorCounts.clear();
+			startedAts.clear();
+			lastEmitAts.clear();
+			avgLatencies.clear();
 			// Invalidate approval controls so stale calls throw
 			for (const name of stepNames) {
 				const def = steps[name] as any;
 				if (typeof def._destroy === "function") def._destroy();
 			}
+		},
+		inspect(): PipelineSnapshot<S> {
+			const stepSnapshots = {} as { [K in keyof S]: StepSnapshot };
+			for (const name of stepNames) {
+				const meta = metaMap.get(name)!.get();
+				const snap: StepSnapshot = {
+					status: meta.status,
+					count: meta.count,
+					errorCount: meta.errorCount,
+					errorRate: meta.errorRate,
+					startedAt: meta.startedAt,
+					lastEmitAt: meta.lastEmitAt,
+					lastLatency: meta.lastLatency,
+					avgLatency: meta.avgLatency,
+					throughput: meta.throughput,
+				};
+				if (meta.error !== undefined) snap.error = meta.error;
+				// Task metadata
+				const ts = allTasksByName.get(name);
+				if (ts) snap.task = ts.get();
+				// Approval pending
+				const def = steps[name] as any;
+				if (def.pending && typeof def.pending.get === "function") {
+					const pending = def.pending.get();
+					if (Array.isArray(pending) && pending.length > 0) {
+						snap.approvalPending = pending;
+					}
+				}
+				(stepSnapshots as any)[name] = snap;
+			}
+			return {
+				status: status.get(),
+				steps: stepSnapshots,
+				order: [...order],
+			};
 		},
 		inner: {
 			streamStatus,

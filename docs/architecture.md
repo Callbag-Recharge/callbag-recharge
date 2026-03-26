@@ -456,7 +456,7 @@ Reactive data structures using version-gated pattern. `reactiveMap` (KV + TTL + 
 
 ### Messaging (`src/messaging/`)
 
-Pulsar-inspired topic/subscription. `topic` (persistent stream), `subscription` (cursor-based consumer with exclusive/shared/failover/key_shared modes), `repeatPublish` (scheduled production), `jobQueue` (topic + subscription + processing), `jobFlow` (multi-queue chaining).
+Pulsar-inspired topic/subscription with distributed bridging. `topic` (persistent stream with optional TTL auto-expiry via `trimHead`), `subscription` (cursor-based consumer with exclusive/shared/failover/key_shared modes, consumer lag metric), `repeatPublish` (scheduled production), `jobQueue` (topic + subscription + processing), `jobFlow` (multi-queue chaining). **Distribution (SA-2):** `topicBridge` (bidirectional local↔remote topic sync with echo-dedup via originId, message filtering by key/header/predicate, backpressure signaling), `wsMessageTransport` (WebSocket transport with auto-reconnect + configurable send buffer), `h2MessageTransport` (HTTP/2 NDJSON bidirectional stream, Node only). **Admin:** `listTopics`, `inspectSubscription`, `resetCursor` for operational introspection. `MessageTransport` interface enables custom transport implementations.
 
 ### Memory (`src/memory/`)
 

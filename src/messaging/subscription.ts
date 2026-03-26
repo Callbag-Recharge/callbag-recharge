@@ -14,6 +14,7 @@ import { state } from "../core/state";
 import type { Store } from "../core/types";
 import type { ReactiveLog } from "../data/types";
 import { fromAny } from "../extra/fromAny";
+import { subscribe } from "../extra/subscribe";
 import { exponential } from "../utils/backoff";
 import type {
 	ConsumerGroup,
@@ -143,13 +144,33 @@ export function subscription<T>(
 		{ name: `${subName}:backlog` },
 	);
 
+	// Consumer lag: time since oldest unread message was published (SA-2f)
+	const _lagStore = derived(
+		[_backlogStore, _log.events, _positionStore],
+		() => {
+			const backlog = _backlogStore.get();
+			if (backlog <= 0) return 0;
+			// Find the oldest unread message
+			const pos = _positionStore.get();
+			const head = _log.headSeq;
+			const effectivePos = head > 0 ? Math.max(pos, head) : pos;
+			const entry = _log.get(effectivePos);
+			if (!entry) return 0;
+			return Math.max(0, Date.now() - entry.value.timestamp);
+		},
+		{ name: `${subName}:lag` },
+	);
+
 	// --- Persistence ---
 	const _persistence = opts?.persistence;
 
 	function _persistCursor(): void {
 		if (!_persistence) return;
-		// Fire and forget
-		Promise.resolve(_persistence.save(`${subName}:cursor`, _cursor)).catch(() => {});
+		// Fire and forget via callbag
+		const src = fromAny(_persistence.save(`${subName}:cursor`, _cursor));
+		const unsub = subscribe(src, () => {});
+		// Auto-cleanup after emission or error
+		setTimeout(() => unsub.unsubscribe(), 0);
 	}
 
 	// --- Failover active check ---
@@ -186,6 +207,15 @@ export function subscription<T>(
 
 		const n = count ?? batchSize;
 		const messages: TopicMessage<T>[] = [];
+
+		// Clamp cursor past trimmed entries (F12)
+		const headSeq = _log.headSeq;
+		if (headSeq > 0 && _cursor < headSeq) {
+			_cursor = headSeq;
+			if (isGroupMode && _group) {
+				_group.cursor = Math.max(_group.cursor, headSeq);
+			}
+		}
 
 		// 1. Check retry queue first (ready entries only)
 		const now = Date.now();
@@ -415,6 +445,7 @@ export function subscription<T>(
 			teardown(_positionStore);
 			teardown(_pendingStore);
 			teardown(_backlogStore);
+			teardown(_lagStore);
 		});
 	}
 
@@ -434,6 +465,7 @@ export function subscription<T>(
 		position: _positionStore as Store<number>,
 		backlog: _backlogStore,
 		pending: _pendingStore as Store<number>,
+		lag: _lagStore,
 
 		pause() {
 			if (_paused) return;
