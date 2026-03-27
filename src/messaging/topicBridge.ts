@@ -120,6 +120,8 @@ export function topicBridge(
 		filter?: MessageFilter<any>;
 		/** Subscription to topic.latest for outgoing forwarding. */
 		localSub: Subscription;
+		/** Subscription to topic depth for backpressure signaling. */
+		depthSub: Subscription;
 		/** Last seq we forwarded (avoid re-forwarding on subscribe). */
 		lastForwardedSeq: number;
 	}
@@ -128,6 +130,10 @@ export function topicBridge(
 
 	// --- Backpressure stores (SA-2h) ---
 	const _backpressureStores = new Map<string, ReturnType<typeof state<boolean>>>();
+	// Remote interest tracking (subscribe/unsubscribe from peer).
+	const _remoteFilters = new Map<string, MessageFilter | undefined>();
+	// Last backpressure state we sent per topic (avoid redundant envelopes).
+	const _lastSentBackpressure = new Map<string, boolean>();
 
 	function _getOrCreateBackpressure(topicName: string): ReturnType<typeof state<boolean>> {
 		let s = _backpressureStores.get(topicName);
@@ -145,7 +151,11 @@ export function topicBridge(
 		msg: TopicMessage<any>,
 		filter: MessageFilter<any> | undefined,
 	): void {
+		// Only forward when remote peer has subscribed to this topic.
+		if (!_remoteFilters.has(name)) return;
+		const remoteFilter = _remoteFilters.get(name);
 		if (!matchesFilter(msg, filter as MessageFilter | undefined)) return;
+		if (!matchesFilter(msg, remoteFilter as MessageFilter | undefined)) return;
 		// Don't re-forward messages that came from any bridge (prevents infinite loops)
 		if (msg.headers?.["x-bridge-origin"]) return;
 		transport.send({
@@ -159,11 +169,15 @@ export function topicBridge(
 	function _subscribeLocal(name: string, bridged: BridgedTopic): TopicEntry {
 		const t = bridged.topic;
 		const filter = bridged.filter;
+		// Preserve pre-SA-2 behavior: topics are forwardable by default unless
+		// the remote peer explicitly unsubscribes this topic.
+		if (!_remoteFilters.has(name)) _remoteFilters.set(name, undefined);
 
 		const entry: TopicEntry = {
 			topic: t,
 			filter,
 			localSub: null as any,
+			depthSub: null as any,
 			lastForwardedSeq: t.tailSeq,
 		};
 
@@ -183,6 +197,18 @@ export function topicBridge(
 			}
 			_forwardMessage(name, msg, filter);
 			entry.lastForwardedSeq = msg.seq;
+		});
+
+		entry.depthSub = subscribe(t.depth, (depth) => {
+			const lagging = depth > _threshold;
+			const prev = _lastSentBackpressure.get(name);
+			if (prev === lagging) return;
+			_lastSentBackpressure.set(name, lagging);
+			transport.send({
+				type: "backpressure",
+				topic: name,
+				lagging,
+			});
 		});
 
 		return entry;
@@ -216,13 +242,14 @@ export function topicBridge(
 			}
 
 			case "subscribe": {
-				// Remote side is subscribing to a topic — store filter if provided
-				// (For future use: server-side filtering of what we send)
+				// Remote side is subscribing to a topic (and optional filter).
+				_remoteFilters.set(envelope.topic, envelope.filter as MessageFilter | undefined);
 				break;
 			}
 
 			case "unsubscribe": {
-				// Remote side unsubscribing
+				// Remote side unsubscribing from a topic.
+				_remoteFilters.delete(envelope.topic);
 				break;
 			}
 
@@ -291,6 +318,7 @@ export function topicBridge(
 			const entry = _topics.get(name);
 			if (!entry) return;
 			entry.localSub.unsubscribe();
+			entry.depthSub.unsubscribe();
 			_topics.delete(name);
 
 			// Clean up backpressure store for this topic
@@ -310,8 +338,11 @@ export function topicBridge(
 			// Unsubscribe from all local topics
 			for (const entry of _topics.values()) {
 				entry.localSub.unsubscribe();
+				entry.depthSub.unsubscribe();
 			}
 			_topics.clear();
+			_remoteFilters.clear();
+			_lastSentBackpressure.clear();
 
 			// Tear down backpressure stores
 			batch(() => {

@@ -331,9 +331,151 @@ OpenClaw's integration means: the agent writes to and reads from Mem0 as a struc
 - **Don't add external service dependency.** In-process value is the whole point. External vector DBs belong in Phase 7 as optional adapters.
 - **The `decay` scoring formula is the retrieval quality mechanism**, not just a utility. Make it more prominent in positioning.
 
+## UPDATE: OpenViking Research (March 26, 2026)
+
+### Sources and Confidence
+
+Primary sources reviewed:
+
+- OpenViking official repository README and concepts docs (architecture, retrieval, session management)
+- OpenViking GitHub releases (latest: v0.2.13, March 26, 2026)
+- Context7 docs for `/volcengine/openviking`
+- Online research validation (March 26, 2026): GitHub repo (19.3K+ stars, 1.3K+ forks), Apache 2.0, Python + C++ core extensions + Rust CLI
+
+Secondary ecosystem articles were used only as directional context, not as canonical technical truth.
+
+### What OpenViking Is
+
+OpenViking is an open-source **Context Database** for AI Agents by Volcengine (ByteDance's cloud platform). Published January 2026. No academic paper — engineering-first OSS project. Tagline: "unifies management of context (memory, resources, skills) through a file system paradigm."
+
+**Core modules:** VikingFS (virtual filesystem), AGFS (content storage: local/S3/memory), Vector Index (local/HTTP/VikingDB), Parser (PDF/MD/HTML/code via tree-sitter), SemanticQueue (async L0/L1 generation), Retrieve (intent + hierarchical search + rerank), Session (conversation management + compression), Compressor (extraction + LLM dedup).
+
+**Dual-layer storage:** Content in AGFS (filesystem); vector index stores only URIs + vectors + metadata. AGFS is single source of truth.
+
+### What OpenViking Validates
+
+OpenViking reinforces the same core market signal as Mem0 integration, but with stronger emphasis on:
+
+1. **Filesystem-shaped context management** (`viking://`) across memory/resource/skill instead of flat chunk stores.
+2. **Two-phase session commit** (fast archive now, extraction/summarization async in background).
+3. **Observable retrieval trajectory** as a product feature, not just internal debug tooling.
+4. **Typed memory categories** for extraction and routing (profile/preferences/entities/events/cases/patterns).
+5. **Hierarchical retrieval planning** (intent -> typed queries -> recursive directory retrieval -> rerank).
+
+This is strong external validation that context architecture is shifting from "vector DB as sidecar" to "memory substrate as first-class runtime."
+
+### L0/L1/L2 Progressive Loading (Validated Detail)
+
+OpenViking's most distinctive design for token budget management:
+
+| Layer | File | ~Tokens | Purpose |
+|---|---|---|---|
+| **L0** (Abstract) | `.abstract.md` | ~100 | Vector search, quick filtering |
+| **L1** (Overview) | `.overview.md` | ~2k | Rerank, content navigation, usually sufficient for LLM context |
+| **L2** (Detail) | Original files | Unlimited | Full content, loaded on-demand |
+
+L0/L1 are **generated bottom-up by LLM**: leaf nodes first, then parent directories aggregate children's L0s into their own L1. Creates a hierarchical summary tree. Maps naturally to a `derived()` chain in callbag-recharge.
+
+### Concrete Hotness/Decay Formula (Validated)
+
+```
+score = sigmoid(log1p(active_count)) * exp_decay(age, half_life=7d)
+```
+
+- **Frequency:** Diminishing returns via `sigmoid(log1p(count))`
+- **Recency:** Exponential decay with 7-day default half-life
+- **Blended with semantic similarity** for final retrieval ranking
+- Simpler than Generative Agents' `α×recency + β×importance + γ×relevance` — purely data-driven, no LLM importance scoring
+- `active_count` in vector index tracks retrieval/access frequency; `updated_at` tracks last modification
+
+### Retrieval Algorithm (Validated Detail)
+
+**Two-stage retrieval:**
+
+1. **Intent Analysis:** LLM analyzes query + session context → 0-5 `TypedQuery` objects (query string, context type, intent, priority)
+2. **Hierarchical Retrieval:** Priority queue recursion over directory tree:
+   - Global vector search locates starting directories
+   - At each directory, search children: `final_score = 0.5 * embedding_score + 0.5 * parent_score`
+   - Directories above threshold get recursed into
+   - **Convergence detection:** Stops when top-K results unchanged for 3 rounds
+   - Optional model-based rerank in "THINKING" mode
+
+### Memory Update Mechanism (Validated Detail)
+
+**MemoryReAct:** Single LLM call with tool use in a ReAct loop (max 5 iterations). Pre-fetches context (ls directories, read overviews, vector search), then lets model decide operations (write/edit/delete).
+
+**Dedup flow:** Embed candidate → vector pre-filter for similar existing → LLM decides: `skip` (duplicate), `create` (new), `merge` (into existing), `delete` (conflicting).
+
+**YAML-driven templates:** Memory categories defined as config (e.g., `profile.yaml`, `preferences.yaml`) with field definitions and merge operations (`patch`, `immutable`). Extensible without core code changes.
+
+### Deployment Modes
+
+- **Embedded:** `OpenViking(path="./data")` — in-process, auto-starts AGFS subprocess
+- **HTTP server:** `openviking-server` — standalone with HTTP API
+- **VikingBot:** Agent framework built on top (`pip install "openviking[bot]"`)
+- **MCP integration:** For tool/skill interop
+- **Rust CLI (`ov`):** Filesystem-style operations (`ov ls`, `ov tree`, `ov find`, `ov grep`)
+
+### Alignment with callbag-recharge (Current State)
+
+| OpenViking pattern | callbag-recharge equivalent | Gap type |
+|---|---|---|
+| Two-phase session commit + async task tracking | `taskState`, `jobQueue`, reactive status stores | Productization/API surface |
+| Observable retrieval trajectory | `Inspector.snapshot()` and trace tools | Memory-specific UX/surface |
+| Typed memory categories and dedup flow | `collection` + `admissionPolicy` + `forgetPolicy` | Category schema + routing ergonomics |
+| Hierarchical retrieval plan | `derived` planning graph + `vectorIndex` + `knowledgeGraph` | Planner layer abstraction |
+| Explicit memory tool endpoints | `agentMemory` + adapters + tool primitives | Unified memory tool API |
+
+### Key Improvements We Should Adopt
+
+1. **Memory observability as a first-class API (P0).**  
+   Add retrieval traces that answer "why this memory surfaced" in domain language (query plan, root candidates, recursive hops, score propagation), not only generic graph internals.
+
+2. **Standardize session commit contract (P0).**  
+   Make commit explicitly two-phase: synchronous archive acknowledgment + asynchronous extraction task with reactive status stores (`pending/running/completed/failed`).
+
+3. **Add typed extraction/routing categories (P1).**  
+   Keep categories optional and policy-driven; use them for retrieval weighting, dedup boundaries, and consolidation targeting.
+
+4. **Expose explicit memory operations (P1).**  
+   Provide stable, tool-friendly operations analogous to `search/read/browse/commit` for agent surfaces and multi-agent orchestration.
+
+5. **Introduce a retrieval planner store (P2).**  
+   Derive intent, targets, depth, thresholds, and overfetch strategy as reactive state before execution so cancellation and recomputation are deterministic.
+
+### Implementation Notes (Do/Don't)
+
+**Do:**
+
+- Keep primitives pure and composable (`collection`, `node`, `decay`, `vectorIndex`) with policy hooks.
+- Build product behavior in `ai/agentMemory` and orchestration layers (`jobQueue`, `taskState`), not inside low-level data primitives.
+- Reuse Inspector internals but expose memory-domain diagnostics for user-facing debugging.
+
+**Don't:**
+
+- Do not hard-wire LLM extraction calls into low-level memory primitives.
+- Do not regress to external service dependency as the default memory path.
+- Do not couple retrieval explanation to one transport or one client surface.
+
+### Performance: callbag-recharge vs OpenViking
+
+| Operation | OpenViking | callbag-recharge (TS) | callbag-recharge (Python) | Notes |
+|---|---|---|---|---|
+| Memory read (cached) | ~50-500μs (subprocess/HTTP) | ~10ns (`state.get()`) | ~100-500ns (`state.get()`) | Architecture win: in-process vs IPC |
+| Reactive propagation | N/A (pull-only) | ~10-100ns | ~0.5-5μs | Python slower per-op, but reactive model eliminates redundant pulls |
+| Vector search (k=10, 10K) | ~1-10μs (C++ core) | ~1-10μs (pure TS HNSW) | ~5-50μs (pure Python HNSW) | Python HNSW slower; C extension or numpy could close gap |
+| Session commit (sync phase) | ~1ms (archive to AGFS) | ~100ns (batch write) | ~1-10μs (batch write) | Both fast; async extraction dominates wall time |
+| Memory extraction (LLM) | ~1-5s (LLM call) | ~1-5s (LLM call) | ~1-5s (LLM call) | LLM is the bottleneck — runtime overhead irrelevant |
+| Context assembly | O(n) per turn (hierarchical retrieval) | O(1) cached (`derived()`) | O(1) cached (`derived()`) | **Key differentiator:** reactive cache vs re-retrieve every turn |
+
+**Python port performance thesis:** The Python port won't match TypeScript's raw nanosecond reads, but the **architectural advantage** (in-process reactive with cached derived computation) still dominates OpenViking's subprocess/HTTP architecture. The LLM call (~1-5s) dwarfs any runtime overhead difference. Where Python's sync graph shines: lock-free `get()` reads, no serialization, no IPC. Where it needs help: pure-Python HNSW should eventually use numpy/C extensions for parity with OpenViking's C++ core.
+
+**Free-threaded Python 3.14** (targeted by callbag-recharge-py) unlocks true parallel DATA phase in derived computation — a capability OpenViking's GIL-bound Python cannot exploit without C++ extensions.
+
 ## FILES CHANGED
 
 - This file created: `src/archive/docs/SESSION-agentic-memory-research.md`
 - This file updated with OpenClaw/Mem0 analysis: 2026-03-23
+- This file updated with OpenViking docs + release analysis: 2026-03-26
 
 ---END SESSION---

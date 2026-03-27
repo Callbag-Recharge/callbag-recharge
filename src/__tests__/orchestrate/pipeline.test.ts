@@ -235,7 +235,7 @@ describe("pipeline", () => {
 		const negativeVals: number[] = [];
 
 		const u1 = subscribe(wf.steps.router, (v) => positiveVals.push(v!));
-		const u2 = subscribe((wf.steps.router as any)._negative, (v) => negativeVals.push(v!));
+		const u2 = subscribe((wf.steps.router as any)._negative, (v: any) => negativeVals.push(v!));
 
 		(wf.steps.input as any).fire(5);
 		(wf.steps.input as any).fire(-3);
@@ -701,6 +701,52 @@ describe("SA-1e: pipeline.inspect()", () => {
 		expect(snap.order.indexOf("b")).toBeLessThan(snap.order.indexOf("c"));
 		wf.destroy();
 	});
+
+	it("includes external tasks passed via opts.tasks", async () => {
+		const trigger = fromTrigger<string>();
+		const external = (await import("../../orchestrate/taskState")).taskState<string>();
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				work: task(["trigger"], async () => "ok"),
+			},
+			{ tasks: { external } },
+		);
+
+		external.run(async () => "external-result");
+		await new Promise((r) => setTimeout(r, 10));
+
+		const snap = wf.inspect();
+		expect((snap.steps as any).external).toBeDefined();
+		expect((snap.steps as any).external.task.status).toBe("success");
+		expect((snap.steps as any).external.task.result).toBe("external-result");
+
+		wf.destroy();
+		external.destroy();
+	});
+
+	it("includes switch case sub-steps in snapshot", async () => {
+		const trigger = fromTrigger<number>();
+		const wf = pipeline({
+			input: source(trigger),
+			route: switchStep<number>(
+				"input",
+				(v) => (v > 0 ? "positive" : v < 0 ? "negative" : "zero"),
+				["positive", "negative", "zero"],
+			),
+		});
+
+		trigger.fire(1);
+		await new Promise((r) => setTimeout(r, 10));
+
+		const snap = wf.inspect();
+		expect((snap.steps as any)["route.positive"]).toBeDefined();
+		expect((snap.steps as any)["route.negative"]).toBeDefined();
+		expect((snap.steps as any)["route.zero"]).toBeDefined();
+		expect((snap.steps as any)["route.positive"].status).toBe("active");
+
+		wf.destroy();
+	});
 });
 
 // ==========================================================================
@@ -767,6 +813,33 @@ describe("SA-1a: pipeline timeout", () => {
 
 		wf.reset();
 		expect(wf.status.get()).toBe("idle");
+		wf.destroy();
+	});
+
+	it("timeout aborts in-flight task callback", async () => {
+		const trigger = fromTrigger<string>();
+		let observedAbort = false;
+		const wf = pipeline(
+			{
+				trigger: source(trigger),
+				slow: task(["trigger"], async (signal) => {
+					await new Promise<void>((resolve) => {
+						signal.addEventListener("abort", () => {
+							observedAbort = true;
+							resolve();
+						});
+					});
+					return "done";
+				}),
+			},
+			{ timeout: 40 },
+		);
+
+		trigger.fire("go");
+		await new Promise((r) => setTimeout(r, 100));
+		expect(wf.status.get()).toBe("errored");
+		expect(observedAbort).toBe(true);
+		expect(wf.steps.slow.get()).toBeUndefined();
 		wf.destroy();
 	});
 });

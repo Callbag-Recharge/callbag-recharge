@@ -220,6 +220,52 @@ describe("SA-2d: topicBridge", () => {
 		t.destroy();
 		tB.close();
 	});
+
+	it("applies remote subscribe filter to outgoing forwarding", () => {
+		const [tA, tB] = createMockTransportPair();
+		const local = topic<string>("events");
+		const remote = topic<string>("events");
+
+		const bridgeA = topicBridge(tA, { events: { topic: local } });
+		const bridgeB = topicBridge(tB, {
+			events: {
+				topic: remote,
+				filter: { headers: { "x-priority": "high" } },
+			},
+		});
+
+		local.publish("skip", { headers: { "x-priority": "low" } });
+		local.publish("forward", { headers: { "x-priority": "high" } });
+
+		expect(remote.tailSeq).toBe(1);
+		expect(remote.get(1)?.value).toBe("forward");
+
+		bridgeA.destroy();
+		bridgeB.destroy();
+		local.destroy();
+		remote.destroy();
+	});
+
+	it("stops forwarding after remote unsubscribe", () => {
+		const [tA, tB] = createMockTransportPair();
+		const local = topic<string>("events");
+		const remote = topic<string>("events");
+
+		const bridgeA = topicBridge(tA, { events: { topic: local } });
+		const bridgeB = topicBridge(tB, { events: { topic: remote } });
+
+		local.publish("first");
+		expect(remote.tailSeq).toBe(1);
+
+		bridgeB.removeTopic("events");
+		local.publish("second");
+		expect(remote.tailSeq).toBe(1);
+
+		bridgeA.destroy();
+		bridgeB.destroy();
+		local.destroy();
+		remote.destroy();
+	});
 });
 
 // ---------------------------------------------------------------------------
@@ -553,5 +599,36 @@ describe("SA-2h: backpressure signaling", () => {
 		bridge.destroy();
 		t.destroy();
 		tB.close();
+	});
+
+	it("emits backpressure envelope when threshold is crossed and recovers", () => {
+		vi.useFakeTimers();
+		const [tA, tB] = createMockTransportPair();
+		const local = topic<string>("bp-out", { ttl: 5 });
+		const remote = topic<string>("bp-out");
+		const sent: TransportEnvelope[] = [];
+
+		tB.onMessage((e) => sent.push(e));
+
+		const bridgeA = topicBridge(tA, { "bp-out": { topic: local } }, { backpressureThreshold: 1 });
+		const bridgeB = topicBridge(tB, { "bp-out": { topic: remote } });
+
+		local.publish("a"); // depth 1 => lagging false
+		local.publish("b"); // depth 2 => lagging true
+		vi.advanceTimersByTime(10);
+		local.publish("c"); // expire a,b before append -> depth re-enters non-lagging
+
+		const signals = sent.filter(
+			(e): e is Extract<TransportEnvelope, { type: "backpressure" }> =>
+				e.type === "backpressure" && e.topic === "bp-out",
+		);
+		expect(signals.some((e) => e.lagging === true)).toBe(true);
+		expect(signals.some((e) => e.lagging === false)).toBe(true);
+
+		bridgeA.destroy();
+		bridgeB.destroy();
+		local.destroy();
+		remote.destroy();
+		vi.useRealTimers();
 	});
 });

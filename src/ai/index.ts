@@ -42,15 +42,15 @@ export type {
 export { agentLoop } from "./agentLoop";
 export { agentMemory } from "./agentMemory";
 export type {
-	AgentMemoryOptions,
-	AgentMemoryOperationBase,
-	AgentMemoryOperationStatus,
 	AgentMemoryAddOperation,
 	AgentMemoryAddOptions,
+	AgentMemoryOperationBase,
+	AgentMemoryOperationStatus,
+	AgentMemoryOptions,
 	AgentMemoryResult,
-	AgentMemorySearchOptions,
-	AgentMemorySearchOperation,
 	AgentMemoryScope,
+	AgentMemorySearchOperation,
+	AgentMemorySearchOptions,
 	AgentMemorySearchResult,
 	EmbedFn,
 	EmbedJob,

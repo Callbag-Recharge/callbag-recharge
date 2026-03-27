@@ -71,6 +71,19 @@ interface JobRecord<T, R> {
 	removed?: boolean;
 }
 
+/** Persisted representation used by jobQueue persistence recovery. */
+interface PersistedJobRecord<T, R> {
+	seq: number;
+	data: T;
+	status: JobStatus;
+	result?: R;
+	error?: unknown;
+	duration?: number;
+	attempts: number;
+	progress?: number;
+	runAt?: number;
+}
+
 // ---------------------------------------------------------------------------
 // Persistence key helpers
 // ---------------------------------------------------------------------------
@@ -87,30 +100,29 @@ function _indexKey(queueName: string): string {
 const _dummyAbort = new AbortController();
 
 /**
- * Synchronously resolve a value that may be a callbag source or plain value.
- * Only supports sync adapters (memoryAdapter, etc.). Async adapters will
- * trigger a console.warn and return undefined (Fix H).
+ * Fire-and-forget persistence side effects.
+ * Persistence adapters may return a callbag source (async); we must subscribe
+ * so the adapter actually performs the save/load/clear operation.
  */
-function _syncResolve<T>(val: T | undefined): T | undefined {
-	if (typeof val === "function") {
-		let result: T | undefined;
-		let gotValue = false;
-		(val as any)(0, (t: number, d: any) => {
-			if (t === 1) {
-				result = d;
-				gotValue = true;
-			}
-		});
-		if (!gotValue) {
-			console.warn(
-				"jobQueue persistence: async checkpoint adapters are not supported. " +
-					"Use a sync adapter (e.g., memoryAdapter).",
-			);
-			return undefined;
-		}
-		return result;
+function _safePersist(result: undefined | ((type: number, payload?: any) => void) | unknown): void {
+	if (typeof result === "function") {
+		rawSubscribe(result as any, () => {});
 	}
-	return val as T | undefined;
+}
+
+/**
+ * Load a value from a checkpoint adapter, supporting both sync return values
+ * and async callbag sources.
+ */
+function _loadMaybe<T>(
+	loaded: T | undefined | ((type: number, payload?: any) => void) | unknown,
+	onValue: (v: T | undefined) => void,
+): void {
+	if (typeof loaded === "function") {
+		rawSubscribe(loaded as any, (v: T) => onValue(v));
+		return;
+	}
+	onValue(loaded as T | undefined);
 }
 
 // ---------------------------------------------------------------------------
@@ -264,7 +276,7 @@ export function jobQueue<T, R = void>(
 			progress: rec.progress,
 			runAt: rec.runAt,
 		};
-		_persistence.save(_jobKey(name, rec.seq), data);
+		_safePersist(_persistence.save(_jobKey(name, rec.seq), data));
 	}
 
 	/** Rebuild and persist the index (Fix C: only called on add/remove, not progress). */
@@ -273,13 +285,13 @@ export function jobQueue<T, R = void>(
 		const allSeqs = new Set<number>();
 		for (const s of _jobs.keys()) allSeqs.add(s);
 		for (const s of _finishedJobs.keys()) allSeqs.add(s);
-		_persistence.save(_indexKey(name), Array.from(allSeqs));
+		_safePersist(_persistence.save(_indexKey(name), Array.from(allSeqs)));
 	}
 
 	/** Remove persisted job and update the index (Fix E). */
 	function _unpersistJob(seq: number): void {
 		if (!_persistence) return;
-		_persistence.clear(_jobKey(name, seq));
+		_safePersist(_persistence.clear(_jobKey(name, seq)));
 		_persistIndex();
 	}
 
@@ -292,7 +304,7 @@ export function jobQueue<T, R = void>(
 			if (oldest !== undefined) {
 				_finishedJobs.delete(oldest);
 				// Also remove from persistence
-				if (_persistence) _persistence.clear(_jobKey(name, oldest));
+				if (_persistence) _safePersist(_persistence.clear(_jobKey(name, oldest)));
 			}
 		}
 	}
@@ -554,75 +566,92 @@ export function jobQueue<T, R = void>(
 
 	// --- Pull loop ---
 
+	let _pulling = false;
+
 	function _tryPull(): void {
+		if (_pulling) return;
 		if (_pausedStore.get() || _destroyed) return;
 
-		const available = concurrency - _processing;
-		if (available <= 0) return;
+		_pulling = true;
+		try {
+			const maxRounds = Math.max(10, concurrency * 10);
+			let rounds = 0;
 
-		const messages = _sub.pull(available);
-		if (messages.length === 0) return;
+			while (rounds < maxRounds) {
+				if (_pausedStore.get() || _destroyed) return;
 
-		_updateWaiting();
+				const available = concurrency - _processing;
+				if (available <= 0) return;
 
-		// SA-3b: Sort by priority (lower number = higher priority)
-		if (messages.length > 1) {
-			messages.sort((a: TopicMessage<T>, b: TopicMessage<T>) => {
-				const pa = a.priority ?? Number.MAX_SAFE_INTEGER;
-				const pb = b.priority ?? Number.MAX_SAFE_INTEGER;
-				return pa - pb;
-			});
-		}
+				const messages = _sub.pull(available);
+				if (messages.length === 0) return;
 
-		for (const msg of messages) {
-			const rec: JobRecord<T, R> = {
-				seq: msg.seq,
-				data: msg.value,
-				status: "waiting",
-				attempts: 0,
-				progress: 0,
-				abort: _createJobAbort(),
-			};
-			_jobs.set(msg.seq, rec);
+				_updateWaiting();
 
-			// SA-3c: Check for scheduled execution via header
-			const runAtHeader = msg.headers?.["x-run-at"];
-			if (runAtHeader) {
-				const runAtMs = Number(runAtHeader);
-				const delay = runAtMs - Date.now();
-				if (delay > 0) {
-					rec.status = "scheduled";
-					rec.runAt = runAtMs;
-					_persistJob(rec);
-					_persistIndex();
-					rawSubscribe(
-						fromTimer(delay, rec.abort.signal),
-						() => {
-							if (_destroyed || rec.removed) {
-								_finishJob(rec);
-								return;
-							}
-							// Fix G: Check pause
-							if (_pausedStore.get()) {
-								_deferredQueue.push(rec);
-								return;
-							}
-							// Fix 1: Concurrency check via _processJob
-							_processJob(rec);
-						},
-						{
-							onEnd: (err?: unknown) => {
-								if (err !== undefined) {
-									_finishJob(rec);
-								}
-							},
-						},
-					);
-					continue;
+				// SA-3b: Sort by priority (lower number = higher priority)
+				if (messages.length > 1) {
+					messages.sort((a: TopicMessage<T>, b: TopicMessage<T>) => {
+						const pa = a.priority ?? Number.MAX_SAFE_INTEGER;
+						const pb = b.priority ?? Number.MAX_SAFE_INTEGER;
+						return pa - pb;
+					});
 				}
-			}
 
-			_processJob(rec);
+				for (const msg of messages) {
+					const rec: JobRecord<T, R> = {
+						seq: msg.seq,
+						data: msg.value,
+						status: "waiting",
+						attempts: 0,
+						progress: 0,
+						abort: _createJobAbort(),
+					};
+					_jobs.set(msg.seq, rec);
+
+					// SA-3c: Check for scheduled execution via header
+					const runAtHeader = msg.headers?.["x-run-at"];
+					if (runAtHeader) {
+						const runAtMs = Number(runAtHeader);
+						const delay = runAtMs - Date.now();
+						if (delay > 0) {
+							rec.status = "scheduled";
+							rec.runAt = runAtMs;
+							_persistJob(rec);
+							_persistIndex();
+							rawSubscribe(
+								fromTimer(delay, rec.abort.signal),
+								() => {
+									if (_destroyed || rec.removed) {
+										_finishJob(rec);
+										return;
+									}
+									// Fix G: Check pause
+									if (_pausedStore.get()) {
+										_deferredQueue.push(rec);
+										return;
+									}
+									// Fix 1: Concurrency check via _processJob
+									_processJob(rec);
+								},
+								{
+									onEnd: (err?: unknown) => {
+										if (err !== undefined) {
+											_finishJob(rec);
+										}
+									},
+								},
+							);
+							continue;
+						}
+					}
+
+					_processJob(rec);
+				}
+
+				rounds++;
+			}
+		} finally {
+			_pulling = false;
 		}
 	}
 
@@ -668,30 +697,31 @@ export function jobQueue<T, R = void>(
 
 	// --- Persistence recovery (SA-3h) ---
 	if (_persistence) {
-		const indexRaw = _syncResolve(_persistence.load(_indexKey(name)));
-		if (Array.isArray(indexRaw)) {
-			for (const seq of indexRaw as number[]) {
-				const jobData = _syncResolve(_persistence.load(_jobKey(name, seq))) as any;
-				if (!jobData) continue;
-				// Only recover non-terminal jobs
-				if (jobData.status === "completed" || jobData.status === "failed") {
-					// Store in finished for introspection (Fix F: use dummy abort)
-					const finishedRec: JobRecord<T, R> = {
-						seq: jobData.seq,
-						data: jobData.data,
-						status: jobData.status,
-						result: jobData.result,
-						error: jobData.error,
-						duration: jobData.duration,
-						attempts: jobData.attempts,
-						progress: jobData.progress ?? 0,
-						abort: _dummyAbort,
-					};
-					_addFinished(finishedRec);
-				}
-				// Active/waiting/scheduled jobs will be re-pulled from the topic
+		_loadMaybe<number[]>(_persistence.load(_indexKey(name)), (indexRaw) => {
+			if (!Array.isArray(indexRaw)) return;
+			for (const seq of indexRaw) {
+				_loadMaybe<PersistedJobRecord<T, R>>(_persistence.load(_jobKey(name, seq)), (jobData) => {
+					if (!jobData) return;
+					// Only recover non-terminal jobs
+					if (jobData.status === "completed" || jobData.status === "failed") {
+						// Store in finished for introspection (Fix F: use dummy abort)
+						const finishedRec: JobRecord<T, R> = {
+							seq: jobData.seq,
+							data: jobData.data,
+							status: jobData.status,
+							result: jobData.result,
+							error: jobData.error,
+							duration: jobData.duration,
+							attempts: jobData.attempts,
+							progress: jobData.progress ?? 0,
+							abort: _dummyAbort,
+						};
+						_addFinished(finishedRec);
+					}
+					// Active/waiting/scheduled jobs will be re-pulled from the topic
+				});
 			}
-		}
+		});
 	}
 
 	// Initial pull

@@ -21,6 +21,11 @@ Job Queue is a queue processor built on topic + subscription primitives. Produce
 - Broadcast event streams where each consumer should see every event.
 - Complex DAG workflow coordination across many dependent steps.
 
+For those cases, prefer:
+
+- `topic()` + one `subscription()` per consumer group/app for true fan-out broadcast.
+- `pipeline()` + `task()` (Orchestrate) when dependencies and graph control are primary.
+
 ## Core primitives
 
 - `jobQueue()` for queue processing and worker lifecycle.

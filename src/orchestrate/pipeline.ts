@@ -97,7 +97,7 @@ export interface StepSnapshot {
 export interface PipelineSnapshot<S extends Record<string, StepDef> = Record<string, StepDef>> {
 	/** Overall pipeline status. */
 	status: PipelineStatus;
-	/** Per-step snapshots keyed by step name. */
+	/** Per-step snapshots keyed by step name (includes compound sub-steps and external tasks). */
 	steps: { [K in keyof S]: StepSnapshot };
 	/** Topologically sorted step names. */
 	order: string[];
@@ -153,6 +153,13 @@ const IDLE_STEP_META: StepMeta = Object.freeze({
 	errorRate: 0,
 	throughput: 0,
 });
+
+function toPipelineStatus(taskStatus: import("./types").TaskStatus): PipelineStatus {
+	if (taskStatus === "running") return "active";
+	if (taskStatus === "error") return "errored";
+	if (taskStatus === "success" || taskStatus === "skipped") return "completed";
+	return "idle";
+}
 
 /**
  * @internal
@@ -688,6 +695,10 @@ export function pipeline<S extends Record<string, StepDef>>(
 		_timeoutAc?.abort();
 		_timeoutAc = new AbortController();
 		rawSubscribe(fromTimer(_timeoutMs, _timeoutAc.signal), () => {
+			// Abort in-flight task callbacks on timeout while keeping pipeline inspectable.
+			for (const sub of stepSubs) {
+				sub.signal(RESET);
+			}
 			_timedOut.set(true);
 		});
 	}
@@ -849,7 +860,7 @@ export function pipeline<S extends Record<string, StepDef>>(
 			}
 		},
 		inspect(): PipelineSnapshot<S> {
-			const stepSnapshots = {} as { [K in keyof S]: StepSnapshot };
+			const stepSnapshots = {} as Record<string, StepSnapshot>;
 			for (const name of stepNames) {
 				const meta = metaMap.get(name)!.get();
 				const snap: StepSnapshot = {
@@ -875,11 +886,40 @@ export function pipeline<S extends Record<string, StepDef>>(
 						snap.approvalPending = pending;
 					}
 				}
-				(stepSnapshots as any)[name] = snap;
+				stepSnapshots[name] = snap;
+			}
+			for (const [name, ts] of externalTasksByName) {
+				if (stepSnapshots[name] !== undefined) continue;
+				const meta = ts.get();
+				stepSnapshots[name] = {
+					status: toPipelineStatus(meta.status),
+					count: 0,
+					errorCount: meta.status === "error" ? 1 : 0,
+					errorRate: meta.status === "error" ? 1 : 0,
+					throughput: 0,
+					task: meta,
+				};
+			}
+			for (const [name, store] of storeMap) {
+				if (!name.includes(".") || stepSnapshots[name] !== undefined) continue;
+				let value: unknown;
+				try {
+					value = store.get();
+				} catch {
+					value = undefined;
+				}
+				const hasValue = value !== undefined;
+				stepSnapshots[name] = {
+					status: hasValue ? "active" : "idle",
+					count: hasValue ? 1 : 0,
+					errorCount: 0,
+					errorRate: 0,
+					throughput: 0,
+				};
 			}
 			return {
 				status: status.get(),
-				steps: stepSnapshots,
+				steps: stepSnapshots as { [K in keyof S]: StepSnapshot },
 				order: [...order],
 			};
 		},

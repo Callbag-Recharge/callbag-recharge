@@ -12,7 +12,7 @@ function h2MessageTransport(authority: string, opts?: H2TransportOpts): MessageT
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `authority` | `string` | HTTP/2 authority URL (e.g. `'https://localhost:8443'`). |
+| `authority` | `string` | HTTP/2 authority URL (e.g. `https://localhost:8443`). |
 | `opts` | `H2TransportOpts` | Transport options. |
 
 ## Returns

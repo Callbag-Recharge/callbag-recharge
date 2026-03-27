@@ -3,12 +3,12 @@ import { agentMemory } from "../../../ai/agentMemory";
 import type { LLMStore } from "../../../ai/fromLLM";
 import { state } from "../../../core/state";
 import type { Store } from "../../../core/types";
-import type { WithStatusStatus } from "../../../utils/withStatus";
 import type {
 	MessageTransport,
 	TransportEnvelope,
 	TransportStatus,
 } from "../../../messaging/transportTypes";
+import type { WithStatusStatus } from "../../../utils/withStatus";
 
 // ---------------------------------------------------------------------------
 // Test utilities
@@ -474,7 +474,9 @@ describe("agentMemory", () => {
 		await vitest.waitFor(() => expect(first.status.get()).toBe("completed"));
 
 		llm._status.set("pending");
-		const second = mem.add([{ role: "user", content: "second op" }], undefined, { opId: "reuse-op" });
+		const second = mem.add([{ role: "user", content: "second op" }], undefined, {
+			opId: "reuse-op",
+		});
 		completeLLM(llm, [{ content: "f2", importance: 0.5, tags: [] }]);
 		await vitest.waitFor(() => expect(second.status.get()).toBe("completed"));
 

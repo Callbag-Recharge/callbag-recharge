@@ -183,6 +183,9 @@ const bridge = topicBridge(transport, {
 bridge.addTopic('logs', { topic: logsTopic });
 bridge.removeTopic('logs');
 
+// Remote subscribe/unsubscribe controls forwarding.
+// If peer subscribes with a filter, outgoing forwarding honors that filter.
+
 // Backpressure: check if remote consumer is lagging
 const bp = bridge.backpressure.get('orders');
 if (bp?.get()) console.log('Remote is lagging on orders');

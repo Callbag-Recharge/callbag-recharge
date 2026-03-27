@@ -19,8 +19,8 @@ Use this section when you want to decide *which building block to use* before di
 ## How to choose
 
 - Pick **Orchestrate** when work is graph-shaped and step dependencies matter.
-- Pick **Messaging** when you need durable event streams and independent subscribers.
-- Pick **Job Queue** when you need pull-based workers that process discrete jobs.
+- Pick **Messaging** when you need durable event streams and fan-out subscribers (each app/group sees its own stream).
+- Pick **Job Queue** when you need competing pull-based workers where each job is processed once.
 
 ## Related Docs
 

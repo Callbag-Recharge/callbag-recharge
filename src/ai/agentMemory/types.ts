@@ -10,9 +10,9 @@ import type {
 	ScoreWeights,
 	VectorIndex,
 } from "../../memory/types";
-import type { JobQueue, Topic } from "../../messaging/types";
 import type { TopicBridgeResult } from "../../messaging/topicBridge";
 import type { MessageFilter, MessageTransport } from "../../messaging/transportTypes";
+import type { JobQueue, Topic } from "../../messaging/types";
 import type { CheckpointAdapter } from "../../utils/checkpoint";
 import type { LLMStore } from "../fromLLM";
 

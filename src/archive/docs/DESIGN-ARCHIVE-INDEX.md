@@ -132,7 +132,7 @@ Implemented the `createStore()` pattern matching Zustand's `create((set, get) =>
 
 **Rejected:** Job queues/Kafka for in-process agent state; Redis as a requirement; RBAC in core primitives.
 
-**Outcome:** 6-phase plan from reactive KV store through knowledge graphs. Benchmark targets (10ns point read vs Redis 100μs). SESSION-agentic-memory-research.md.
+**Outcome:** 6-phase plan from reactive KV store through knowledge graphs. Benchmark targets (10ns point read vs Redis 100μs). Later updates include OpenClaw/Mem0 integration analysis (Mar 23) and OpenViking architecture/release analysis (Mar 26), with concrete recommendations: memory retrieval observability as first-class API, two-phase session commit contract, typed extraction categories, explicit memory tool operations, and retrieval planner stores. `SESSION-agentic-memory-research.md`.
 
 ### Session generic-utils-design (March 17) — Generic Utility Layer Design
 **Topic:** Backoff strategies, eviction policies, circuit breaker, rate limiter — reusable strategy layer between extras and patterns

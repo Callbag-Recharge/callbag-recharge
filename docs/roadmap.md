@@ -157,9 +157,11 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 > **Depends on:** Data structures (shipped), memoryNode/collection/decay/vectorIndex (shipped).
 >
 > **Market validation (March 2026):** OpenClaw integrated Mem0 (hybrid vector + graph) as
-> built-in agent memory — confirms demand for structured memory backends in AI tools. Our
-> differentiator: reactive/push-based (vs Mem0's pull-only), in-process (vs service call),
-> diamond-safe updates, transport-agnostic.
+> built-in agent memory — confirms demand for structured memory backends in AI tools.
+> OpenViking (Volcengine/ByteDance, 19K+ stars) further validates with filesystem-shaped
+> context management, L0/L1/L2 progressive loading, typed categories, retrieval observability.
+> Our differentiator: reactive/push-based (vs both Mem0 and OpenViking's pull-only),
+> in-process (vs service/subprocess), diamond-safe updates, transport-agnostic.
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
@@ -225,7 +227,7 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | SA-2e | Message filtering | Bridge-level filter by key, header match, content predicate (`MessageFilter<T>`) | S | ✅ |
 | SA-2f | Consumer lag + TTL | `lag` derived store on subscription; `ttl` option + `expireMessages()` on topic (publish-time expiry via `trimHead`) | S | ✅ |
 | SA-2g | Admin API | `listTopics()`, `inspectSubscription()`, `resetCursor()` in `admin.ts` | S-M | ✅ |
-| SA-2h | Backpressure signaling | Reactive `state<boolean>` stores per topic on bridge, updated via backpressure envelopes | S | ✅ |
+| SA-2h | Backpressure signaling | Reactive `state<boolean>` stores per topic on bridge; bridge emits and consumes backpressure envelopes | S | ✅ |
 
 #### SA-3: Job Queue Standalone
 
@@ -247,8 +249,16 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 #### SA-4: agentMemory v2 (Composing Products 2 & 3)
 
 > **Goal:** Upgrade agentMemory from inline processing to composing jobQueue + topic.
+> Add OpenViking-validated patterns: progressive loading, retrieval observability,
+> typed categories, improved decay scoring.
 >
 > **Depends on:** SA-3 (jobQueue standalone).
+>
+> **Market validation (March 2026):** OpenViking (Volcengine/ByteDance, 19K+ stars)
+> validates: L0/L1/L2 progressive context loading for token budgets, typed memory
+> categories (profile/preferences/entities/events/cases/patterns), hierarchical
+> retrieval with score propagation, retrieval trajectory observability, two-phase
+> session commit. Our differentiator: reactive/push-based, in-process, diamond-safe.
 
 | # | Deliverable | What | Effort |
 |---|-------------|------|--------|
@@ -262,6 +272,10 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 | SA-4h | Configurable search overfetch | Current 2x overfetch for scope filtering may be insufficient; make overfetch factor configurable | S |
 | SA-4i | Cancellable embed | `search()`/`add()` abort doesn't cancel in-flight `embed()` call — requires `EmbedFn` signature accepting `AbortSignal` | S-M |
 | SA-4j | Per-operation status | Concurrent add + search clobbers single status store — jobQueue tracks per-operation status independently | M |
+| SA-4k | Retrieval observability | `search()` returns retrieval trace: query plan, candidate scores, decay/similarity breakdown, final ranking rationale. Answers "why this memory surfaced" in domain language, not just generic graph internals. Inspired by OpenViking's observable retrieval trajectory. | S-M |
+| SA-4l | Typed memory categories | Optional `category` field on memory nodes (profile/preferences/entities/events/cases/patterns or custom). Policy-driven: categories route retrieval weighting, dedup boundaries, consolidation targeting. YAML/JSON schema definition like OpenViking's templates. | M |
+| SA-4m | Improved decay formula | Adopt OpenViking-validated `sigmoid(log1p(access_count)) * exp_decay(age, half_life)` with configurable half-life (default 7d). Simpler and purely data-driven vs current formula. Blendable with semantic similarity for final scoring. | S |
+| SA-4n | Progressive context loading (L0/L1/L2) | Three-tier summary generation per memory: L0 (~100 tokens, for vector search), L1 (~2K tokens, for rerank/context), L2 (full content, on-demand). L0/L1 generated via `fromLLM` through jobQueue. `derived()` chains for bottom-up aggregation. Token-budget-aware retrieval returns L1 by default, L2 on demand. | M-L |
 
 #### SA-5: Multi-Agent Routing
 

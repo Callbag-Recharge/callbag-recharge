@@ -453,6 +453,33 @@ const sub = subscribe(
 
 Defensive — no current code path causes `node.meta` to END independently. Relevant when future orchestration features (e.g., node disposal, hot-swap) start completing individual node stores. The guard `if (!entry) return` handles the case where the key was already manually deleted before the store completed.
 
+### 28. jobQueue SA-3 durability + distributed dispatch correctness
+
+#### Findings
+- **SA-3h (persistence)**: `jobQueue` treated `CheckpointAdapter` as sync-only. Async adapters that return a callbag from `save/load/clear` were effectively ignored, and recovery used a sync-only loader.
+- **SA-3g (distributed jobs)**: existing coverage was only “surface exposure” (`queue.inner.topic`). We added an end-to-end test to ensure bridged queues process remote jobs with the expected metadata.
+- **SA-3c/SA-3f (dispatch fill)**: `_tryPull()` previously pulled at most once per trigger; if it pulled scheduled/rate-limited jobs first, it could leave worker capacity idle until the next trigger.
+
+#### Fix (implemented)
+- `src/messaging/jobQueue.ts`:
+  - Added `_safePersist()` to subscribe to persistence callbags (`save/clear`) so async adapters actually execute side effects.
+  - Added `_loadMaybe()` so recovery supports both sync returns and async callbag sources (`load`).
+  - Updated `_tryPull()` to keep pulling while capacity remains (guarded by a `_pulling` re-entrancy flag).
+- Tests (`src/__tests__/messaging/jobQueue.test.ts`):
+  - Added pause/resume coverage for scheduled jobs (SA-3c) and rate-limited jobs (SA-3f).
+  - Added an async checkpoint adapter recovery test (SA-3h).
+  - Added an SA-3g end-to-end bridging test using `topicBridge` + a mock transport.
+
+#### Alternative discussion: “Option 3 with `fromAny`”
+- `fromAny/rawFromAny` dispatches on: PromiseLike → AsyncIterable → Iterable → plain value. A callbag source is just a function `(type, payload?) => void` — it has no `.then`, no `Symbol.asyncIterator`, no `Symbol.iterator`, so `rawFromAny` treats it as a **plain value** (emits the function itself, then END). Extending `rawFromAny` with a “callbag source function” branch would require arity-based detection (`fn.length <= 2`), which is fragile — any 0-2 arity function would be misidentified as a callbag source. The local `_safePersist`/`_loadMaybe` helpers (which check `typeof result === “function”` at a type-constrained call site) are the correct pattern.
+
+#### Dispatch cursor vs consumer cursor (SA-3c/3f)
+- The slot-fill fix works because `subscription` and `jobQueue` already separate two cursors: the **dispatch cursor** (`_cursor` / `_group.cursor` in subscription — “next seq to read from the log”) and the **consumer cursor** (`_processing` count + `concurrency` limit in jobQueue — “how many slots are filled”). The original bug was that `_tryPull()` only called `_sub.pull(available)` once per trigger — if pulled messages were deferred (scheduled/rate-limited), remaining log entries weren’t backfilled. The looping fix makes jobQueue actually exploit the cursor separation by pulling repeatedly until capacity is full or the log is exhausted. In shared/failover subscription modes, `_group.cursor` is shared across consumers, making the dispatch cursor truly independent of any single consumer’s processing state.
+
+#### Messaging impact (why it’s a good outcome)
+- `topicBridge` already forwards headers/payloads, so with SA-3g end-to-end validation, `jobQueue.inner.topic` is a reliable distribution primitive.
+- Improving `_tryPull()` increases prompt start rates for distributed queues where some jobs are scheduled/rate-limited.
+
 ---
 
 ## Potential optimizations
@@ -510,6 +537,12 @@ Producer/state `_handleLifecycleSignal(RESET)` resets `_value` to `_initial` and
 ### 7. Batch drain resilience
 
 Per-emission `try/catch` in the batch drain loop ensures one throwing callback doesn't orphan remaining deferred emissions. The first error is captured and re-thrown after all emissions are processed. The drain loop itself is wrapped in `try/finally` so `draining` is always reset to `false` and `deferredEmissions` is always cleared. Previously, one throw permanently broke all future `batch()` usage — `draining` stayed `true`, causing all subsequent batch drains to be skipped.
+
+### 8. Shared checkpoint persistence utility (SA-3h)
+
+**Status:** Not implemented. **Impact:** Medium (maintainability + consistency). **Priority:** Medium — reduces duplicated “adapter-result might be a callbag” logic across modules.
+
+**Proposed action:** Extract `_safePersist`/`_loadMaybe` from `jobQueue.ts` into a shared `utils/checkpoint.ts` helper so all durable primitives (future pipeline checkpoints, durable subscriptions, etc.) use identical `typeof result === “function”` → `rawSubscribe` semantics. This is preferred over extending `rawFromAny` because: (a) `rawFromAny` cannot distinguish callbag sources from arbitrary functions without fragile arity heuristics, (b) the checkpoint call sites are type-constrained (adapter returns `T | CallbagSource`), making a local `typeof` check safe and unambiguous, (c) a shared utility avoids copy-paste without polluting the raw layer with adapter-specific logic.
 
 ---
 

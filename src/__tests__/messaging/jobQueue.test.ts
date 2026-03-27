@@ -1,8 +1,57 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Inspector } from "../../core/inspector";
+import { state } from "../../core/state";
 import { jobQueue } from "../../messaging/jobQueue";
 import { topic } from "../../messaging/topic";
+import { topicBridge } from "../../messaging/topicBridge";
+import type {
+	MessageTransport,
+	TransportEnvelope,
+	TransportStatus,
+} from "../../messaging/transportTypes";
 import { memoryAdapter } from "../../utils/checkpoint";
+
+// ---------------------------------------------------------------------------
+// Mock transport — in-memory loopback for testing topicBridge wiring
+// ---------------------------------------------------------------------------
+function createMockTransportPair(): [MessageTransport, MessageTransport] {
+	const statusA = state<TransportStatus>("connected");
+	const statusB = state<TransportStatus>("connected");
+	const handlersA = new Set<(e: TransportEnvelope) => void>();
+	const handlersB = new Set<(e: TransportEnvelope) => void>();
+
+	const transportA: MessageTransport = {
+		send(envelope) {
+			for (const h of handlersB) h(envelope);
+		},
+		onMessage(handler) {
+			handlersA.add(handler);
+			return () => handlersA.delete(handler);
+		},
+		status: statusA as any,
+		close() {
+			handlersA.clear();
+			statusA.set("disconnected");
+		},
+	};
+
+	const transportB: MessageTransport = {
+		send(envelope) {
+			for (const h of handlersA) h(envelope);
+		},
+		onMessage(handler) {
+			handlersB.add(handler);
+			return () => handlersB.delete(handler);
+		},
+		status: statusB as any,
+		close() {
+			handlersB.clear();
+			statusB.set("disconnected");
+		},
+	};
+
+	return [transportA, transportB];
+}
 
 describe("jobQueue", () => {
 	beforeEach(() => {
@@ -635,6 +684,117 @@ describe("jobQueue", () => {
 			expect(results).toContain("past");
 			q.destroy();
 		});
+
+		it("resumes queued scheduled jobs after pause", async () => {
+			const processed: string[] = [];
+
+			const q = jobQueue<string, void>(
+				"scheduled-pause-resume",
+				async (_signal, data) => {
+					processed.push(data);
+				},
+				{ concurrency: 1 },
+			);
+
+			q.pause();
+
+			const now = Date.now();
+			const seq = q.add("later", { runAt: new Date(now + 500) });
+
+			await vi.advanceTimersByTimeAsync(200);
+			expect(processed).toEqual([]);
+			expect(q.getJob(seq)?.status).toBeUndefined(); // not pulled while paused
+
+			q.resume();
+			expect(q.getJob(seq)?.status).toBe("scheduled");
+
+			// 200ms after resume => still not at runAt
+			await vi.advanceTimersByTimeAsync(200);
+			expect(processed).toEqual([]);
+
+			// Remaining ~300ms => should fire
+			await vi.advanceTimersByTimeAsync(300);
+			expect(processed).toEqual(["later"]);
+			q.destroy();
+		});
+	});
+
+	// -----------------------------------------------------------------------
+	// SA-3c/3f: Slot-fill backfill (_tryPull loops until capacity full)
+	// -----------------------------------------------------------------------
+
+	describe("SA-3c/3f: slot-fill backfill", () => {
+		it("backfills capacity when scheduled jobs are deferred", async () => {
+			// Guards the dispatch-cursor vs consumer-cursor separation:
+			// _tryPull must loop to fill all available worker slots, not stop
+			// after a single pull round that yields only deferred (scheduled) jobs.
+			const processed: string[] = [];
+			const now = Date.now();
+
+			const q = jobQueue<string, void>(
+				"backfill-scheduled",
+				async (_signal, data) => {
+					processed.push(data);
+				},
+				{ concurrency: 3 },
+			);
+
+			// Add a mix of scheduled (deferred) and immediate jobs
+			q.add("scheduled-1", { runAt: new Date(now + 5000) });
+			q.add("immediate-1");
+			q.add("immediate-2");
+			q.add("scheduled-2", { runAt: new Date(now + 5000) });
+			q.add("immediate-3");
+
+			// Let immediate jobs process
+			await vi.advanceTimersByTimeAsync(200);
+
+			// All 3 immediate jobs should have been pulled and processed,
+			// even though scheduled jobs were interspersed in the topic.
+			// This proves _tryPull loops to backfill capacity past deferred jobs.
+			expect(processed).toContain("immediate-1");
+			expect(processed).toContain("immediate-2");
+			expect(processed).toContain("immediate-3");
+
+			// Scheduled jobs should not have processed yet
+			expect(processed).not.toContain("scheduled-1");
+			expect(processed).not.toContain("scheduled-2");
+
+			// After scheduled time, they should process too
+			await vi.advanceTimersByTimeAsync(5000);
+			expect(processed).toContain("scheduled-1");
+			expect(processed).toContain("scheduled-2");
+			expect(processed.length).toBe(5);
+
+			q.destroy();
+		});
+
+		it("_tryPull re-entrancy guard prevents infinite loops", async () => {
+			// The _pulling flag prevents recursive _tryPull calls.
+			// Verify the queue processes correctly even when topic depth
+			// changes during pull (which triggers _depthSub → _tryPull).
+			const processed: string[] = [];
+
+			const q = jobQueue<string, void>(
+				"reentrant-guard",
+				async (_signal, data) => {
+					processed.push(data);
+				},
+				{ concurrency: 2 },
+			);
+
+			// Rapid-fire adds that may trigger overlapping depth notifications
+			for (let i = 0; i < 10; i++) {
+				q.add(`job-${i}`);
+			}
+
+			await vi.advanceTimersByTimeAsync(500);
+
+			// All 10 jobs should eventually process despite re-entrancy guard
+			expect(processed.length).toBe(10);
+
+			q.destroy();
+		});
 	});
 
 	// -----------------------------------------------------------------------
@@ -891,6 +1051,41 @@ describe("jobQueue", () => {
 			expect(startCount).toBe(2); // both start immediately
 			q.destroy();
 		});
+
+		it("resumes queued rate-limited jobs after pause", async () => {
+			const started: string[] = [];
+
+			const q = jobQueue<string, void>(
+				"rate-pause-resume",
+				(_signal, data) => {
+					started.push(data);
+				},
+				{
+					concurrency: 2,
+					rateLimit: { max: 1, windowMs: 1000 },
+				},
+			);
+
+			q.pause();
+
+			q.add("job1", { priority: 1 });
+			q.add("job2", { priority: 2 });
+
+			await vi.advanceTimersByTimeAsync(200);
+			expect(started).toEqual([]);
+
+			q.resume();
+
+			// Only one job should start immediately (max=1)
+			await vi.advanceTimersByTimeAsync(20);
+			expect(started).toEqual(["job1"]);
+
+			// Next window => second job can start
+			await vi.advanceTimersByTimeAsync(1100);
+			expect(started).toEqual(["job1", "job2"]);
+
+			q.destroy();
+		});
 	});
 
 	// -----------------------------------------------------------------------
@@ -917,6 +1112,53 @@ describe("jobQueue", () => {
 			expect(msg!.value).toBe("msg");
 
 			q.destroy();
+		});
+
+		it("processes bridged jobs remotely (topicBridge + headers)", async () => {
+			const processed: string[] = [];
+			const processedA: string[] = [];
+
+			const qA = jobQueue<string, void>(
+				"dist-producer",
+				(_signal, data) => {
+					processedA.push(data);
+				},
+				{ concurrency: 1 },
+			);
+			qA.pause(); // producer-only: prevent local consumption
+
+			const qB = jobQueue<string, void>(
+				"dist-consumer",
+				(_signal, data) => {
+					processed.push(data);
+				},
+				{ concurrency: 3 },
+			);
+
+			const [tA, tB] = createMockTransportPair();
+			const bridgeA = topicBridge(tA, { jobs: { topic: qA.inner.topic } });
+			const bridgeB = topicBridge(tB, { jobs: { topic: qB.inner.topic } });
+
+			const now = Date.now();
+
+			// Add via qA; qB should process forwarded messages.
+			qA.add("immediateHigh", { priority: 1 });
+			qA.add("immediateLow", { priority: 10 });
+			qA.add("scheduled", { priority: 5, runAt: new Date(now + 500) });
+
+			// Immediate jobs should be processed before scheduled runAt.
+			await vi.advanceTimersByTimeAsync(100);
+			expect(processed).toEqual(["immediateHigh", "immediateLow"]);
+			expect(processedA).toEqual([]);
+
+			// After runAt => scheduled job processed.
+			await vi.advanceTimersByTimeAsync(500);
+			expect(processed).toEqual(["immediateHigh", "immediateLow", "scheduled"]);
+
+			bridgeA.destroy();
+			bridgeB.destroy();
+			qA.destroy();
+			qB.destroy();
 		});
 	});
 
@@ -994,6 +1236,95 @@ describe("jobQueue", () => {
 			expect(job).toBeDefined();
 			expect(job!.status).toBe("completed");
 			expect(job!.result).toBe("r:work");
+
+			q2.destroy();
+		});
+
+		it("recovers persisted completed jobs with async checkpoint adapter", async () => {
+			// Async adapter that returns callbag sources from save/load/clear.
+			// This simulates durable persistence backends (file/IDB/SQLite) in async mode.
+			const delayMs = 50;
+			const store = new Map<string, unknown>();
+
+			const adapter = {
+				save(id: string, value: unknown) {
+					return (type: number, sink?: any) => {
+						if (type !== 0 /* START */) return;
+						let done = false;
+						const timer = setTimeout(() => {
+							if (done) return;
+							store.set(id, value);
+							sink(1 /* DATA */, undefined);
+							sink(2 /* END */);
+						}, delayMs);
+						sink(0 /* START */, (t: number) => {
+							if (t === 2 /* END */) {
+								done = true;
+								clearTimeout(timer);
+							}
+						});
+					};
+				},
+				load(id: string) {
+					return (type: number, sink?: any) => {
+						if (type !== 0 /* START */) return;
+						let done = false;
+						const timer = setTimeout(() => {
+							if (done) return;
+							const v = store.has(id) ? store.get(id) : undefined;
+							sink(1 /* DATA */, v);
+							sink(2 /* END */);
+						}, delayMs);
+						sink(0 /* START */, (t: number) => {
+							if (t === 2 /* END */) {
+								done = true;
+								clearTimeout(timer);
+							}
+						});
+					};
+				},
+				clear(id: string) {
+					return (type: number, sink?: any) => {
+						if (type !== 0 /* START */) return;
+						let done = false;
+						const timer = setTimeout(() => {
+							if (done) return;
+							store.delete(id);
+							sink(1 /* DATA */, undefined);
+							sink(2 /* END */);
+						}, delayMs);
+						sink(0 /* START */, (t: number) => {
+							if (t === 2 /* END */) {
+								done = true;
+								clearTimeout(timer);
+							}
+						});
+					};
+				},
+			};
+
+			// 1) Process and persist via q1
+			const q1 = jobQueue<string, string>(
+				"persist-async",
+				async (_signal, data) => `result:${data}`,
+				{ persistence: adapter as any, retry: { maxRetries: 0 } },
+			);
+			const seq = q1.add("work");
+			await vi.advanceTimersByTimeAsync(300);
+			q1.destroy();
+
+			// 2) Recover finished job state via q2
+			const q2 = jobQueue<string, string>("persist-async", async () => "ignored", {
+				persistence: adapter as any,
+				retry: { maxRetries: 0 },
+			});
+
+			await vi.advanceTimersByTimeAsync(300);
+
+			const job = q2.getJob(seq);
+			expect(job).toBeDefined();
+			expect(job!.status).toBe("completed");
+			expect(job!.result).toBe("result:work");
 
 			q2.destroy();
 		});

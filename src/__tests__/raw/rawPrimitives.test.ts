@@ -189,6 +189,32 @@ describe("rawFromAny", () => {
 		expect(values).toEqual([1, 2, 3]);
 	});
 
+	it("function value → emits the function itself, not invoked as callbag source", () => {
+		// Guards SA-3h invariant: rawFromAny must NOT subscribe to function values.
+		// Callbag sources are functions, but rawFromAny cannot distinguish them from
+		// arbitrary functions without fragile arity heuristics. Functions must be
+		// treated as plain values (case 4 in dispatch order).
+		const fn = (x: number) => x * 2;
+		const values: unknown[] = [];
+		let ended = false;
+		rawSubscribe(rawFromAny(fn as any), (v) => values.push(v), {
+			onEnd: () => (ended = true),
+		});
+		expect(values).toEqual([fn]); // emits the function object
+		expect(ended).toBe(true);
+	});
+
+	it("callbag-shaped function → still treated as plain value, not subscribed", () => {
+		// A function with callbag arity (type, payload?) must NOT be auto-subscribed.
+		// This is the exact ambiguity that prevents extending rawFromAny for adapters.
+		const fakeCb = (type: number, _payload?: any) => {
+			if (type === 0) throw new Error("should not be called as callbag");
+		};
+		const values: unknown[] = [];
+		rawSubscribe(rawFromAny(fakeCb as any), (v) => values.push(v));
+		expect(values).toEqual([fakeCb]);
+	});
+
 	it("unsubscribe during iterable → stops emitting", () => {
 		// Use raw callbag protocol directly since rawSubscribe returns after
 		// sync sources have already emitted (sub isn't assigned yet in callback)

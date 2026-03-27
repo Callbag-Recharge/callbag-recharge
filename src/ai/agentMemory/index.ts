@@ -29,13 +29,13 @@ import { autoPersist } from "./persistence";
 import type {
 	AgentMemoryAddOperation,
 	AgentMemoryAddOptions,
+	AgentMemoryOperationStatus,
 	AgentMemoryOptions,
 	AgentMemoryResult,
-	AgentMemorySearchOptions,
-	AgentMemorySearchOperation,
 	AgentMemoryScope,
+	AgentMemorySearchOperation,
+	AgentMemorySearchOptions,
 	AgentMemorySearchResult,
-	AgentMemoryOperationStatus,
 	EmbedJob,
 	EmbedResult,
 	ExtractedFact,
@@ -89,7 +89,8 @@ function matchesScope(nodeTags: Set<string>, requiredTags: string[]): boolean {
  * @remarks **Configurable overfetch (SA-4h):** `searchOverfetch` option controls
  *   the multiplier for scope-filtered search results.
  * @remarks **Cancellable embed (SA-4i):** `EmbedFn` accepts optional AbortSignal.
- * @remarks **Queue-level status (SA-4j):** Status derived from active queue stores.
+ * @remarks **Per-operation handles (SA-4j):** `add()`/`search()` return isolated
+ *   operation stores (`status`, `error`, results/extracted data, cancellation).
  *
  * @example
  * ```ts

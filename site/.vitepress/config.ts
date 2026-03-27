@@ -387,6 +387,7 @@ export default withMermaid(
 								text: "agentLoop()",
 								link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/ai/agentLoop",
 							},
+							{ text: "agentMemory()", link: "/api/agentMemory" },
 							{ text: "memoryStore()", link: "/api/memoryStore" },
 							{ text: "ragPipeline()", link: "/api/ragPipeline" },
 							{ text: "conversationSummary()", link: "/api/conversationSummary" },
