@@ -16,6 +16,7 @@
 import { state } from "../../core/state";
 import { subscribe } from "../../core/subscribe";
 import { collection } from "../../memory/collection";
+import { computeScore } from "../../memory/decay";
 import { vectorIndex as createVectorIndex } from "../../memory/vectorIndex";
 import { jobQueue } from "../../messaging/jobQueue";
 import { topic } from "../../messaging/topic";
@@ -44,9 +45,12 @@ import type {
 	GraphExtractionJob,
 	GraphExtractionResult,
 	MemoryEvent,
+	RetrievalTrace,
+	RetrievalTraceCandidate,
 } from "./types";
 
 const SCOPE_PREFIX = "scope:";
+const DEFAULT_DECAY_HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000;
 
 function scopeTags(scope?: AgentMemoryScope): string[] {
 	if (!scope) return [];
@@ -64,6 +68,55 @@ function matchesScope(nodeTags: Set<string>, requiredTags: string[]): boolean {
 		if (!nodeTags.has(t)) return false;
 	}
 	return true;
+}
+
+function clip(input: string, maxChars: number): string {
+	if (maxChars <= 0) return "";
+	if (input.length <= maxChars) return input;
+	if (maxChars <= 3) return input.slice(0, maxChars);
+	return `${input.slice(0, maxChars - 3).trim()}...`;
+}
+
+function makeProgressiveFallback(content: string, l0Max: number, l1Max: number) {
+	return {
+		level0: clip(content, l0Max),
+		level1: clip(content, l1Max),
+		level2: content,
+	};
+}
+
+function buildProgressiveMessages(content: string, category?: string) {
+	const catHint = category ? `Category: ${category}\n` : "";
+	return [
+		{
+			role: "system" as const,
+			content:
+				'You generate progressive memory summaries. Return ONLY JSON: {"level0":"...","level1":"..."}.',
+		},
+		{
+			role: "user" as const,
+			content:
+				`${catHint}Memory:\n${content}\n\n` +
+				"Constraints:\n" +
+				"- level0: <= 140 chars, compact semantic gist for vector retrieval\n" +
+				"- level1: <= 1800 chars, richer context for ranking/prompt assembly\n" +
+				"- preserve factual correctness; do not invent details",
+		},
+	];
+}
+
+function parseProgressiveLevels(raw: string): { level0?: string; level1?: string } {
+	const trimmed = raw.trim();
+	if (!trimmed) return {};
+	try {
+		const parsed = JSON.parse(trimmed) as Record<string, unknown>;
+		return {
+			level0: typeof parsed.level0 === "string" ? parsed.level0 : undefined,
+			level1: typeof parsed.level1 === "string" ? parsed.level1 : undefined,
+		};
+	} catch {
+		return {};
+	}
 }
 
 /**
@@ -122,8 +175,26 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	const llm = opts.llm;
 	const embed = opts.embed;
 	const searchOverfetch = opts.searchOverfetch ?? 2;
+	const categoryWeights = opts.categoryWeights ?? {};
+	const decayHalfLifeMs = opts.decayHalfLifeMs ?? DEFAULT_DECAY_HALF_LIFE_MS;
+	const rankSimilarityWeightRaw = opts.rankWeights?.similarity ?? 1;
+	const rankDecayWeightRaw = opts.rankWeights?.decay ?? 0.35;
+	const rankSimilarityWeight =
+		Number.isFinite(rankSimilarityWeightRaw) && rankSimilarityWeightRaw >= 0
+			? rankSimilarityWeightRaw
+			: 1;
+	const rankDecayWeight =
+		Number.isFinite(rankDecayWeightRaw) && rankDecayWeightRaw >= 0 ? rankDecayWeightRaw : 0.35;
 	const embeddingConcurrency = opts.embeddingConcurrency ?? 4;
 	const extractionRetry = opts.extractionRetry ?? { maxRetries: 3 };
+	const progressiveEnabled = opts.progressive?.enabled ?? true;
+	const progressiveLlm = opts.progressive?.llm;
+	const progressiveRetry = opts.progressive?.retry ?? { maxRetries: 1 };
+	const l0MaxChars = opts.progressive?.l0MaxChars ?? 140;
+	const l1MaxChars = opts.progressive?.l1MaxChars ?? 1800;
+	if (progressiveEnabled && !progressiveLlm) {
+		throw new Error("agentMemory: progressive.llm is required when progressive loading is enabled");
+	}
 	const kg = opts.knowledgeGraph;
 	if (kg && !opts.graphLlm) {
 		throw new Error("agentMemory: graphLlm is required when knowledgeGraph is provided");
@@ -267,6 +338,80 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	);
 
 	// -----------------------------------------------------------------------
+	// SA-4n: Progressive level generation queue (L0/L1, L2 is raw content)
+	// -----------------------------------------------------------------------
+	const _progressiveQueue = progressiveEnabled
+		? jobQueue<
+				{ nodeId: string; content: string; category?: string; batchId: number; version: number },
+				{
+					nodeId: string;
+					level0: string;
+					level1: string;
+					level2: string;
+					version: number;
+					content: string;
+				}
+			>(
+				`${name}:progressive`,
+				(signal, job) => {
+					return new Promise<{
+						nodeId: string;
+						level0: string;
+						level1: string;
+						level2: string;
+						version: number;
+						content: string;
+					}>((resolve, reject) => {
+						if (signal.aborted) {
+							reject(new DOMException("Aborted", "AbortError"));
+							return;
+						}
+						let seenActive = false;
+						const progressiveStore = progressiveLlm!;
+						const sub = subscribe(progressiveStore.status, (status) => {
+							if (signal.aborted) {
+								sub.unsubscribe();
+								reject(new DOMException("Aborted", "AbortError"));
+								return;
+							}
+							if (status === "active") {
+								seenActive = true;
+								return;
+							}
+							if (status === "completed" && seenActive) {
+								sub.unsubscribe();
+								const parsed = parseProgressiveLevels(progressiveStore.get());
+								const fallback = makeProgressiveFallback(job.content, l0MaxChars, l1MaxChars);
+								resolve({
+									nodeId: job.nodeId,
+									level0: parsed.level0 ? clip(parsed.level0, l0MaxChars) : fallback.level0,
+									level1: parsed.level1 ? clip(parsed.level1, l1MaxChars) : fallback.level1,
+									level2: job.content,
+									version: job.version,
+									content: job.content,
+								});
+							} else if (status === "errored" && seenActive) {
+								sub.unsubscribe();
+								reject(progressiveStore.error.get());
+							}
+						});
+						progressiveStore.generate(buildProgressiveMessages(job.content, job.category));
+
+						signal.addEventListener(
+							"abort",
+							() => {
+								sub.unsubscribe();
+								progressiveStore.abort();
+							},
+							{ once: true },
+						);
+					});
+				},
+				{ concurrency: 1, retry: progressiveRetry },
+			)
+		: undefined;
+
+	// -----------------------------------------------------------------------
 	// SA-4d: Graph extraction job queue (optional, concurrency 1)
 	// -----------------------------------------------------------------------
 	const _graphQueue = kg
@@ -331,6 +476,13 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	const _addOpsByBatch = new Map<number, AddOpState>();
 	const _searchAborts = new Map<string, AbortController>();
 	const _activeOpIds = new Set<string>();
+	const _progressiveVersionByNode = new Map<string, number>();
+
+	function _nextProgressiveVersion(nodeId: string): number {
+		const next = (_progressiveVersionByNode.get(nodeId) ?? 0) + 1;
+		_progressiveVersionByNode.set(nodeId, next);
+		return next;
+	}
 
 	function _reserveOpId(baseId: string, kind: "add" | "search"): string {
 		const base = baseId.trim() || `${kind}-${++_opSeq}`;
@@ -382,9 +534,26 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 				if (existing) {
 					existing.update(fact.content);
 					existing.setImportance(Math.max(existing.meta.get().importance, fact.importance));
+					if (fact.category) existing.setCategory(fact.category);
+					const fallback = makeProgressiveFallback(fact.content, l0MaxChars, l1MaxChars);
+					existing.setLevels({
+						level0: fact.level0 ?? fallback.level0,
+						level1: fact.level1 ?? fallback.level1,
+						level2: fact.level2 ?? fallback.level2,
+					});
 					for (const t of fact.tags) existing.tag(t);
 					for (const t of tags) existing.tag(t);
 					_publishEvent("update", dedup.existingId, fact.content, tags);
+					if (_progressiveQueue) {
+						const version = _nextProgressiveVersion(dedup.existingId);
+						_progressiveQueue.add({
+							nodeId: dedup.existingId,
+							content: fact.content,
+							category: fact.category,
+							batchId,
+							version,
+						});
+					}
 				}
 				vi.add(dedup.existingId, embedding);
 				_embeddings.set(dedup.existingId, embedding);
@@ -393,14 +562,29 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			} else {
 				// Add new memory
 				const allTags = [...fact.tags, ...tags];
+				const fallback = makeProgressiveFallback(fact.content, l0MaxChars, l1MaxChars);
 				const node = col.add(fact.content, {
 					importance: fact.importance,
 					tags: allTags,
+					category: fact.category,
+					level0: fact.level0 ?? fallback.level0,
+					level1: fact.level1 ?? fallback.level1,
+					level2: fact.level2 ?? fallback.level2,
 				});
 				if (node) {
 					vi.add(node.id, embedding);
 					_embeddings.set(node.id, embedding);
 					_publishEvent("add", node.id, fact.content, tags);
+					if (_progressiveQueue) {
+						const version = _nextProgressiveVersion(node.id);
+						_progressiveQueue.add({
+							nodeId: node.id,
+							content: fact.content,
+							category: fact.category,
+							batchId,
+							version,
+						});
+					}
 					const opState = _addOpsByBatch.get(batchId);
 					if (opState) opState.touchedIds.add(node.id);
 				}
@@ -432,6 +616,29 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			_releaseOpId(batchState.op.id);
 		}
 	});
+
+	if (_progressiveQueue) {
+		_progressiveQueue.on("completed", (job) => {
+			const result = job.result as {
+				nodeId: string;
+				level0: string;
+				level1: string;
+				level2: string;
+				version: number;
+				content: string;
+			};
+			const latestVersion = _progressiveVersionByNode.get(result.nodeId);
+			if (latestVersion !== result.version) return;
+			const node = col.get(result.nodeId);
+			if (!node) return;
+			if (node.content.get() !== result.content) return;
+			node.setLevels({
+				level0: result.level0,
+				level1: result.level1,
+				level2: result.level2,
+			});
+		});
+	}
 
 	function _settleAdd(batchId: number): void {
 		const batchState = _addOpsByBatch.get(batchId);
@@ -606,10 +813,16 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		const startedAt = Date.now();
 		const base = _createOpBase(opId);
 		const opResults = state<AgentMemorySearchResult[]>([], { name: `${name}.op:${opId}.results` });
+		const trace = state<RetrievalTrace | undefined>(undefined, {
+			name: `${name}.op:${opId}.trace`,
+		});
 		const abort = new AbortController();
 		_searchAborts.set(opId, abort);
 		const signal = abort.signal;
 		const tags = scopeTags(scope);
+		const includeL2 = opts?.includeL2 ?? false;
+		const tokenBudget = opts?.tokenBudget;
+		const categoryFilter = opts?.categories ? new Set(opts.categories) : undefined;
 		base.status.set("active");
 
 		const op: AgentMemorySearchOperation = {
@@ -619,6 +832,7 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			startedAt,
 			endedAt: base.endedAt,
 			results: opResults,
+			trace,
 			cancel: () => {
 				abort.abort();
 				_searchAborts.delete(opId);
@@ -638,22 +852,106 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 				// SA-4h: configurable overfetch
 				const raw = vi.search(embedding, k * searchOverfetch);
 				const results: AgentMemorySearchResult[] = [];
+				const traceCandidates: RetrievalTraceCandidate[] = [];
+				const now = Date.now();
 
 				for (const r of raw) {
-					if (results.length >= k) break;
 					const node = col.get(r.id);
-					if (!node) continue;
+					if (!node) {
+						traceCandidates.push({
+							id: r.id,
+							similarity: 0,
+							decayScore: 0,
+							categoryWeight: 1,
+							finalScore: 0,
+							filteredOut: "missing-node",
+							rationale: "vector hit had no corresponding node",
+						});
+						continue;
+					}
+					const meta = node.meta.get();
+					const category = meta.category;
 
 					// Scope filtering
 					if (tags.length > 0 && !matchesScope(node.meta.get().tags, tags)) {
+						traceCandidates.push({
+							id: r.id,
+							similarity: Math.max(0, 1 - r.distance),
+							decayScore: 0,
+							category,
+							categoryWeight: 1,
+							finalScore: 0,
+							filteredOut: "scope",
+							rationale: "filtered by scope constraints",
+						});
 						continue;
 					}
-
-					results.push({ node, score: Math.max(0, 1 - r.distance) });
-					node.touch();
+					if (categoryFilter && (!category || !categoryFilter.has(category))) {
+						traceCandidates.push({
+							id: r.id,
+							similarity: Math.max(0, 1 - r.distance),
+							decayScore: 0,
+							category,
+							categoryWeight: 1,
+							finalScore: 0,
+							filteredOut: "category",
+							rationale: "filtered by category constraints",
+						});
+						continue;
+					}
+					const similarity = Math.max(0, 1 - r.distance);
+					const decayScore = computeScore(
+						meta,
+						{ halfLife: decayHalfLifeMs, recency: 1, importance: 0, frequency: 0.5 },
+						now,
+					);
+					const categoryWeightRaw = category ? (categoryWeights[category] ?? 1) : 1;
+					const categoryWeight =
+						Number.isFinite(categoryWeightRaw) && categoryWeightRaw >= 0 ? categoryWeightRaw : 1;
+					const finalScore =
+						(similarity * rankSimilarityWeight + decayScore * rankDecayWeight) * categoryWeight;
+					const useL2 = includeL2 || (tokenBudget !== undefined && tokenBudget > 1800);
+					const content = useL2
+						? (meta.level2 ?? node.content.get())
+						: (meta.level1 ?? node.content.get());
+					const level = useL2 ? "L2" : "L1";
+					traceCandidates.push({
+						id: node.id,
+						similarity,
+						decayScore,
+						category,
+						categoryWeight,
+						finalScore,
+						rationale: `sim=${similarity.toFixed(3)}, decay=${decayScore.toFixed(3)}, cw=${categoryWeight.toFixed(2)}`,
+					});
+					results.push({
+						node,
+						score: similarity,
+						similarity,
+						decayScore,
+						finalScore,
+						category,
+						content,
+						level,
+						rationale: `Matched by semantic similarity with ${level} context`,
+					});
 				}
+				results.sort((a, b) => b.finalScore - a.finalScore);
+				const selected = results.slice(0, k);
+				for (const row of selected) row.node.touch();
+				trace.set({
+					query,
+					k,
+					overfetch: searchOverfetch,
+					tokenBudget,
+					includeL2,
+					rankWeights: { similarity: rankSimilarityWeight, decay: rankDecayWeight },
+					candidateCount: raw.length,
+					selectedCount: selected.length,
+					candidates: traceCandidates,
+				});
 
-				opResults.set(results);
+				opResults.set(selected);
 				base.status.set("completed");
 				base.endedAt.set(Date.now());
 				_searchAborts.delete(opId);
@@ -690,6 +988,11 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		if (!node) return;
 
 		node.update(content);
+		node.setLevels({
+			level0: clip(content, l0MaxChars),
+			level1: clip(content, l1MaxChars),
+			level2: content,
+		});
 		_publishEvent("update", id, content);
 
 		// Re-embed asynchronously via embedding queue
@@ -715,9 +1018,11 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		for (const abort of _searchAborts.values()) abort.abort();
 		_searchAborts.clear();
 		_activeOpIds.clear();
+		_progressiveVersionByNode.clear();
 		_sharedBridge?.destroy();
 		_extractionQueue.destroy();
 		_embeddingQueue.destroy();
+		_progressiveQueue?.destroy();
 		_graphQueue?.destroy();
 		_events.destroy();
 		_persist?.dispose();
@@ -738,6 +1043,7 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			vectorIndex: vi,
 			extractionQueue: _extractionQueue,
 			embeddingQueue: _embeddingQueue,
+			progressiveQueue: _progressiveQueue,
 			events: _events,
 			graphQueue: _graphQueue,
 			sharedBridge: _sharedBridge,

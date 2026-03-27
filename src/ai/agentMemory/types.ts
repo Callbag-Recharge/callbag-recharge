@@ -34,7 +34,22 @@ export interface ExtractedFact {
 	importance: number;
 	/** Tags/categories assigned by the LLM. */
 	tags: string[];
+	/** Optional canonical category for policy-aware retrieval. */
+	category?: string;
+	/** Progressive context levels (L0/L1/L2). */
+	level0?: string;
+	level1?: string;
+	level2?: string;
 }
+
+export type MemoryCategory =
+	| "profile"
+	| "preferences"
+	| "entities"
+	| "events"
+	| "cases"
+	| "patterns"
+	| (string & {});
 
 /** An entity/relation extracted for knowledgeGraph integration (SA-4d). */
 export interface ExtractedEntity {
@@ -163,6 +178,37 @@ export interface AgentMemoryOptions {
 	};
 	/** Search overfetch multiplier. Default: 2 (SA-4h). */
 	searchOverfetch?: number;
+	/**
+	 * Category-level retrieval weighting. Multiplies final rank score.
+	 * Missing categories default to 1.
+	 */
+	categoryWeights?: Record<string, number>;
+	/** Half-life for decay-v2 ranking in ms. Default: 7 days (SA-4m). */
+	decayHalfLifeMs?: number;
+	/** Similarity/decay blending for final rank score (SA-4m). */
+	rankWeights?: {
+		/** Semantic similarity weight. Default: 1. */
+		similarity?: number;
+		/** Decay score weight. Default: 0.35. */
+		decay?: number;
+	};
+	/**
+	 * Progressive loading options (SA-4n).
+	 */
+	progressive?: {
+		/** Enable L0/L1 generation (defaults true). */
+		enabled?: boolean;
+		/** Dedicated LLM store for L0/L1 generation (required when enabled). */
+		llm?: LLMStore;
+		/** Queue retry policy for L0/L1 generation. */
+		retry?: {
+			maxRetries?: number;
+		};
+		/** Max chars for generated L0 summary. Default: 140. */
+		l0MaxChars?: number;
+		/** Max chars for generated L1 summary. Default: 1800. */
+		l1MaxChars?: number;
+	};
 	/** Optional knowledgeGraph for entity/relation extraction (SA-4d). */
 	knowledgeGraph?: KnowledgeGraph<string>;
 	/** Custom graph extraction prompt (SA-4d). Used only when knowledgeGraph is provided. */
@@ -191,6 +237,20 @@ export interface AgentMemorySearchResult {
 	node: MemoryNode<string>;
 	/** Similarity score (0–1, higher = more similar). */
 	score: number;
+	/** Raw semantic similarity before rerank blending. */
+	similarity: number;
+	/** Decay-v2 score contribution. */
+	decayScore: number;
+	/** Final blended score after weights/category factor. */
+	finalScore: number;
+	/** Optional category from memory metadata. */
+	category?: string;
+	/** Content returned for retrieval budget policy (L1 default, L2 on-demand). */
+	content: string;
+	/** Which context tier backed `content`. */
+	level: "L0" | "L1" | "L2";
+	/** Human-readable ranking rationale. */
+	rationale: string;
 }
 
 /** Optional overrides for a single add() operation invocation. */
@@ -203,6 +263,35 @@ export interface AgentMemoryAddOptions {
 export interface AgentMemorySearchOptions {
 	/** Caller-provided operation ID for tracing/correlation. */
 	opId?: string;
+	/** Include L2 content directly in result payload. */
+	includeL2?: boolean;
+	/** Token budget hint. If too small for L2, L1 is returned by default. */
+	tokenBudget?: number;
+	/** Category filter. */
+	categories?: string[];
+}
+
+export interface RetrievalTraceCandidate {
+	id: string;
+	similarity: number;
+	decayScore: number;
+	category?: string;
+	categoryWeight: number;
+	finalScore: number;
+	filteredOut?: "scope" | "category" | "missing-node";
+	rationale: string;
+}
+
+export interface RetrievalTrace {
+	query: string;
+	k: number;
+	overfetch: number;
+	tokenBudget?: number;
+	includeL2: boolean;
+	rankWeights: { similarity: number; decay: number };
+	candidateCount: number;
+	selectedCount: number;
+	candidates: RetrievalTraceCandidate[];
 }
 
 /** Base reactive operation handle returned by add/search. */
@@ -233,6 +322,8 @@ export interface AgentMemoryAddOperation extends AgentMemoryOperationBase {
 export interface AgentMemorySearchOperation extends AgentMemoryOperationBase {
 	/** Search results for this search() invocation only. */
 	results: Store<AgentMemorySearchResult[]>;
+	/** Retrieval plan + scoring trajectory (SA-4k). */
+	trace: Store<RetrievalTrace | undefined>;
 }
 
 export interface AgentMemoryResult {
@@ -283,6 +374,18 @@ export interface AgentMemoryResult {
 		events: Topic<MemoryEvent>;
 		/** Graph extraction queue — present when knowledgeGraph option is set (SA-4d). */
 		graphQueue?: JobQueue<GraphExtractionJob, GraphExtractionResult>;
+		/** Progressive level generation queue (SA-4n). */
+		progressiveQueue?: JobQueue<
+			{ nodeId: string; content: string; category?: string; batchId: number; version: number },
+			{
+				nodeId: string;
+				level0: string;
+				level1: string;
+				level2: string;
+				version: number;
+				content: string;
+			}
+		>;
 		/** Shared-memory event bridge — present when `shared` option is provided (SA-4e). */
 		sharedBridge?: TopicBridgeResult;
 	};

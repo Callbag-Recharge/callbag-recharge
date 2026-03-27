@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi as vitest } from "vitest";
-import { agentMemory } from "../../../ai/agentMemory";
+import { agentMemory as baseAgentMemory } from "../../../ai/agentMemory";
 import type { LLMStore } from "../../../ai/fromLLM";
 import { state } from "../../../core/state";
 import type { Store } from "../../../core/types";
@@ -48,10 +48,25 @@ function makeMockLLM(): LLMStore & {
 	};
 }
 
+function agentMemory(opts: Parameters<typeof baseAgentMemory>[0]) {
+	return baseAgentMemory({
+		progressive: { enabled: false },
+		...opts,
+	});
+}
+
 /** Helper: trigger LLM completion with canned facts. */
 function completeLLM(
 	llm: ReturnType<typeof makeMockLLM>,
-	facts: Array<{ content: string; importance: number; tags: string[] }>,
+	facts: Array<{
+		content: string;
+		importance: number;
+		tags: string[];
+		category?: string;
+		level0?: string;
+		level1?: string;
+		level2?: string;
+	}>,
 ) {
 	llm._content.set(JSON.stringify(facts));
 	llm._status.set("completed");
@@ -655,5 +670,66 @@ describe("agentMemory", () => {
 
 		mem.destroy();
 		mem = null; // Prevent afterEach double-destroy
+	});
+
+	it("search() emits retrieval trace (SA-4k)", async () => {
+		const llm = makeMockLLM();
+		mem = agentMemory({ llm, embed: mockEmbed, dimensions: 3 });
+
+		const addOp = mem.add([{ role: "user", content: "trace me" }]);
+		completeLLM(llm, [{ content: "Trace fact", importance: 0.6, tags: ["fact"] }]);
+		await vitest.waitFor(() => expect(addOp.status.get()).toBe("completed"));
+
+		const searchOp = mem.search("Trace");
+		await vitest.waitFor(() => expect(searchOp.status.get()).toBe("completed"));
+		const trace = searchOp.trace.get();
+		expect(trace).toBeDefined();
+		expect(trace!.candidateCount).toBeGreaterThanOrEqual(1);
+	});
+
+	it("category weighting influences final ranking (SA-4l)", async () => {
+		const llm = makeMockLLM();
+		mem = agentMemory({
+			llm,
+			embed: mockEmbed,
+			dimensions: 3,
+			categoryWeights: { profile: 0.2, preferences: 2 },
+		});
+
+		const op = mem.add([{ role: "user", content: "cat test" }]);
+		completeLLM(llm, [
+			{ content: "Alice likes tea", importance: 0.5, tags: ["pref"], category: "preferences" },
+			{ content: "Alice is 31", importance: 0.5, tags: ["fact"], category: "profile" },
+		]);
+		await vitest.waitFor(() => expect(op.status.get()).toBe("completed"));
+
+		const searchOp = mem.search("Alice");
+		await vitest.waitFor(() => expect(searchOp.status.get()).toBe("completed"));
+		const res = searchOp.results.get();
+		expect(res.length).toBeGreaterThan(1);
+		expect(res[0].finalScore).toBeGreaterThanOrEqual(res[1].finalScore);
+	});
+
+	it("returns L2 content on demand (SA-4n)", async () => {
+		const llm = makeMockLLM();
+		mem = agentMemory({ llm, embed: mockEmbed, dimensions: 3 });
+
+		const op = mem.add([{ role: "user", content: "levels" }]);
+		completeLLM(llm, [
+			{
+				content: "Short summary",
+				importance: 0.7,
+				tags: ["fact"],
+				level1: "Medium context",
+				level2: "Long detailed context with specifics",
+			},
+		]);
+		await vitest.waitFor(() => expect(op.status.get()).toBe("completed"));
+
+		const searchOp = mem.search("summary", undefined, 5, { includeL2: true });
+		await vitest.waitFor(() => expect(searchOp.status.get()).toBe("completed"));
+		const first = searchOp.results.get()[0];
+		expect(first.level).toBe("L2");
+		expect(first.content).toContain("Long detailed context");
 	});
 });

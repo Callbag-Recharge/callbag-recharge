@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi as vitest } from "vitest";
-import { agentMemory } from "../../../ai/agentMemory";
+import { agentMemory as baseAgentMemory } from "../../../ai/agentMemory";
 import type { LLMStore } from "../../../ai/fromLLM";
 import { state } from "../../../core/state";
 import type { WithStatusStatus } from "../../../utils/withStatus";
@@ -55,6 +55,13 @@ function makeMockLLM(): LLMStore & {
 		_status,
 		_content,
 	};
+}
+
+function agentMemory(opts: Parameters<typeof baseAgentMemory>[0]) {
+	return baseAgentMemory({
+		progressive: { enabled: false },
+		...opts,
+	});
 }
 
 describe("agentMemory persistence", () => {

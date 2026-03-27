@@ -33,6 +33,10 @@ function serializeMeta(node: MemoryNode<string>): SerializedMeta {
 		accessCount: meta.accessCount,
 		importance: meta.importance,
 		tags: Array.from(meta.tags),
+		category: meta.category,
+		level0: meta.level0,
+		level1: meta.level1,
+		level2: meta.level2,
 	};
 }
 
@@ -133,6 +137,10 @@ function hydrateState(
 			id: saved.id,
 			importance: saved.meta.importance,
 			tags: saved.meta.tags,
+			category: saved.meta.category,
+			level0: saved.meta.level0,
+			level1: saved.meta.level1,
+			level2: saved.meta.level2,
 			// P4: restore timestamps from persisted metadata
 			createdAt: saved.meta.createdAt,
 			updatedAt: saved.meta.updatedAt,

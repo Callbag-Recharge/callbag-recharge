@@ -17,6 +17,12 @@ export interface MemoryMeta {
 	accessCount: number;
 	importance: number; // 0–1
 	tags: Set<string>;
+	/** Optional semantic category (profile/preferences/entities/events/cases/patterns/custom). */
+	category?: string;
+	/** Progressive summary levels. */
+	level0?: string;
+	level1?: string;
+	level2?: string;
 }
 
 export interface MemoryNode<T> {
@@ -35,6 +41,10 @@ export interface MemoryNode<T> {
 	untag(...tags: string[]): void;
 	/** Set importance (0–1). */
 	setImportance(value: number): void;
+	/** Set semantic category. */
+	setCategory(category?: string): void;
+	/** Set progressive summary levels. */
+	setLevels(levels: { level0?: string; level1?: string; level2?: string }): void;
 	/** Update content and bump updatedAt. */
 	update(value: T): void;
 
@@ -65,6 +75,12 @@ export interface MemoryNodeOptions {
 	importance?: number;
 	/** Initial tags. */
 	tags?: string[];
+	/** Semantic category for policy-aware retrieval. */
+	category?: string;
+	/** Progressive summary levels. */
+	level0?: string;
+	level1?: string;
+	level2?: string;
 	/** Override createdAt timestamp (for hydration from persistence). */
 	createdAt?: number;
 	/** Override updatedAt timestamp (for hydration from persistence). */
@@ -250,6 +266,10 @@ export interface SerializedMeta {
 	accessCount: number;
 	importance: number;
 	tags: string[];
+	category?: string;
+	level0?: string;
+	level1?: string;
+	level2?: string;
 }
 
 /** JSON-safe representation of a MemoryNode. */

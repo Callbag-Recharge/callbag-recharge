@@ -260,22 +260,22 @@ exactly how to use each primitive. These replace `src/examples/` as the canonica
 > retrieval with score propagation, retrieval trajectory observability, two-phase
 > session commit. Our differentiator: reactive/push-based, in-process, diamond-safe.
 
-| # | Deliverable | What | Effort |
-|---|-------------|------|--------|
-| SA-4a | Extraction via jobQueue | Route LLM fact extraction through `jobQueue` (retry, stall detection, DLQ) | M |
-| SA-4b | Embedding via jobQueue | Route embedding through `jobQueue` (parallel, retry). Extraction queue concurrency 1, embedding queue concurrency N | M |
-| SA-4c | Memory event topic | `topic<MemoryEvent>` for broadcasting add/update/delete events to other agents | S-M |
-| SA-4d | Graph extraction | Optional `knowledgeGraph` integration — extract entities + relations alongside facts | M |
-| SA-4e | Shared memory via bridge | Multi-process shared memory via topic bridge (SA-2d) | M |
-| SA-4f | Update tests | Revise test suite for jobQueue-backed extraction + embedding | M |
-| SA-4g | Shared LLM race | Concurrent `add()` calls share one `fromLLM` — jobQueue serialization (SA-4a) solves naturally | S |
-| SA-4h | Configurable search overfetch | Current 2x overfetch for scope filtering may be insufficient; make overfetch factor configurable | S |
-| SA-4i | Cancellable embed | `search()`/`add()` abort doesn't cancel in-flight `embed()` call — requires `EmbedFn` signature accepting `AbortSignal` | S-M |
-| SA-4j | Per-operation status | Concurrent add + search clobbers single status store — jobQueue tracks per-operation status independently | M |
-| SA-4k | Retrieval observability | `search()` returns retrieval trace: query plan, candidate scores, decay/similarity breakdown, final ranking rationale. Answers "why this memory surfaced" in domain language, not just generic graph internals. Inspired by OpenViking's observable retrieval trajectory. | S-M |
-| SA-4l | Typed memory categories | Optional `category` field on memory nodes (profile/preferences/entities/events/cases/patterns or custom). Policy-driven: categories route retrieval weighting, dedup boundaries, consolidation targeting. YAML/JSON schema definition like OpenViking's templates. | M |
-| SA-4m | Improved decay formula | Adopt OpenViking-validated `sigmoid(log1p(access_count)) * exp_decay(age, half_life)` with configurable half-life (default 7d). Simpler and purely data-driven vs current formula. Blendable with semantic similarity for final scoring. | S |
-| SA-4n | Progressive context loading (L0/L1/L2) | Three-tier summary generation per memory: L0 (~100 tokens, for vector search), L1 (~2K tokens, for rerank/context), L2 (full content, on-demand). L0/L1 generated via `fromLLM` through jobQueue. `derived()` chains for bottom-up aggregation. Token-budget-aware retrieval returns L1 by default, L2 on demand. | M-L |
+| # | Deliverable | What | Effort | |
+|---|-------------|------|--------|---|
+| SA-4a | Extraction via jobQueue | Route LLM fact extraction through `jobQueue` (retry, stall detection, DLQ) | M | ✅ |
+| SA-4b | Embedding via jobQueue | Route embedding through `jobQueue` (parallel, retry). Extraction queue concurrency 1, embedding queue concurrency N | M | ✅ |
+| SA-4c | Memory event topic | `topic<MemoryEvent>` for broadcasting add/update/delete events to other agents | S-M | ✅ |
+| SA-4d | Graph extraction | Optional `knowledgeGraph` integration — extract entities + relations alongside facts | M | ✅ |
+| SA-4e | Shared memory via bridge | Multi-process shared memory via topic bridge (SA-2d) | M | ✅ |
+| SA-4f | Update tests | Revise test suite for jobQueue-backed extraction + embedding | M | ✅ |
+| SA-4g | Shared LLM race | Concurrent `add()` calls share one `fromLLM` — jobQueue serialization (SA-4a) solves naturally | S | ✅ |
+| SA-4h | Configurable search overfetch | Current 2x overfetch for scope filtering may be insufficient; make overfetch factor configurable | S | ✅ |
+| SA-4i | Cancellable embed | `search()`/`add()` abort doesn't cancel in-flight `embed()` call — requires `EmbedFn` signature accepting `AbortSignal` | S-M | ✅ |
+| SA-4j | Per-operation status | Concurrent add + search clobbers single status store — jobQueue tracks per-operation status independently | M | ✅ |
+| SA-4k | Retrieval observability | `search()` returns retrieval trace: query plan, candidate scores, decay/similarity breakdown, final ranking rationale. Answers "why this memory surfaced" in domain language, not just generic graph internals. Inspired by OpenViking's observable retrieval trajectory. | S-M | ✅ |
+| SA-4l | Typed memory categories | Optional `category` field on memory nodes (profile/preferences/entities/events/cases/patterns or custom). Policy-driven: categories route retrieval weighting, dedup boundaries, consolidation targeting. YAML/JSON schema definition like OpenViking's templates. | M | ✅ |
+| SA-4m | Improved decay formula | Adopt OpenViking-validated `sigmoid(log1p(access_count)) * exp_decay(age, half_life)` with configurable half-life (default 7d). Simpler and purely data-driven vs current formula. Blendable with semantic similarity for final scoring. | S | ✅ |
+| SA-4n | Progressive context loading (L0/L1/L2) | Three-tier summary generation per memory: L0 (~100 tokens, for vector search), L1 (~2K tokens, for rerank/context), L2 (full content, on-demand). L0/L1 generated via `fromLLM` through jobQueue. `derived()` chains for bottom-up aggregation. Token-budget-aware retrieval returns L1 by default, L2 on demand. | M-L | ✅ |
 
 #### SA-5: Multi-Agent Routing
 

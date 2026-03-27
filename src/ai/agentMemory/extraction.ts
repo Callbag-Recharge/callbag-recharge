@@ -11,6 +11,7 @@ Output ONLY a JSON array. Each element has:
 - "content": concise factual statement (1-2 sentences)
 - "importance": float 0-1 (1.0 = critical fact/preference, 0.5 = useful context, 0.1 = minor detail)
 - "tags": string array of categories from: ["preference", "fact", "skill", "opinion", "context", "personal", "technical", "project"]
+- "category": one of ["profile","preferences","entities","events","cases","patterns"] (or custom string if needed)
 
 Rules:
 - Extract ONLY genuine facts, preferences, and lasting context
@@ -21,8 +22,8 @@ Rules:
 
 Example output:
 [
-  {"content": "User prefers TypeScript over JavaScript", "importance": 0.8, "tags": ["preference", "technical"]},
-  {"content": "User is building a state management library", "importance": 0.9, "tags": ["project", "technical"]}
+  {"content": "User prefers TypeScript over JavaScript", "importance": 0.8, "tags": ["preference", "technical"], "category": "preferences"},
+  {"content": "User is building a state management library", "importance": 0.9, "tags": ["project", "technical"], "category": "entities"}
 ]`;
 
 /**
@@ -105,6 +106,10 @@ function normalizeFact(raw: unknown): ExtractedFact | null {
 	const tags = Array.isArray(obj.tags)
 		? obj.tags.filter((t): t is string => typeof t === "string")
 		: [];
+	const category = typeof obj.category === "string" ? obj.category : undefined;
+	const level0 = typeof obj.level0 === "string" ? obj.level0 : undefined;
+	const level1 = typeof obj.level1 === "string" ? obj.level1 : undefined;
+	const level2 = typeof obj.level2 === "string" ? obj.level2 : undefined;
 
-	return { content, importance, tags };
+	return { content, importance, tags, category, level0, level1, level2 };
 }

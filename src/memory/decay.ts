@@ -1,13 +1,12 @@
 // ---------------------------------------------------------------------------
 // Phase 1: Decay Scoring
 // ---------------------------------------------------------------------------
-// FadeMem-inspired exponential decay scoring for memory nodes.
-// Combines recency, importance, and access frequency into a single score.
+// OpenViking-inspired decay scoring for memory nodes.
+// Frequency and recency are composed multiplicatively:
 //
-// score = α × recencyDecay + β × importance + γ × frequencyFactor
-//
-// recencyDecay = 2^(-timeSinceAccess / halfLife)   [exponential decay]
-// frequencyFactor = 1 - 1/(1 + accessCount)        [saturating curve]
+// score = α * (sigmoid(log1p(accessCount)) * exp_decay(age, halfLife))
+//       + β * importance
+//       + γ * sigmoid(log1p(accessCount))
 // ---------------------------------------------------------------------------
 
 import type { DecayFn, DecayOptions, MemoryMeta, ScoreWeights } from "./types";
@@ -28,8 +27,8 @@ export function decay(opts?: DecayOptions): DecayFn {
 	return (meta: MemoryMeta, now?: number): number => {
 		const t = (now ?? Date.now()) - meta.accessedAt;
 		const recencyDecay = Math.exp(-ln2OverHalfLife * t);
-		const frequencyFactor = 1 - 1 / (1 + meta.accessCount);
-		return α * recencyDecay + β * meta.importance + γ * frequencyFactor;
+		const frequencySignal = 1 / (1 + Math.exp(-Math.log1p(meta.accessCount)));
+		return α * (frequencySignal * recencyDecay) + β * meta.importance + γ * frequencySignal;
 	};
 }
 
@@ -45,6 +44,6 @@ export function computeScore(meta: MemoryMeta, weights?: ScoreWeights, now?: num
 
 	const t = (now ?? Date.now()) - meta.accessedAt;
 	const recencyDecay = Math.exp((-Math.LN2 / halfLife) * t);
-	const frequencyFactor = 1 - 1 / (1 + meta.accessCount);
-	return α * recencyDecay + β * meta.importance + γ * frequencyFactor;
+	const frequencySignal = 1 / (1 + Math.exp(-Math.log1p(meta.accessCount)));
+	return α * (frequencySignal * recencyDecay) + β * meta.importance + γ * frequencySignal;
 }

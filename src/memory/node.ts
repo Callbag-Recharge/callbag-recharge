@@ -42,6 +42,10 @@ export function memoryNode<T>(initialContent: T, opts?: MemoryNodeOptions): Memo
 		accessCount: 0,
 		importance: opts?.importance ?? 0.5,
 		tags: new Set(opts?.tags),
+		category: opts?.category,
+		level0: opts?.level0,
+		level1: opts?.level1,
+		level2: opts?.level2,
 	};
 
 	const _content: WritableStore<T> = state<T>(initialContent, {
@@ -97,6 +101,24 @@ export function memoryNode<T>(initialContent: T, opts?: MemoryNodeOptions): Memo
 			_meta.update((m) => ({
 				...m,
 				importance: Math.max(0, Math.min(1, value)),
+				updatedAt: Date.now(),
+			}));
+		},
+
+		setCategory(category?: string): void {
+			_meta.update((m) => ({
+				...m,
+				category,
+				updatedAt: Date.now(),
+			}));
+		},
+
+		setLevels(levels: { level0?: string; level1?: string; level2?: string }): void {
+			_meta.update((m) => ({
+				...m,
+				level0: levels.level0 ?? m.level0,
+				level1: levels.level1 ?? m.level1,
+				level2: levels.level2 ?? m.level2,
 				updatedAt: Date.now(),
 			}));
 		},

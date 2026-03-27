@@ -183,7 +183,7 @@ describe("decay — scoring functions", () => {
 		expect(scorer(meta, 0)).toBeCloseTo(1.0, 5); // 2 * 0.5
 	});
 
-	it("frequency factor saturates with high access count", () => {
+	it("frequency signal starts at sigmoid(0) and rises with access count", () => {
 		const scorer = decay({ recency: 0, importance: 0, frequency: 1 });
 		const baseMeta: MemoryMeta = {
 			id: "test",
@@ -195,11 +195,11 @@ describe("decay — scoring functions", () => {
 			tags: new Set(),
 		};
 
-		const s0 = scorer(baseMeta, 0); // accessCount=0 → factor=0
-		const s100 = scorer({ ...baseMeta, accessCount: 100 }, 0); // factor ≈ 0.99
+		const s0 = scorer(baseMeta, 0); // accessCount=0 → sigmoid(0)=0.5
+		const s100 = scorer({ ...baseMeta, accessCount: 100 }, 0); // -> near 1
 
-		expect(s0).toBeCloseTo(0, 5);
-		expect(s100).toBeGreaterThan(0.98);
+		expect(s0).toBeCloseTo(0.5, 5);
+		expect(s100).toBeGreaterThan(0.95);
 		expect(s100).toBeLessThanOrEqual(1);
 	});
 
