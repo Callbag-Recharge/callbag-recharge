@@ -98,6 +98,9 @@ let bridgeCounter = 0;
  * @remarks **Backpressure (SA-2h):** When a remote consumer's backlog exceeds the
  * threshold, the bridge receives a backpressure envelope. The corresponding
  * `backpressure` store flips to `true`.
+ * @remarks **Disconnect buffering:** Outgoing messages are buffered while the
+ * transport is disconnected. On reconnect, the buffer is flushed in order,
+ * preventing message loss during transport outages.
  *
  * @category messaging
  */
@@ -146,6 +149,9 @@ export function topicBridge(
 
 	// --- Outgoing: subscribe to local topic.latest and forward ---
 
+	// D1: Buffer outgoing messages during transport disconnect
+	const _outBuffer: Array<{ name: string; msg: TopicMessage<any> }> = [];
+
 	function _forwardMessage(
 		name: string,
 		msg: TopicMessage<any>,
@@ -158,6 +164,12 @@ export function topicBridge(
 		if (!matchesFilter(msg, remoteFilter as MessageFilter | undefined)) return;
 		// Don't re-forward messages that came from any bridge (prevents infinite loops)
 		if (msg.headers?.["x-bridge-origin"]) return;
+
+		// D1: Buffer when disconnected; replay on reconnect
+		if (transport.status.get() === "disconnected") {
+			_outBuffer.push({ name, msg });
+			return;
+		}
 		transport.send({
 			type: "publish",
 			topic: name,
@@ -272,6 +284,22 @@ export function topicBridge(
 		}
 	});
 
+	// D1: Flush outgoing buffer when transport reconnects
+	const _statusSub = subscribe(transport.status, (status) => {
+		if (_destroyed) return;
+		if (status === "connected" && _outBuffer.length > 0) {
+			const buffered = _outBuffer.splice(0);
+			for (const { name, msg } of buffered) {
+				transport.send({
+					type: "publish",
+					topic: name,
+					message: msg,
+					originId,
+				});
+			}
+		}
+	});
+
 	// --- Initialize all topics ---
 	for (const [name, bridged] of Object.entries(topics)) {
 		const entry = _subscribeLocal(name, bridged);
@@ -334,6 +362,10 @@ export function topicBridge(
 		destroy(): void {
 			if (_destroyed) return;
 			_destroyed = true;
+
+			// D1: Clean up status subscription and buffer
+			_statusSub.unsubscribe();
+			_outBuffer.length = 0;
 
 			// Unsubscribe from all local topics
 			for (const entry of _topics.values()) {

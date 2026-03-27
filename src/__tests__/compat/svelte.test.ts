@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { useSubscribe } from "../../compat/svelte/index";
+import { useSubscribe, useSubscribeRecord } from "../../compat/svelte/index";
 import { state } from "../../core/state";
 
 describe("compat/svelte", () => {
@@ -51,6 +51,55 @@ describe("compat/svelte", () => {
 			expect(a).toEqual([0, 5]);
 			expect(b).toEqual([0, 5, 9]);
 			unsub2();
+		});
+	});
+
+	describe("useSubscribeRecord", () => {
+		it("emits keyed snapshots and updates nested fields", () => {
+			const keys = state<string[]>(["a", "b"]);
+			const counts: Record<string, ReturnType<typeof state<number>>> = {
+				a: state(1),
+				b: state(2),
+			};
+			const flags: Record<string, ReturnType<typeof state<boolean>>> = {
+				a: state(false),
+				b: state(true),
+			};
+
+			const readable = useSubscribeRecord(keys, (id) => ({
+				count: counts[id],
+				flag: flags[id],
+			}));
+			const values: Array<Record<string, { count: number; flag: boolean }>> = [];
+			const unsub = readable.subscribe((v) => values.push(v));
+
+			expect(values[0]).toEqual({
+				a: { count: 1, flag: false },
+				b: { count: 2, flag: true },
+			});
+
+			counts.a.set(9);
+			expect(values[values.length - 1].a.count).toBe(9);
+
+			unsub();
+		});
+
+		it("re-subscribes when keys change", () => {
+			const keys = state<string[]>(["a"]);
+			const counts: Record<string, ReturnType<typeof state<number>>> = {
+				a: state(1),
+				b: state(2),
+			};
+
+			const readable = useSubscribeRecord(keys, (id) => ({ count: counts[id] }));
+			const values: Array<Record<string, { count: number }>> = [];
+			const unsub = readable.subscribe((v) => values.push(v));
+
+			expect(values[0]).toEqual({ a: { count: 1 } });
+			keys.set(["b"]);
+			expect(values[values.length - 1]).toEqual({ b: { count: 2 } });
+
+			unsub();
 		});
 	});
 });

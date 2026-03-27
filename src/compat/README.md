@@ -10,3 +10,7 @@ Drop-in API replacements for popular state libraries, backed by callbag-recharge
 | **zustand** | `callbag-recharge/compat/zustand` | `create` (set/get contract) | ~50 |
 
 All compat layers use only `core/` imports (`state`, `derived`, `effect`, `subscribe`). Zero overhead wrappers — each module delegates directly to callbag-recharge primitives.
+
+Notes:
+- `useSubscribeRecord` is available in `compat/vue`, `compat/react`, `compat/svelte`, and `compat/solid`.
+- React exposes `useSubscribe` and `useStore`; Svelte and Solid expose `useSubscribe`.

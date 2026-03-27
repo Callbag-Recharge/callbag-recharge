@@ -138,7 +138,7 @@ function _loadMaybe<T>(
  * on completion, failure, and stall detection.
  *
  * @param name - Queue name (used for topic and subscription naming).
- * @param processor - Function called per job. Receives `(signal, data, progress)`. Signal is aborted on stall (if configured) or destroy. Progress is a callback accepting 0-1 values.
+ * @param processor - Function called per job. Receives `(signal, data, progress)`. May return a sync value, Promise, or raw callbag source (function). Signal is aborted on stall (if configured) or destroy. Progress is a callback accepting 0-1 values.
  * @param opts - Queue configuration.
  *
  * @returns `JobQueue<T, R>` — queue with add, event subscription, companion stores, and lifecycle.
@@ -147,7 +147,11 @@ function _loadMaybe<T>(
  */
 export function jobQueue<T, R = void>(
 	name: string,
-	processor: (signal: AbortSignal, data: T, progress: (value: number) => void) => R | Promise<R>,
+	processor: (
+		signal: AbortSignal,
+		data: T,
+		progress: (value: number) => void,
+	) => R | Promise<R> | ((type: number, payload?: any) => void),
 	opts?: JobQueueOptions<T>,
 ): JobQueue<T, R> {
 	const concurrency = opts?.concurrency ?? 1;
@@ -407,11 +411,21 @@ export function jobQueue<T, R = void>(
 			_persistJob(rec);
 		};
 
+		// P4B: Handle callbag source return values natively (functions),
+		// otherwise wrap with rawFromAny (handles Promise, sync values, etc.)
+		const processorResult = processor(rec.abort.signal, rec.data, progressFn);
+		const source =
+			typeof processorResult === "function"
+				? (processorResult as (type: number, payload?: any) => void)
+				: rawFromAny(processorResult);
+
 		rawSubscribe(
-			rawFromAny(processor(rec.abort.signal, rec.data, progressFn)),
+			source,
 			(result: R) => {
 				// Fix 2: Guard against removed jobs
 				if (rec.removed) return;
+				// A3: Guard against stall-detection having already transitioned this job
+				if (rec.status !== "active") return;
 				if (_destroyed) {
 					_finishJob(rec);
 					return;
@@ -444,6 +458,8 @@ export function jobQueue<T, R = void>(
 					if (err === undefined) return; // success — handled in DATA callback
 					// Fix 2: Guard against removed jobs
 					if (rec.removed) return;
+					// A3: Guard against double-decrement if DATA callback already completed this job
+					if (rec.status === "completed" || rec.status === "failed") return;
 					if (_destroyed) {
 						_finishJob(rec);
 						return;
@@ -597,6 +613,8 @@ export function jobQueue<T, R = void>(
 					});
 				}
 
+				let scheduledThisRound = 0;
+
 				for (const msg of messages) {
 					const rec: JobRecord<T, R> = {
 						seq: msg.seq,
@@ -616,6 +634,7 @@ export function jobQueue<T, R = void>(
 						if (delay > 0) {
 							rec.status = "scheduled";
 							rec.runAt = runAtMs;
+							scheduledThisRound++;
 							_persistJob(rec);
 							_persistIndex();
 							rawSubscribe(
@@ -647,6 +666,11 @@ export function jobQueue<T, R = void>(
 
 					_processJob(rec);
 				}
+
+				// D3: If all pulled messages were scheduled, stop pulling —
+				// scheduled jobs don't consume processing slots, so the loop
+				// would keep pulling indefinitely, accumulating unbounded timers.
+				if (scheduledThisRound === messages.length) return;
 
 				rounds++;
 			}

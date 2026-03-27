@@ -15,10 +15,11 @@ const DEFAULT_HALF_LIFE = 86_400_000; // 24 hours
 
 /**
  * Create a decay scoring function with fixed weights.
- * Returns a pure function: (meta, now?) => score
+ * Returns a pure function: (meta, now?) => score.
+ * halfLife is clamped to a minimum of 1ms to prevent NaN from division by zero.
  */
 export function decay(opts?: DecayOptions): DecayFn {
-	const halfLife = opts?.halfLife ?? DEFAULT_HALF_LIFE;
+	const halfLife = Math.max(1, opts?.halfLife ?? DEFAULT_HALF_LIFE);
 	const α = opts?.recency ?? 1;
 	const β = opts?.importance ?? 1;
 	const γ = opts?.frequency ?? 0.5;
@@ -35,9 +36,10 @@ export function decay(opts?: DecayOptions): DecayFn {
 /**
  * One-shot score computation with inline weights.
  * Avoids closure allocation when you just need a single score.
+ * halfLife is clamped to a minimum of 1ms to prevent NaN from division by zero.
  */
 export function computeScore(meta: MemoryMeta, weights?: ScoreWeights, now?: number): number {
-	const halfLife = weights?.halfLife ?? DEFAULT_HALF_LIFE;
+	const halfLife = Math.max(1, weights?.halfLife ?? DEFAULT_HALF_LIFE);
 	const α = weights?.recency ?? 1;
 	const β = weights?.importance ?? 1;
 	const γ = weights?.frequency ?? 0.5;

@@ -115,6 +115,8 @@ export interface LLMStore extends Store<string> {
 	error: Store<unknown | undefined>;
 	/** Tool calls parsed from the last generation (reactive). Empty array when no tool calls. */
 	toolCalls: Store<LLMToolCall[]>;
+	/** Monotonically increasing generation nonce. Incremented on each generate() call. */
+	generationId: Store<number>;
 	/** Start a generation. Aborts any in-progress generation. */
 	generate: (messages: LLMMessage[], opts?: GenerateOptions) => void;
 	/** Abort the current generation. */
@@ -244,11 +246,12 @@ function buildHeaders(_provider: string, apiKey?: string): Record<string, string
  *
  * @param opts - Provider configuration (provider, baseURL, apiKey, model).
  *
- * @returns `LLMStore` — `Store<string>` with `status`, `error`, `tokens`, `toolCalls` companion stores, plus `generate()` and `abort()`.
+ * @returns `LLMStore` — `Store<string>` with `status`, `error`, `tokens`, `toolCalls`, `generationId` companion stores, plus `generate()` and `abort()`.
  *
  * @remarks **Provider-agnostic:** Works with OpenAI, Ollama, Anthropic (via proxy), Vercel AI SDK, or any OpenAI-compatible endpoint.
  * @remarks **No hard deps:** Uses fetch + SSE line parsing. No SDK imports required.
  * @remarks **Auto-cancel:** Calling `generate()` while streaming aborts the previous generation.
+ * @remarks **Generation nonce:** `generationId` is a monotonically increasing `Store<number>` incremented on each `generate()` call. Use it to distinguish stale status emissions from previous generations when subscribing to `status`.
  * @remarks **Tool calling:** Pass `tools` in `GenerateOptions` to enable function calling. Parsed tool calls accumulate in the `toolCalls` store. Use `toToolCallRequests()` to convert to `ToolCallRequest[]` for `toolRegistry.execute()`.
  * @remarks **Token tracking:** `tokens` store populated on stream completion (when usage data is available).
  * @remarks **Status:** Uses WithStatusStatus enum (pending → active → completed/errored) for consistent lifecycle tracking.
@@ -288,6 +291,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 	const statusState = state<WithStatusStatus>("pending", { name: `${name}.status` });
 	const errorState = state<unknown | undefined>(undefined, { name: `${name}.error` });
 	const toolCallsState = state<LLMToolCall[]>([], { name: `${name}.toolCalls` });
+	const generationIdState = state<number>(0, { name: `${name}.generationId` });
 
 	let abortController: AbortController | null = null;
 	let generationId = 0;
@@ -316,15 +320,16 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 			? combineSignals(abortController.signal, genOpts.signal)
 			: abortController.signal;
 
+		const myGenId = ++generationId;
+
 		batch(() => {
 			storeState.set("");
 			tokensState.set({});
 			errorState.set(undefined);
 			toolCallsState.set([]);
+			generationIdState.set(myGenId);
 			statusState.set("active");
 		});
-
-		const myGenId = ++generationId;
 
 		try {
 			const url = buildURL(provider, baseURL);
@@ -562,6 +567,7 @@ export function fromLLM(opts: LLMOptions): LLMStore {
 		status: statusState,
 		error: errorState,
 		toolCalls: toolCallsState,
+		generationId: generationIdState,
 		generate,
 		abort,
 	};

@@ -37,3 +37,6 @@ Incoming messages are always published to the local topic (the remote side filte
 - **Backpressure (SA-2h):** When a remote consumer's backlog exceeds the
 threshold, the bridge receives a backpressure envelope. The corresponding
 `backpressure` store flips to `true`.
+- **Disconnect buffering:** Outgoing messages are buffered while the
+transport is disconnected. On reconnect, the buffer is flushed in order,
+preventing message loss during transport outages.

@@ -59,4 +59,48 @@ describe("compat/solid", () => {
 			expect(value()).toBe(5);
 		});
 	});
+
+	describe("useSubscribeRecord", () => {
+		it("returns keyed snapshot and updates nested fields", async () => {
+			cleanupFn = null;
+			const { useSubscribeRecord } = await import("../../compat/solid/index");
+			const keys = state<string[]>(["a", "b"]);
+			const counts: Record<string, ReturnType<typeof state<number>>> = {
+				a: state(1),
+				b: state(2),
+			};
+			const flags: Record<string, ReturnType<typeof state<boolean>>> = {
+				a: state(false),
+				b: state(true),
+			};
+
+			const value = useSubscribeRecord(keys, (id) => ({
+				count: counts[id],
+				flag: flags[id],
+			}));
+
+			expect(value()).toEqual({
+				a: { count: 1, flag: false },
+				b: { count: 2, flag: true },
+			});
+
+			counts.a.set(10);
+			expect(value().a.count).toBe(10);
+		});
+
+		it("rebuilds snapshot when keys change", async () => {
+			cleanupFn = null;
+			const { useSubscribeRecord } = await import("../../compat/solid/index");
+			const keys = state<string[]>(["a"]);
+			const counts: Record<string, ReturnType<typeof state<number>>> = {
+				a: state(1),
+				b: state(2),
+			};
+
+			const value = useSubscribeRecord(keys, (id) => ({ count: counts[id] }));
+			expect(value()).toEqual({ a: { count: 1 } });
+			keys.set(["b"]);
+			expect(value()).toEqual({ b: { count: 2 } });
+		});
+	});
 });

@@ -42,13 +42,18 @@ function makeMockLLM(): LLMStore & {
 	const _content = state<string>("");
 	const error = state<unknown | undefined>(undefined);
 	const tokens = state<Record<string, unknown>>({});
+	const generationId = state<number>(0);
+	const toolCalls = state<any[]>([]);
 	return {
 		get: () => _content.get(),
 		source: (type: number, payload?: any) => _content.source(type, payload),
 		status: _status,
 		error,
 		tokens,
+		generationId,
+		toolCalls,
 		generate: vitest.fn(() => {
+			generationId.set(generationId.get() + 1);
 			_status.set("active");
 		}),
 		abort: vitest.fn(),

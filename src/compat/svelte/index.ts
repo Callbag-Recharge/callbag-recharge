@@ -58,3 +58,70 @@ export function useSubscribe<T>(store: Store<T>): SvelteReadable<T> {
 		},
 	};
 }
+
+/** Maps a key to an object of stores. Used by `useSubscribeRecord`. */
+export type StoreFactory<K, R extends Record<string, any>> = (key: K) => {
+	[P in keyof R]: Store<R[P]>;
+};
+
+/**
+ * Subscribe to a dynamic keyed record of stores as a Svelte readable store.
+ * Re-subscribes all per-key fields whenever `keys` changes.
+ *
+ * @param keys - Store of current keys (e.g. node IDs).
+ * @param factory - Function returning `{ [field]: Store<V> }` for each key.
+ *
+ * @returns `SvelteReadable<Record<K, R>>` — Svelte-readable keyed snapshot.
+ *
+ * @category compat/svelte
+ */
+export function useSubscribeRecord<K extends string, R extends Record<string, any>>(
+	keys: Store<K[]>,
+	factory: StoreFactory<K, R>,
+): SvelteReadable<Record<K, R>> {
+	return {
+		subscribe(run: (value: Record<K, R>) => void): () => void {
+			let entrySubs: Array<{ unsubscribe: () => void }> = [];
+
+			const cleanupEntries = () => {
+				for (const sub of entrySubs) sub.unsubscribe();
+				entrySubs = [];
+			};
+
+			const buildSnapshot = (): Record<K, R> => {
+				const snap = {} as Record<K, R>;
+				for (const key of keys.get()) {
+					const stores = factory(key);
+					const values = {} as R;
+					for (const field of Object.keys(stores) as (keyof R)[]) {
+						values[field] = stores[field].get();
+					}
+					snap[key] = values;
+				}
+				return snap;
+			};
+
+			const sync = (nextKeys: K[]) => {
+				cleanupEntries();
+				for (const key of nextKeys) {
+					const stores = factory(key);
+					for (const field of Object.keys(stores) as (keyof R)[]) {
+						const sub = subscribe(stores[field], () => {
+							run(buildSnapshot());
+						});
+						entrySubs.push(sub);
+					}
+				}
+				run(buildSnapshot());
+			};
+
+			const keysSub = subscribe(keys, sync);
+			sync(keys.get());
+
+			return () => {
+				keysSub.unsubscribe();
+				cleanupEntries();
+			};
+		},
+	};
+}

@@ -52,3 +52,75 @@ export function useSubscribe<T>(store: Store<T>): Accessor<T> {
 
 	return value;
 }
+
+/** Maps a key to an object of stores. Used by `useSubscribeRecord`. */
+export type StoreFactory<K, R extends Record<string, any>> = (key: K) => {
+	[P in keyof R]: Store<R[P]>;
+};
+
+/**
+ * Subscribe to a dynamic set of keyed store records as a Solid accessor.
+ * Re-subscribes all per-key fields whenever `keys` changes.
+ *
+ * @param keys - Store of current keys (e.g. node IDs).
+ * @param factory - Function returning `{ [field]: Store<V> }` for each key.
+ *
+ * @returns `Accessor<Record<K, R>>` — accessor for current keyed snapshot.
+ *
+ * @category compat/solid
+ */
+export function useSubscribeRecord<K extends string, R extends Record<string, any>>(
+	keys: Store<K[]>,
+	factory: StoreFactory<K, R>,
+): Accessor<Record<K, R>> {
+	const [value, setValue] = createSignal({} as Record<K, R>, { equals: false });
+	let entrySubs: Array<{ unsubscribe: () => void }> = [];
+
+	const cleanupEntries = () => {
+		for (const sub of entrySubs) sub.unsubscribe();
+		entrySubs = [];
+	};
+
+	const buildSnapshot = (): Record<K, R> => {
+		const snap = {} as Record<K, R>;
+		for (const key of keys.get()) {
+			const stores = factory(key);
+			const values = {} as R;
+			for (const field of Object.keys(stores) as (keyof R)[]) {
+				values[field] = stores[field].get();
+			}
+			snap[key] = values;
+		}
+		return snap;
+	};
+
+	const sync = (nextKeys: K[]) => {
+		cleanupEntries();
+		for (const key of nextKeys) {
+			const stores = factory(key);
+			for (const field of Object.keys(stores) as (keyof R)[]) {
+				const sub = subscribe(stores[field], () => {
+					setValue(() => buildSnapshot());
+				});
+				entrySubs.push(sub);
+			}
+		}
+		setValue(() => buildSnapshot());
+	};
+
+	const keysSub = subscribe(keys, sync);
+	sync(keys.get());
+
+	if (getOwner()) {
+		onCleanup(() => {
+			keysSub.unsubscribe();
+			cleanupEntries();
+		});
+	} else if (typeof console !== "undefined") {
+		console.warn(
+			"[callbag-recharge] useSubscribeRecord called outside a Solid reactive owner — subscription will not be auto-disposed.",
+		);
+	}
+
+	return value;
+}

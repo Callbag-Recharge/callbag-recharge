@@ -51,6 +51,8 @@ import type {
 
 const SCOPE_PREFIX = "scope:";
 const DEFAULT_DECAY_HALF_LIFE_MS = 7 * 24 * 60 * 60 * 1000;
+/** D4: Named constant for update() embed jobs (not part of any add() batch). */
+const UPDATE_BATCH_ID = -1;
 
 function scopeTags(scope?: AgentMemoryScope): string[] {
 	if (!scope) return [];
@@ -144,6 +146,12 @@ function parseProgressiveLevels(raw: string): { level0?: string; level1?: string
  * @remarks **Cancellable embed (SA-4i):** `EmbedFn` accepts optional AbortSignal.
  * @remarks **Per-operation handles (SA-4j):** `add()`/`search()` return isolated
  *   operation stores (`status`, `error`, results/extracted data, cancellation).
+ * @remarks **Callbag-native processors:** LLM-backed queue processors (extraction,
+ *   progressive, graph) return callbag sources instead of Promises, eliminating
+ *   resolve/reject race conditions. Uses `generationId` nonce to reject stale
+ *   status emissions from previous LLM generations.
+ * @remarks **Cancellable batches:** `cancel()` on an add operation cancels both
+ *   the extraction job and all in-flight embedding jobs for that batch.
  *
  * @example
  * ```ts
@@ -252,45 +260,67 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	const _extractionQueue = jobQueue<ExtractionJob, ExtractionResult>(
 		`${name}:extract`,
 		(signal, job) => {
-			return new Promise<ExtractionResult>((resolve, reject) => {
+			// P4B: Callbag-native processor — no new Promise
+			return (type: number, sink?: any) => {
+				if (type !== 0 /* START */) return;
+				let done = false;
+				sink(0, (t: number) => {
+					if (t === 2) done = true;
+				});
 				if (signal.aborted) {
-					reject(new DOMException("Aborted", "AbortError"));
+					sink(2, new DOMException("Aborted", "AbortError"));
 					return;
 				}
 
 				const extractionMessages = buildExtractionMessages(job.messages, opts.extractionPrompt);
 				llm.generate(extractionMessages);
+				// P3A: Capture generation nonce after generate() to distinguish
+				// stale status from previous generations
+				const myGen = llm.generationId.get();
 
 				const sub = subscribe(llm.status, (status) => {
+					if (done) return;
 					if (signal.aborted) {
 						sub.unsubscribe();
-						reject(new DOMException("Aborted", "AbortError"));
+						done = true;
+						sink(2, new DOMException("Aborted", "AbortError"));
 						return;
 					}
-
+					if (llm.generationId.get() !== myGen) {
+						sub.unsubscribe();
+						done = true;
+						sink(2, new Error("LLM generation was superseded"));
+						return;
+					}
 					if (status === "completed") {
 						sub.unsubscribe();
 						const output = llm.get();
-						resolve({
+						done = true;
+						sink(1, {
 							facts: parseFacts(output),
 							scopeTags: job.scopeTags,
 							batchId: job.batchId,
 						});
+						sink(2);
 					} else if (status === "errored") {
 						sub.unsubscribe();
-						reject(llm.error.get());
+						done = true;
+						sink(2, llm.error.get());
 					}
 				});
 
 				signal.addEventListener(
 					"abort",
 					() => {
+						if (done) return;
 						sub.unsubscribe();
 						llm.abort();
+						done = true;
+						sink(2, new DOMException("Aborted", "AbortError"));
 					},
 					{ once: true },
 				);
-			});
+			};
 		},
 		{ concurrency: 1, retry: extractionRetry },
 	);
@@ -301,38 +331,15 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	const _embeddingQueue = jobQueue<EmbedJob, EmbedResult>(
 		`${name}:embed`,
 		(signal, job) => {
-			return new Promise<EmbedResult>((resolve, reject) => {
-				if (signal.aborted) {
-					reject(new DOMException("Aborted", "AbortError"));
-					return;
-				}
-
-				rawSubscribe(
-					rawFromAny(embed(job.fact.content, signal)),
-					(embedding: Float32Array | number[]) => {
-						resolve({
-							fact: job.fact,
-							embedding,
-							scopeTags: job.scopeTags,
-							batchId: job.batchId,
-							targetId: job.targetId,
-						});
-					},
-					{
-						onEnd: (err?: unknown) => {
-							if (err !== undefined) reject(err);
-						},
-					},
-				);
-
-				signal.addEventListener(
-					"abort",
-					() => {
-						reject(new DOMException("Aborted", "AbortError"));
-					},
-					{ once: true },
-				);
-			});
+			// P4B: embed() returns a Promise — just map it directly,
+			// jobQueue wraps via rawFromAny. No manual Promise construction.
+			return embed(job.fact.content, signal).then((embedding) => ({
+				fact: job.fact,
+				embedding,
+				scopeTags: job.scopeTags,
+				batchId: job.batchId,
+				targetId: job.targetId,
+			}));
 		},
 		{ concurrency: embeddingConcurrency },
 	);
@@ -354,35 +361,42 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			>(
 				`${name}:progressive`,
 				(signal, job) => {
-					return new Promise<{
-						nodeId: string;
-						level0: string;
-						level1: string;
-						level2: string;
-						version: number;
-						content: string;
-					}>((resolve, reject) => {
+					// P4B: Callbag-native processor with generation nonce
+					return (type: number, sink?: any) => {
+						if (type !== 0 /* START */) return;
+						let done = false;
+						sink(0, (t: number) => {
+							if (t === 2) done = true;
+						});
 						if (signal.aborted) {
-							reject(new DOMException("Aborted", "AbortError"));
+							sink(2, new DOMException("Aborted", "AbortError"));
 							return;
 						}
-						let seenActive = false;
+
 						const progressiveStore = progressiveLlm!;
+						progressiveStore.generate(buildProgressiveMessages(job.content, job.category));
+						const myGen = progressiveStore.generationId.get();
+
 						const sub = subscribe(progressiveStore.status, (status) => {
+							if (done) return;
 							if (signal.aborted) {
 								sub.unsubscribe();
-								reject(new DOMException("Aborted", "AbortError"));
+								done = true;
+								sink(2, new DOMException("Aborted", "AbortError"));
 								return;
 							}
-							if (status === "active") {
-								seenActive = true;
+							if (progressiveStore.generationId.get() !== myGen) {
+								sub.unsubscribe();
+								done = true;
+								sink(2, new Error("LLM generation was superseded"));
 								return;
 							}
-							if (status === "completed" && seenActive) {
+							if (status === "completed") {
 								sub.unsubscribe();
 								const parsed = parseProgressiveLevels(progressiveStore.get());
 								const fallback = makeProgressiveFallback(job.content, l0MaxChars, l1MaxChars);
-								resolve({
+								done = true;
+								sink(1, {
 									nodeId: job.nodeId,
 									level0: parsed.level0 ? clip(parsed.level0, l0MaxChars) : fallback.level0,
 									level1: parsed.level1 ? clip(parsed.level1, l1MaxChars) : fallback.level1,
@@ -390,22 +404,26 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 									version: job.version,
 									content: job.content,
 								});
-							} else if (status === "errored" && seenActive) {
+								sink(2);
+							} else if (status === "errored") {
 								sub.unsubscribe();
-								reject(progressiveStore.error.get());
+								done = true;
+								sink(2, progressiveStore.error.get());
 							}
 						});
-						progressiveStore.generate(buildProgressiveMessages(job.content, job.category));
 
 						signal.addEventListener(
 							"abort",
 							() => {
+								if (done) return;
 								sub.unsubscribe();
 								progressiveStore.abort();
+								done = true;
+								sink(2, new DOMException("Aborted", "AbortError"));
 							},
 							{ once: true },
 						);
-					});
+					};
 				},
 				{ concurrency: 1, retry: progressiveRetry },
 			)
@@ -418,41 +436,61 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		? jobQueue<GraphExtractionJob, GraphExtractionResult>(
 				`${name}:graph`,
 				(signal, job) => {
-					return new Promise<GraphExtractionResult>((resolve, reject) => {
+					// P4B + A9: Callbag-native processor, consistent non-null assertion
+					return (type: number, sink?: any) => {
+						if (type !== 0 /* START */) return;
+						let done = false;
+						sink(0, (t: number) => {
+							if (t === 2) done = true;
+						});
 						if (signal.aborted) {
-							reject(new DOMException("Aborted", "AbortError"));
+							sink(2, new DOMException("Aborted", "AbortError"));
 							return;
 						}
 
 						const msgs = buildGraphExtractionMessages(job.messages, opts.graphExtractionPrompt);
-						graphLlm?.generate(msgs);
+						graphLlm!.generate(msgs);
+						const myGen = graphLlm!.generationId.get();
 
 						const sub = subscribe(graphLlm!.status, (status) => {
+							if (done) return;
 							if (signal.aborted) {
 								sub.unsubscribe();
-								reject(new DOMException("Aborted", "AbortError"));
+								done = true;
+								sink(2, new DOMException("Aborted", "AbortError"));
 								return;
 							}
-
+							if (graphLlm!.generationId.get() !== myGen) {
+								sub.unsubscribe();
+								done = true;
+								sink(2, new Error("LLM generation was superseded"));
+								return;
+							}
 							if (status === "completed") {
 								sub.unsubscribe();
 								const output = graphLlm!.get();
-								resolve(parseGraphExtraction(output));
+								done = true;
+								sink(1, parseGraphExtraction(output));
+								sink(2);
 							} else if (status === "errored") {
 								sub.unsubscribe();
-								reject(graphLlm!.error.get());
+								done = true;
+								sink(2, graphLlm!.error.get());
 							}
 						});
 
 						signal.addEventListener(
 							"abort",
 							() => {
+								if (done) return;
 								sub.unsubscribe();
-								graphLlm?.abort();
+								graphLlm!.abort();
+								done = true;
+								sink(2, new DOMException("Aborted", "AbortError"));
 							},
 							{ once: true },
 						);
-					});
+					};
 				},
 				{ concurrency: 1, retry: { maxRetries: 0 } },
 			)
@@ -472,6 +510,8 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		pending: number;
 		failed: boolean;
 		touchedIds: Set<string>;
+		/** P5: Track embed job seqs for cancellation */
+		embedSeqs: number[];
 	}
 	const _addOpsByBatch = new Map<number, AddOpState>();
 	const _searchAborts = new Map<string, AbortController>();
@@ -602,18 +642,15 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 	_embeddingQueue.on("failed", (job) => {
 		const batchId = (job.data as EmbedJob).batchId;
 		const batchState = _addOpsByBatch.get(batchId);
-		if (batchState) {
-			batchState.pending++;
-			batchState.failed = true;
-			if (batchState.pending >= batchState.expected) {
-				_settleAdd(batchId);
-			}
-		}
-		if (batchState) {
-			batchState.error.set(job.error);
-			batchState.status.set("errored");
-			batchState.endedAt.set(Date.now());
-			_releaseOpId(batchState.op.id);
+		if (!batchState) return;
+		// P1: Only record failure state here; let _settleAdd handle terminal
+		// status, endedAt, and opId release to avoid double-release and
+		// premature status overwrites.
+		batchState.pending++;
+		batchState.failed = true;
+		batchState.error.set(job.error);
+		if (batchState.pending >= batchState.expected) {
+			_settleAdd(batchId);
 		}
 	});
 
@@ -645,8 +682,9 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		if (!batchState) return;
 		const ids = [...batchState.touchedIds];
 		batchState.storedIds.set(ids);
-		if (!batchState.failed && batchState.status.get() !== "cancelled") {
-			batchState.status.set("completed");
+		// P1: Centralized terminal status — failed handler no longer sets status directly
+		if (batchState.status.get() !== "cancelled") {
+			batchState.status.set(batchState.failed ? "errored" : "completed");
 		}
 		if (batchState.endedAt.get() === undefined) {
 			batchState.endedAt.set(Date.now());
@@ -678,8 +716,10 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		addState.expected = facts.length;
 		addState.pending = 0;
 		addState.failed = false;
+		addState.embedSeqs = [];
 		for (const fact of facts) {
-			_embeddingQueue.add({ fact, scopeTags: tags, batchId });
+			// P5: Track embed job seqs for cancellation
+			addState.embedSeqs.push(_embeddingQueue.add({ fact, scopeTags: tags, batchId }));
 		}
 	});
 
@@ -778,6 +818,13 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 					_releaseOpId(opId);
 				}
 				if (seq !== -1) _extractionQueue.remove(seq);
+				// P5: Cancel in-flight embedding jobs for this batch
+				const batchState = _addOpsByBatch.get(batchId);
+				if (batchState) {
+					for (const embedSeq of batchState.embedSeqs) {
+						_embeddingQueue.remove(embedSeq);
+					}
+				}
 			},
 		};
 
@@ -793,6 +840,7 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 			pending: 0,
 			failed: false,
 			touchedIds: new Set(),
+			embedSeqs: [],
 		});
 		seq = _extractionQueue.add({ messages, scope, scopeTags: tags, batchId });
 
@@ -847,7 +895,11 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		rawSubscribe(
 			rawFromAny(embed(query, signal)),
 			(embedding: Float32Array | number[]) => {
-				if (signal.aborted) return;
+				if (signal.aborted) {
+					// A7: Clean up _searchAborts on abort-then-success path
+					_searchAborts.delete(opId);
+					return;
+				}
 
 				// SA-4h: configurable overfetch
 				const raw = vi.search(embedding, k * searchOverfetch);
@@ -910,7 +962,7 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 						Number.isFinite(categoryWeightRaw) && categoryWeightRaw >= 0 ? categoryWeightRaw : 1;
 					const finalScore =
 						(similarity * rankSimilarityWeight + decayScore * rankDecayWeight) * categoryWeight;
-					const useL2 = includeL2 || (tokenBudget !== undefined && tokenBudget > 1800);
+					const useL2 = includeL2 || (tokenBudget !== undefined && tokenBudget > l1MaxChars);
 					const content = useL2
 						? (meta.level2 ?? node.content.get())
 						: (meta.level1 ?? node.content.get());
@@ -995,18 +1047,32 @@ export function agentMemory(opts: AgentMemoryOptions): AgentMemoryResult {
 		});
 		_publishEvent("update", id, content);
 
-		// Re-embed asynchronously via embedding queue
+		// Re-embed asynchronously via embedding queue (D4: named constant)
 		_embeddingQueue.add({
 			fact: { content, importance: node.meta.get().importance, tags: [] },
 			scopeTags: [],
-			batchId: -1,
+			batchId: UPDATE_BATCH_ID,
 			targetId: id,
 		});
+
+		// A8: Enqueue progressive generation for updated content
+		if (_progressiveQueue) {
+			const version = _nextProgressiveVersion(id);
+			_progressiveQueue.add({
+				nodeId: id,
+				content,
+				category: node.meta.get().category,
+				batchId: UPDATE_BATCH_ID,
+				version,
+			});
+		}
 	}
 
 	function del(id: string): boolean {
 		vi.remove(id);
 		_embeddings.delete(id);
+		// A6: Clean up progressive version tracking to prevent memory leak
+		_progressiveVersionByNode.delete(id);
 		const removed = col.remove(id);
 		if (removed) {
 			_publishEvent("delete", id);

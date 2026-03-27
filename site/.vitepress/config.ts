@@ -438,7 +438,17 @@ export default withMermaid(
 						text: "Framework Bindings",
 						collapsed: true,
 						items: [
-							{ text: "useSubscribeRecord() (Vue)", link: "/api/useSubscribeRecord" },
+							{ text: "useSubscribeRecord() (Overview)", link: "/api/useSubscribeRecord" },
+							{ text: "useSubscribeRecord() (React)", link: "/api/useSubscribeRecordReact" },
+							{
+								text: "useSubscribeRecord() (Svelte)",
+								link: "/api/useSubscribeRecordSvelte",
+							},
+							{ text: "useSubscribeRecord() (Solid)", link: "/api/useSubscribeRecordSolid" },
+							{ text: "useSubscribe() (React)", link: "/api/useSubscribeReact" },
+							{ text: "useStore() (React)", link: "/api/useStoreReact" },
+							{ text: "useSubscribe() (Svelte)", link: "/api/useSubscribeSvelte" },
+							{ text: "useSubscribe() (Solid)", link: "/api/useSubscribeSolid" },
 							{
 								text: "Vue (useStore, useSubscribe)",
 								link: "https://github.com/Callbag-Recharge/callbag-recharge/blob/main/src/compat/vue/index.ts",

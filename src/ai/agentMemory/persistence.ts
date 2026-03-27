@@ -9,7 +9,6 @@
 
 import { subscribe } from "../../core/subscribe";
 import type { Collection, MemoryNode, SerializedMeta, VectorIndex } from "../../memory/types";
-import { rawFromAny } from "../../raw/fromAny";
 import { rawSubscribe } from "../../raw/subscribe";
 import type { CheckpointAdapter } from "../../utils/checkpoint";
 
@@ -106,14 +105,23 @@ export function autoPersist(
 			return;
 		}
 
-		// Handle async adapters (return CallbagSource)
+		// Handle async adapters (return CallbagSource — a function)
 		_restoring = true;
-		rawSubscribe(rawFromAny(result), (loaded: unknown) => {
-			if (loaded && typeof loaded === "object") {
-				hydrateState(loaded as PersistedState, col, vi, embeddings);
-			}
-			_restoring = false;
-		});
+		rawSubscribe(
+			result as any,
+			(loaded: unknown) => {
+				if (loaded && typeof loaded === "object") {
+					hydrateState(loaded as PersistedState, col, vi, embeddings);
+				}
+				_restoring = false;
+			},
+			{
+				onEnd: () => {
+					// Ensure _restoring is reset even if source errors or completes without data
+					_restoring = false;
+				},
+			},
+		);
 	}
 
 	function dispose(): void {

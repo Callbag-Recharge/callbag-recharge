@@ -16,7 +16,7 @@ function fromLLM(opts: LLMOptions): LLMStore
 
 ## Returns
 
-`LLMStore` — `Store&lt;string&gt;` with `status`, `error`, `tokens`, `toolCalls` companion stores, plus `generate()` and `abort()`.
+`LLMStore` — `Store&lt;string&gt;` with `status`, `error`, `tokens`, `toolCalls`, `generationId` companion stores, plus `generate()` and `abort()`.
 
 ## Basic Usage
 
@@ -44,6 +44,7 @@ effect([llm.toolCalls], () => {
 - **Provider-agnostic:** Works with OpenAI, Ollama, Anthropic (via proxy), Vercel AI SDK, or any OpenAI-compatible endpoint.
 - **No hard deps:** Uses fetch + SSE line parsing. No SDK imports required.
 - **Auto-cancel:** Calling `generate()` while streaming aborts the previous generation.
+- **Generation nonce:** `generationId` is a monotonically increasing `Store<number>` incremented on each `generate()` call. Use it to distinguish stale status emissions from previous generations when subscribing to `status`.
 - **Tool calling:** Pass `tools` in `GenerateOptions` to enable function calling. Parsed tool calls accumulate in the `toolCalls` store. Use `toToolCallRequests()` to convert to `ToolCallRequest[]` for `toolRegistry.execute()`.
 - **Token tracking:** `tokens` store populated on stream completion (when usage data is available).
 - **Status:** Uses WithStatusStatus enum (pending → active → completed/errored) for consistent lifecycle tracking.
