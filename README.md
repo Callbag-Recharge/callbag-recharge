@@ -1,5 +1,13 @@
 # callbag-recharge
 
+> **This project has been succeeded by [GraphReFly](https://github.com/graphrefly/graphrefly-ts).** New development, bug fixes, and documentation happen there. See the [migration guide](https://graphrefly.dev/recipes/from-callbag-recharge/) or jump straight to [graphrefly.dev](https://graphrefly.dev).
+>
+> ```bash
+> npm install @graphrefly/graphrefly
+> ```
+
+---
+
 **State that flows.** Reactive state management for TypeScript — from simple atoms to streaming pipelines, in one library.
 
 - **6 primitives** — `state`, `derived`, `dynamicDerived`, `effect`, `producer`, `operator`

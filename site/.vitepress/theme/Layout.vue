@@ -28,6 +28,13 @@ const blogPublishedLabel = computed(() => {
 
 <template>
 	<DefaultTheme.Layout>
+		<template #layout-top>
+			<div class="cr-deprecation-banner">
+				<strong>This project has been succeeded by <a href="https://graphrefly.dev">GraphReFly</a>.</strong>
+				New development happens at <a href="https://github.com/graphrefly/graphrefly-ts">graphrefly-ts</a>.
+				<code>npm install @graphrefly/graphrefly</code>
+			</div>
+		</template>
 		<template #doc-before>
 			<p v-if="blogPublishedLabel" class="cr-blog-published">{{ blogPublishedLabel }}</p>
 		</template>

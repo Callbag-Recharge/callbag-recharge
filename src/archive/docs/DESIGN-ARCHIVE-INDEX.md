@@ -427,6 +427,42 @@ Implemented `toolRegistry` — reactive tool dispatch with dual execution modes 
 
 **Outcome:** Phase SU (Surface Layer) added to roadmap. 7 descriptor types (progress, table, log, form, metric, chat, diagram). `surface()` + `autoSurface()` + `dashboard()` API. Framework renderers in compat/ (~200 lines each). Protocol adapters deferred until A2UI/AG-UI stabilize.
 
+### Session vision-llm-actuator-jarvis (March 26–27) — Vision: LLM Actuator Layer, Jarvis Graph Builder, Architecture v5
+**Topic:** Strategic vision for recharge as LLM actuator layer + Jarvis-like graph builder + primitive semantic alignment audit + Graph as universal output type
+
+Cross-repo session (discussed in Python port, applies to both TS and Python). Research covered: AI infrastructure landscape (March 2026), multi-agent coordination pain points (Deloitte, Salesforce), MCP ecosystem (97M downloads, no state layer), reaktiv competitive analysis, primitive lifecycle semantics audit.
+
+**Key decisions:**
+- Three-layer vision: (1) backend state unification, (2) LLM actuator layer (LLM writes state, system reacts), (3) LLM as graph builder (Jarvis — LLM constructs persistent, auditable graphs)
+- RESET → **INVALIDATE** rename (behavior is correct, name misleads LLMs)
+- **Graph as universal output type** — `pipeline()`, `jobQueue()`, `topic()` all produce `Graph` objects → architecture v5
+- Effect completion: change to **combineLatest semantics** (complete on ALL deps, not ANY)
+- Producer cleanup: fix to run on TEARDOWN, not just last-unsubscribe (resubscription safety)
+- No custom DSL — constrained dict-based `Graph()` builder API is the "language"
+- Port `pausable` from TS extra/ to Python
+
+**Rejected:** "Replace X" positioning, custom DSL, RESET with auto-emit, Graph separate from pipeline/jobQueue, cleanup only on last-unsubscribe.
+
+**Downstream impact:** Architecture v5 needed in both repos. Python roadmap Phase 5-7 added. Both repos need INVALIDATE rename, effect completion fix, producer cleanup fix.
+
+### Session reflow-spec-design (March 27) — ReFlow Unified Spec: Protocol, Single Primitive, Graph Container
+**Topic:** Designing a unified cross-repo spec (ReFlow) through a 7-step process (lessons learned → demands → functionalities → patterns → primitives → nice-to-haves → scenario validation). Radical simplification of callbag-recharge into a new library.
+
+**Key decisions:**
+- **Drop callbag 4-type system.** Unified message format: always `[[Type, Data?], ...]`. 9 message types (DATA, DIRTY, RESOLVED, INVALIDATE, PAUSE, RESUME, TEARDOWN, COMPLETE, ERROR). No channel separation.
+- **One primitive: `node(deps?, fn?, opts?)`** — behavior determined by configuration. Sugar constructors (state, derived, effect, etc.) for readability. dynamicDerived merged into derived (Python lesson: declare superset at construction).
+- **Unified node interface:** `.get()` (cached, never errors), `.status`, `.down()`, `.up()`, `.unsubscribe()`, `.meta` (companion stores).
+- **Meta as companion stores** — each key in meta is a subscribable node. Replaces all `with*()` wrappers.
+- **No separate Knob/Gauge** — just metadata on nodes. `describe()` exposes both.
+- **No separate Inspector** — `Graph.observe()` + `Graph.describe()` replace it.
+- **No transforms on edges** — edges are pure wires. Add a node for transforms.
+- **Colon-delimited namespacing** — `"system:payment:validate"`. No separate namespace primitive.
+- **New repo decision** — create reflow-ts/reflow-py rather than evolve callbag-recharge. Almost a complete rewrite.
+
+**Rejected:** Keep callbag types, separate DATA/CONTROL channels, 5 separate primitives, separate Knob/Gauge, dynamicDerived as primitive, get() pull-recompute, transforms on edges, separate Inspector, single-message format option.
+
+**Outcome:** `REFLOW-SPEC.md` (v0.1.0 draft) at both repo roots. 7 scenarios validated. Spec fits ~350 lines. ~8 concepts for an LLM to learn. Library name TBD.
+
 ---
 
 ## Archived Documents (formerly in docs/)
